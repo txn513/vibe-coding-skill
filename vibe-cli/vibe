@@ -1,0 +1,12 @@
+#!/usr/bin/env python3
+"""vibe CLI entry point."""
+
+import sys
+import os
+
+# Add src to path
+SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "src")
+sys.path.insert(0, SRC)
+
+from main import main
+main()

@@ -1,0 +1,66 @@
+# {{SPEC_NAME}} — 回顾
+
+> 上线日期: {{SHIP_DATE}} | 回顾日期: {{RETRO_DATE}} | 参与者: {{PARTICIPANTS}}
+
+## 失败模式分类
+
+- **主失败模式**: {{PRIMARY_FAILURE_MODE}}
+- **次级失败模式**: {{SECONDARY_FAILURE_MODE}}
+- **为什么归到这个类别**: {{FAILURE_MODE_RATIONALE}}
+
+## 目标回顾
+
+**最初意图**: {{ORIGINAL_INTENT}}
+
+**实际交付**: {{ACTUAL_DELIVERY}}
+
+**差异分析**: {{GAP_ANALYSIS}}
+
+## 做对了什么
+
+- {{WENT_WELL_1}}
+- {{WENT_WELL_2}}
+- {{WENT_WELL_3}}
+
+## 做错了什么
+
+- {{WENT_WRONG_1}}
+- {{WENT_WRONG_2}}
+- {{WENT_WRONG_3}}
+
+## Agent 表现评估
+
+### 实现 Agent
+- **擅长**: {{BUILDER_STRENGTHS}}
+- **反复出错**: {{BUILDER_WEAKNESSES}}
+- **需要补充的规则**: {{BUILDER_MISSING_RULES}}
+
+### Review Agent
+- **发现的真实问题**: {{REVIEWER_FOUND}}
+- **漏掉的问题**: {{REVIEWER_MISSED}}
+
+## 规格质量
+
+- **哪些约束写对了**: {{SPEC_CONSTRAINTS_GOOD}}
+- **哪些约束漏了**: {{SPEC_CONSTRAINTS_MISSING}}
+- **验收标准是否覆盖了所有线上情况**: {{AC_COVERAGE}}
+
+## 上下文质量
+
+- **AGENTS.md 是否准确**: {{AGENTS_ACCURACY}}
+- **规则文件是否有误导**: {{RULES_ISSUES}}
+- **Agent 是否理解了项目结构**: {{CONTEXT_UNDERSTANDING}}
+
+## 沉淀落点
+
+- **项目内应更新什么**: {{PROJECT_UPDATES}}
+- **是否形成 Skill 治理候选**: {{SKILL_CANDIDATE}}
+- **如果形成，候选摘要是什么**: {{SKILL_CANDIDATE_SUMMARY}}
+
+## 行动项
+
+- [ ] 更新 AGENTS.md: {{ACTION_AGENTS}}
+- [ ] 更新规则文件: {{ACTION_RULES}}
+- [ ] 更新 spec 模板: {{ACTION_SPEC_TEMPLATE}}
+- [ ] 更新 review checklist: {{ACTION_REVIEW_CL}}
+- [ ] 其他: {{ACTION_OTHER}}

@@ -1,0 +1,47 @@
+{
+  "schema_version": 4,
+  "project_id": "2026-06-12-vibe-coding-10-vibe-coding-agent-2",
+  "roles": {
+    "owner": "",
+    "builder": "",
+    "reviewer": "",
+    "releaser": "",
+    "observer": "",
+    "override_approver": ""
+  },
+  "risk_profiles": {
+    "low": {
+      "require_plan": false,
+      "require_verify": true,
+      "require_review": true,
+      "require_release": false,
+      "require_observe": false,
+      "require_role_separation": false,
+      "require_clean_worktree": false
+    },
+    "medium": {
+      "require_plan": true,
+      "require_verify": true,
+      "require_review": true,
+      "require_release": true,
+      "require_observe": false,
+      "require_role_separation": false,
+      "require_clean_worktree": false
+    },
+    "high": {
+      "require_plan": true,
+      "require_verify": true,
+      "require_review": true,
+      "require_release": true,
+      "require_observe": true,
+      "require_role_separation": true,
+      "require_clean_worktree": true
+    }
+  },
+  "commands": {
+    "verify": [],
+    "release": [],
+    "observe": []
+  },
+  "repositories": []
+}

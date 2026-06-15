@@ -1,0 +1,4 @@
+interface:
+  display_name: "Vibe Coding"
+  short_description: "Guide projects from intent through release"
+  default_prompt: "Use $vibe-coding to interpret my request, inspect this project, and carry out the next appropriate governed workflow step without requiring me to know its internal commands."

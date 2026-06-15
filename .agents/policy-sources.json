@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "precedence": [
+    "external-mandate",
+    "project",
+    "project-local",
+    "skill-default"
+  ],
+  "sources": [
+    {
+      "id": "agents-md",
+      "path": "AGENTS.md",
+      "kind": "project",
+      "priority": 300,
+      "status": "active",
+      "detected": true
+    },
+    {
+      "id": "agent-rule-api",
+      "path": ".agents/rules/api.md",
+      "kind": "project-local",
+      "priority": 200,
+      "status": "active",
+      "detected": true
+    },
+    {
+      "id": "agent-rule-db",
+      "path": ".agents/rules/db.md",
+      "kind": "project-local",
+      "priority": 200,
+      "status": "active",
+      "detected": true
+    },
+    {
+      "id": "agent-rule-error",
+      "path": ".agents/rules/error.md",
+      "kind": "project-local",
+      "priority": 200,
+      "status": "active",
+      "detected": true
+    },
+    {
+      "id": "agent-rule-frontend",
+      "path": ".agents/rules/frontend.md",
+      "kind": "project-local",
+      "priority": 200,
+      "status": "active",
+      "detected": true
+    },
+    {
+      "id": "agent-rule-security",
+      "path": ".agents/rules/security.md",
+      "kind": "project-local",
+      "priority": 200,
+      "status": "active",
+      "detected": true
+    },
+    {
+      "id": "skill-defaults",
+      "path": "skill://vibe-coding",
+      "kind": "skill-default",
+      "priority": 100,
+      "status": "active",
+      "detected": true
+    }
+  ],
+  "conflicts": [],
+  "review_items": []
+}

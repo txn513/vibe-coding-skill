@@ -1,0 +1,317 @@
+#!/usr/bin/env python3
+"""Single dispatcher for the Vibe Coding workflow.
+
+Codex should invoke this internally after interpreting the user's natural language.
+"""
+
+import argparse
+import json
+import os
+import sys
+from pathlib import Path
+
+import confirm_risk
+import install_auxiliary
+import create_retro
+import create_intent
+import create_spec
+import doctor_project
+import generate_plan
+import generate_prompt
+import generate_review
+import generate_changelog
+import knowledge_gate
+import manage_specs
+import migrate_project
+import policy_sources
+import project_status
+import record_evidence
+import record_review
+import refresh_context
+import rule_status
+import set_status
+import self_analyze
+import spec_amend
+import retrospective
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Unified Vibe Coding workflow dispatcher")
+    sub = parser.add_subparsers(dest="operation", required=True)
+
+    for name in ("status", "next", "migrate", "doctor", "context-refresh"):
+        command = sub.add_parser(name)
+        command.add_argument("project_root")
+        if name == "migrate":
+            command.add_argument("--apply", action="store_true")
+        if name == "doctor":
+            command.add_argument("--smoke", action="store_true")
+
+    install_aux = sub.add_parser("install-auxiliary")
+    install_aux.add_argument("name", nargs="?", default="")
+    install_aux.add_argument("--all", action="store_true")
+    install_aux.add_argument("--suite-root", default="<inferred>")
+    install_aux.add_argument("--codex-home", default=os.path.expanduser("~/.codex"))
+    install_aux.add_argument("--force", action="store_true")
+    install_aux.add_argument("--list", action="store_true")
+
+    specs = sub.add_parser("specs")
+    specs.add_argument("project_root")
+    specs.add_argument("--conflicts", action="store_true")
+    specs.add_argument("--priority", action="store_true")
+
+    boundary = sub.add_parser("boundary")
+    boundary.add_argument("project_root")
+    boundary.add_argument("--skill-root", default=os.path.dirname(os.path.dirname(__file__)))
+
+    intent = sub.add_parser("intent")
+    intent.add_argument("project_root")
+    intent.add_argument("name")
+
+    spec = sub.add_parser("spec")
+    spec.add_argument("project_root")
+    spec.add_argument("name")
+    spec.add_argument("--type", choices=["feature", "bug", "refactor"], default="feature")
+    spec.add_argument("--risk", choices=["low", "medium", "high"], default="medium")
+    spec.add_argument("--owner", default="")
+    spec.add_argument("--depends-on", default="无")
+    spec.add_argument("--release-group", default="")
+    spec.add_argument("--regression-from", default="")
+
+    for name in ("plan", "prompt", "review"):
+        command = sub.add_parser(name)
+        command.add_argument("project_root")
+        command.add_argument("spec_name")
+        if name == "review":
+            command.add_argument("--reviewer", default="")
+
+    changelog_cmd = sub.add_parser("changelog")
+    changelog_cmd.add_argument("project_root")
+    changelog_cmd.add_argument("--version", default="")
+    changelog_cmd.add_argument("--force", action="store_true")
+    changelog_cmd.add_argument("--release-group", default="")
+
+    retro = sub.add_parser("retro")
+    retro.add_argument("project_root")
+    retro.add_argument("spec_name")
+
+    retrospective_cmd = sub.add_parser("retrospective")
+    retrospective_cmd.add_argument("project_root")
+    retrospective_cmd.add_argument("spec_name", nargs="?", default="")
+
+    self_analyze_cmd = sub.add_parser("self-analyze")
+    self_analyze_cmd.add_argument("project_root")
+    self_analyze_cmd.add_argument("--output", default="")
+
+    advance = sub.add_parser("advance")
+    advance.add_argument("project_root")
+    advance.add_argument("spec_name")
+    advance.add_argument("status", choices=set_status.VALID_STATUSES)
+    advance.add_argument("--actor", default="")
+    advance.add_argument("--role", default="")
+    advance.add_argument("--force", action="store_true")
+    advance.add_argument("--reason", default="")
+    advance.add_argument("--skip-changelog", action="store_true",
+                        help="released 推进时不自动生成 changelog")
+    advance.add_argument("--changelog-version", default="",
+                        help="released 推进时使用的 changelog 版本号（默认按时间戳）")
+
+    evidence = sub.add_parser("evidence")
+    evidence.add_argument("project_root")
+    evidence.add_argument("spec_name")
+    evidence.add_argument("phase", choices=sorted(record_evidence.PHASES))
+    evidence.add_argument("result", choices=sorted(record_evidence.RESULTS))
+    evidence.add_argument("description", nargs="?", default="")
+    evidence.add_argument("--actor", default="")
+    evidence.add_argument("--role", default="")
+    evidence.add_argument("--command", dest="exec_command", nargs=argparse.REMAINDER)
+    evidence.add_argument("--configured", action="store_true")
+    evidence.add_argument("--purpose", choices=sorted(record_evidence.PURPOSES), default="standard")
+
+    decision = sub.add_parser("review-decision")
+    decision.add_argument("project_root")
+    decision.add_argument("spec_name")
+    decision.add_argument("conclusion", choices=sorted(record_review.CONCLUSIONS))
+    decision.add_argument("basis")
+    decision.add_argument("evidence")
+    decision.add_argument("--reviewer", required=True)
+
+    amend = sub.add_parser("amend")
+    amend.add_argument("project_root")
+    amend.add_argument("spec_name")
+    amend.add_argument("description")
+
+    risk = sub.add_parser("risk")
+    risk.add_argument("project_root")
+    risk.add_argument("spec_name")
+    risk.add_argument("risk", choices=sorted(confirm_risk.RISKS))
+    risk.add_argument("--reason", required=True)
+
+    rule = sub.add_parser("rule-status")
+    rule.add_argument("project_root")
+    rule.add_argument("rule_name")
+    rule.add_argument("status", nargs="?", choices=sorted(rule_status.RULE_STATUSES))
+    rule.add_argument("--reason", default="")
+
+    policy_scan = sub.add_parser("policy-scan")
+    policy_scan.add_argument("project_root")
+    policy_scan.add_argument("--apply", action="store_true")
+
+    policy_add = sub.add_parser("policy-conflict-add")
+    policy_add.add_argument("project_root")
+    policy_add.add_argument("conflict_id")
+    policy_add.add_argument("--topic", required=True)
+    policy_add.add_argument("--sources", required=True)
+    policy_add.add_argument("--severity", choices=sorted(policy_sources.SEVERITIES), required=True)
+    policy_add.add_argument("--description", required=True)
+    policy_add.add_argument("--scope", default="*")
+
+    policy_resolve = sub.add_parser("policy-conflict-resolve")
+    policy_resolve.add_argument("project_root")
+    policy_resolve.add_argument("conflict_id")
+    policy_resolve.add_argument("--resolution", required=True)
+    policy_resolve.add_argument("--accept", action="store_true")
+
+    args = parser.parse_args()
+
+    # install-auxiliary: project_root 不需要；直接转发到 install_auxiliary.main()
+    if args.operation == "install-auxiliary":
+        saved_argv = sys.argv
+        try:
+            argv = [saved_argv[0]]
+            if args.list:
+                argv.append("--list")
+            if args.all:
+                argv.append("--all")
+            if args.name:
+                argv.append(args.name)
+            if args.suite_root != "<inferred>":
+                argv += ["--suite-root", args.suite_root]
+            if args.codex_home != os.path.expanduser("~/.codex"):
+                argv += ["--codex-home", args.codex_home]
+            if args.force:
+                argv.append("--force")
+            sys.argv = argv
+            install_auxiliary.main()
+        finally:
+            sys.argv = saved_argv
+        return
+
+    root = os.path.abspath(args.project_root)
+    if args.operation == "status":
+        project_status.project_status(root)
+    elif args.operation == "next":
+        project_status.project_next(root)
+    elif args.operation == "migrate":
+        migrate_project.migrate_project(root, args.apply)
+    elif args.operation == "specs":
+        manage_specs.manage_specs(
+            root, show_conflicts=args.conflicts, show_priority=args.priority
+        )
+    elif args.operation == "doctor":
+        result = doctor_project.doctor(root)
+        if getattr(args, 'smoke', False):
+            smoke_result = doctor_project._smoke_commands(root)
+            result["smoke"] = smoke_result
+            if smoke_result:
+                for cmd_result in smoke_result:
+                    if not cmd_result.get("passed"):
+                        result["issues"].append(
+                            f"smoke: {cmd_result['phase']} command failed: "
+                            f"{cmd_result.get('error', cmd_result.get('argv'))}"
+                        )
+        raise SystemExit(1 if result["issues"] else 0)
+    elif args.operation == "context-refresh":
+        refresh_context.refresh_context(root)
+    elif args.operation == "boundary":
+        result = knowledge_gate.audit_skill(args.skill_root, root)
+        knowledge_gate.print_audit(result)
+        raise SystemExit(1 if result["issues"] else 0)
+    elif args.operation == "intent":
+        create_intent.create_intent(root, args.name)
+    elif args.operation == "spec":
+        create_spec.create_spec(
+            root, args.name, args.type, args.risk, args.owner,
+            args.depends_on, args.release_group,
+            args.regression_from,
+        )
+    elif args.operation == "plan":
+        generate_plan.generate_plan(root, args.spec_name)
+    elif args.operation == "prompt":
+        generate_prompt.generate_and_save(root, args.spec_name)
+    elif args.operation == "review":
+        generate_review.generate_review(root, args.spec_name, args.reviewer)
+    elif args.operation == "changelog":
+        generate_changelog.generate_changelog(
+            root, args.version, args.force, args.release_group,
+        )
+    elif args.operation == "retro":
+        create_retro.create_retro(root, args.spec_name)
+    elif args.operation == "retrospective":
+        result = retrospective.run_retrospective(root, args.spec_name)
+        if result is None:
+            raise SystemExit(1)
+    elif args.operation == "self-analyze":
+        findings = self_analyze.analyze(root)
+        self_analyze.print_report(findings)
+        if args.output:
+            path = self_analyze.save_report(findings, args.output)
+            print(f"\n📄 报告已保存: {path}")
+    elif args.operation == "advance":
+        result = set_status.set_status(
+            root, args.spec_name, args.status, args.force, args.reason,
+            args.actor, args.role,
+            auto_changelog=not args.skip_changelog,
+            changelog_version=args.changelog_version,
+        )
+        if result is None:
+            raise SystemExit(1)
+    elif args.operation == "evidence":
+        result = record_evidence.record_evidence(
+            root, args.spec_name, args.phase, args.result, args.description,
+            args.actor, args.role, args.exec_command,
+            args.configured, args.purpose,
+        )
+        if result is None:
+            raise SystemExit(1)
+    elif args.operation == "review-decision":
+        result = record_review.record_review(
+            root, args.spec_name, args.conclusion, args.basis,
+            args.evidence, args.reviewer,
+        )
+        if result is None:
+            raise SystemExit(1)
+    elif args.operation == "amend":
+        spec_amend.amend_spec(root, args.spec_name, args.description)
+    elif args.operation == "risk":
+        confirm_risk.confirm_risk(root, args.spec_name, args.risk, args.reason)
+    elif args.operation == "rule-status":
+        rule_status.set_rule_status(root, args.rule_name, args.status, args.reason)
+    elif args.operation == "policy-scan":
+        result = policy_sources.scan_policy_sources(
+            Path(root), apply=args.apply
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    elif args.operation == "policy-conflict-add":
+        result = policy_sources.add_conflict(
+            Path(root),
+            args.conflict_id,
+            args.topic,
+            [item.strip() for item in args.sources.split(",") if item.strip()],
+            args.severity,
+            args.description,
+            [item.strip() for item in args.scope.split(",") if item.strip()],
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    elif args.operation == "policy-conflict-resolve":
+        result = policy_sources.resolve_conflict(
+            Path(root),
+            args.conflict_id,
+            args.resolution,
+            "accepted" if args.accept else "resolved",
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+if __name__ == "__main__":
+    main()
