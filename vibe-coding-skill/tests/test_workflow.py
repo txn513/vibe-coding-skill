@@ -73,7 +73,7 @@ VALID_SPEC = """# example
 - 遵循现有产品规则
 
 ### 明确不做什么 (Out of Scope)
-- 不修改无关模块
+- [abandoned] 不修改无关模块
 
 ## 验收标准 (Acceptance Criteria)
 
@@ -600,10 +600,31 @@ class WorkflowTests(unittest.TestCase):
                 str(self.project), "typed", "bug", "high", "owner-a", "base", "r1"
             )
         )
-        self.assertIn("> 类型: bug", path.read_text(encoding="utf-8"))
-        self.assertIn("> 风险: high", path.read_text(encoding="utf-8"))
-        self.assertIn("> 风险确认: confirmed", path.read_text(encoding="utf-8"))
-        self.assertIn("> 依赖: base", path.read_text(encoding="utf-8"))
+        content = path.read_text(encoding="utf-8")
+        self.assertIn("> 类型: bug", content)
+        self.assertIn("> 风险: high", content)
+        self.assertIn("> 风险确认: confirmed", content)
+        self.assertIn("> 依赖: base", content)
+        self.assertIn("AC1:", content)
+        self.assertIn("[follow-up: spec-id]", content)
+
+    def test_record_evidence_warns_about_missing_ac_references(self) -> None:
+        self.write_spec(status="in-progress")
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            record_evidence.record_evidence(
+                str(self.project), "example", "verify", "passed", "checks passed"
+            )
+        self.assertIn("缺少验收标准引用", output.getvalue())
+        self.assertIn("AC1, AC2, AC3", output.getvalue())
+
+    def test_out_of_scope_items_must_be_tagged(self) -> None:
+        content = VALID_SPEC.format(status="review").replace(
+            "- [abandoned] 不修改无关模块",
+            "- 不修改无关模块",
+        )
+        invalid = set_status._untagged_out_of_scope_items(content)
+        self.assertEqual(invalid, ["- 不修改无关模块"])
 
         design_path = Path(create_design.create_design(str(self.project), "generic-design"))
         design = design_path.read_text(encoding="utf-8")
@@ -1852,9 +1873,9 @@ _SPEC_CONTENT = """# {name}
 - 不修改认证和授权逻辑
 
 ### 明确不做什么 (Out of Scope)
-- 不重构已有模块
-- 不修改数据库 schema
-- 不改变现有 API 契约
+- [abandoned] 不重构已有模块
+- [abandoned] 不修改数据库 schema
+- [abandoned] 不改变现有 API 契约
 
 ## 验收标准 (Acceptance Criteria)
 

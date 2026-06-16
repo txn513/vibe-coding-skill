@@ -17,7 +17,8 @@ from common import (
     spec_digest,
     validate_artifact_name,
 )
-from workflow_state import configured_commands, ensure_workflow
+from set_status import _acceptance_criteria_ids, _missing_acceptance_criteria_references
+from workflow_state import configured_commands, ensure_workflow, spec_metadata
 
 PHASES = {"verify", "release", "observe"}
 RESULTS = {"passed", "failed", "not-applicable"}
@@ -55,6 +56,7 @@ def record_evidence(
         return None
     with open(spec_file, encoding="utf-8") as handle:
         spec_content = handle.read()
+    spec_fields = spec_metadata(spec_content)
 
     status_match = re.search(r">\s*状态:\s*(\S+)", spec_content)
     status = status_match.group(1) if status_match else "draft"
@@ -131,6 +133,15 @@ def record_evidence(
 ```
 """
     atomic_write(evidence_file, content)
+    if phase == "verify" and purpose == "standard" and spec_fields.get("risk") != "low":
+        missing_ac = _missing_acceptance_criteria_references(
+            spec_content, content, spec_fields.get("risk", "medium")
+        )
+        if missing_ac:
+            expected = ", ".join(f"AC{index}" for index in _acceptance_criteria_ids(spec_content))
+            print(f"⚠️  verify 证据缺少验收标准引用: {', '.join(missing_ac)}")
+            if expected:
+                print(f"   建议在证据中标注覆盖: {expected}")
     print(f"✅ 已记录 {phase} 证据: {evidence_file}")
     return evidence_file
 

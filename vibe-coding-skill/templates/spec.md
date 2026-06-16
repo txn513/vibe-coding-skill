@@ -31,23 +31,23 @@
 - {{BUSINESS_CONSTRAINT_2}}
 
 ### 明确不做什么 (Out of Scope)
-- {{OUT_OF_SCOPE_1}}
-- {{OUT_OF_SCOPE_2}}
+- [follow-up: spec-id] {{OUT_OF_SCOPE_1}}
+- [abandoned] {{OUT_OF_SCOPE_2}}
 
 ## 验收标准 (Acceptance Criteria)
 
 ### 正常路径
-1. {{HAPPY_PATH_1}}
-2. {{HAPPY_PATH_2}}
-3. {{HAPPY_PATH_3}}
+1. AC1: {{HAPPY_PATH_1}}
+2. AC2: {{HAPPY_PATH_2}}
+3. AC3: {{HAPPY_PATH_3}}
 
 ### 边界情况
-- {{EDGE_CASE_1}}
-- {{EDGE_CASE_2}}
+- AC4: {{EDGE_CASE_1}}
+- AC5: {{EDGE_CASE_2}}
 
 ### 错误处理
-- {{ERROR_HANDLING_1}}
-- {{ERROR_HANDLING_2}}
+- AC6: {{ERROR_HANDLING_1}}
+- AC7: {{ERROR_HANDLING_2}}
 
 ## 非功能需求 (NFR)
 

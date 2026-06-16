@@ -171,6 +171,13 @@ def set_status(
                 project_root, spec_name, content, "verify", profile, workflow
             ):
                 print("❌ 进入审查前需要当前规格版本的 verify 证据")
+                missing_ac = _missing_acceptance_criteria_references(
+                    content,
+                    _read_evidence(project_root, spec_name, "verify"),
+                    metadata_fields.get("risk", "medium"),
+                )
+                if missing_ac:
+                    print(f"   verify 证据缺少验收标准引用: {', '.join(missing_ac)}")
                 print("   使用 record_evidence.py 记录 passed 或 not-applicable")
                 return None
 
@@ -190,6 +197,13 @@ def set_status(
         if new_status == "done":
             if profile["require_release"] and current_status != "released":
                 print("❌ 此风险等级要求先进入 released 状态")
+                return None
+            invalid_out_of_scope = _untagged_out_of_scope_items(content)
+            if invalid_out_of_scope:
+                print("❌ 标记 done 前需要为 Out of Scope 项标注去向")
+                for item in invalid_out_of_scope[:5]:
+                    print(f"   - {item}")
+                print("   使用 [included]、[follow-up: spec-id] 或 [abandoned]")
                 return None
             if profile.get("require_observe", False) and not _has_current_evidence(
                 project_root, spec_name, content, "observe", profile, workflow
@@ -411,13 +425,21 @@ def _verify_evidence_references_acceptance_criteria(
     evidence: str,
     risk: str,
 ) -> bool:
+    return not _missing_acceptance_criteria_references(spec_content, evidence, risk)
+
+
+def _missing_acceptance_criteria_references(
+    spec_content: str,
+    evidence: str,
+    risk: str,
+) -> list[str]:
     if risk == "low":
-        return True
+        return []
     criteria = _acceptance_criteria_ids(spec_content)
     if not criteria:
-        return True
+        return []
     evidence_tokens = set(re.findall(r"\bAC\s*-?\s*(\d+)\b", evidence, re.IGNORECASE))
-    return all(str(index) in evidence_tokens for index in criteria)
+    return [f"AC{index}" for index in criteria if str(index) not in evidence_tokens]
 
 
 def _acceptance_criteria_ids(spec_content: str) -> list[int]:
@@ -426,6 +448,12 @@ def _acceptance_criteria_ids(spec_content: str) -> list[int]:
         section = _markdown_section(spec_content, "Acceptance Criteria")
     if not section:
         return []
+    explicit = {
+        int(match.group(1))
+        for match in re.finditer(r"\bAC\s*-?\s*(\d+)\b", section, re.IGNORECASE)
+    }
+    if explicit:
+        return sorted(explicit)
     count = 0
     for line in section.splitlines():
         stripped = line.strip()
@@ -441,6 +469,46 @@ def _markdown_section(content: str, title: str) -> str:
         re.MULTILINE,
     )
     match = pattern.search(content)
+    return match.group(1) if match else ""
+
+
+def _read_evidence(project_root: str, spec_name: str, evidence_name: str) -> str:
+    evidence_file = os.path.join(
+        project_root, ".agents", "evidence", spec_name, f"{evidence_name}.md"
+    )
+    if not os.path.exists(evidence_file):
+        return ""
+    with open(evidence_file, encoding="utf-8") as handle:
+        return handle.read()
+
+
+def _untagged_out_of_scope_items(spec_content: str) -> list[str]:
+    section = _out_of_scope_section(spec_content)
+    if not section:
+        return []
+    invalid = []
+    tag_pattern = re.compile(
+        r"^\s*[-*]\s+\[(?:included|abandoned|follow-up:\s*[A-Za-z0-9_.-]+)\]\s+\S",
+        re.IGNORECASE,
+    )
+    for line in section.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith(("-", "*")):
+            continue
+        if "{{" in stripped or "(请" in stripped or not re.search(r"\S", stripped[1:]):
+            continue
+        if not tag_pattern.match(stripped):
+            invalid.append(stripped)
+    return invalid
+
+
+def _out_of_scope_section(spec_content: str) -> str:
+    pattern = re.compile(
+        r"^#{2,6}\s+.*(?:明确不做什么|Out of Scope).*$"
+        r"([\s\S]*?)(?=^#{1,6}\s+|\Z)",
+        re.MULTILINE | re.IGNORECASE,
+    )
+    match = pattern.search(spec_content)
     return match.group(1) if match else ""
 
 

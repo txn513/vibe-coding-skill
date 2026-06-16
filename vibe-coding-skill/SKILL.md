@@ -200,7 +200,9 @@ artifacts merely because a template exists.
     artifact that proves it. Evidence that does not reference a specific
     criterion must not be counted as acceptance evidence. This rule governs
     evidence *structure* (how evidence maps to criteria) and applies
-    independently of the evidence format requirement in Rule 28.
+    independently of the evidence format requirement in Rule 28. New specs
+    should use explicit `AC1`, `AC2`, ... labels so the gate can report missing
+    coverage precisely.
 31. **Context freshness before major actions**: Before creating a new spec,
     generating a plan, or advancing a spec past `spec-ready`, the Agent must
     check whether the project context is stale. If context freshness is
