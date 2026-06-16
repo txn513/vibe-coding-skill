@@ -361,7 +361,8 @@ def load_policy_sources(project_root: Path) -> dict[str, Any]:
 
 def pending_review_items(project_root: Path) -> list[dict[str, Any]]:
     manifest = load_policy_sources(project_root)
-    return manifest.get("review_items") or _build_review_items(manifest)
+    items = manifest.get("review_items") or _build_review_items(manifest)
+    return [i for i in items if i.get("status") != "resolved"]
 
 
 def _source(

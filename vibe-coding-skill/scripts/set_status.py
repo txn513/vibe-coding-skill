@@ -386,6 +386,11 @@ def _has_current_evidence(
             item.strip() for item in digest_match.group(1).split(",") if item.strip()
         }
     commands_ok = not expected_commands or expected_commands.issubset(actual_commands)
+    clauses_ok = True
+    if phase == "verify" and purpose == "standard":
+        clauses_ok = _verify_evidence_references_acceptance_criteria(
+            spec_content, evidence, spec_metadata(spec_content).get("risk", "medium")
+        )
     return bool(
         f"规格: {spec_name}" in evidence
         and f"规格摘要: {expected_digest}" in evidence
@@ -397,7 +402,46 @@ def _has_current_evidence(
         and clean_ok
         and actor_ok
         and commands_ok
+        and clauses_ok
     )
+
+
+def _verify_evidence_references_acceptance_criteria(
+    spec_content: str,
+    evidence: str,
+    risk: str,
+) -> bool:
+    if risk == "low":
+        return True
+    criteria = _acceptance_criteria_ids(spec_content)
+    if not criteria:
+        return True
+    evidence_tokens = set(re.findall(r"\bAC\s*-?\s*(\d+)\b", evidence, re.IGNORECASE))
+    return all(str(index) in evidence_tokens for index in criteria)
+
+
+def _acceptance_criteria_ids(spec_content: str) -> list[int]:
+    section = _markdown_section(spec_content, "验收标准")
+    if not section:
+        section = _markdown_section(spec_content, "Acceptance Criteria")
+    if not section:
+        return []
+    count = 0
+    for line in section.splitlines():
+        stripped = line.strip()
+        if re.match(r"^(?:[-*]\s+|\d+[.)]\s+)", stripped):
+            if not re.match(r"^[-*]\s*\[[ xX]\]\s+", stripped):
+                count += 1
+    return list(range(1, count + 1))
+
+
+def _markdown_section(content: str, title: str) -> str:
+    pattern = re.compile(
+        rf"^##\s+.*{re.escape(title)}.*$([\s\S]*?)(?=^##\s+|\Z)",
+        re.MULTILINE,
+    )
+    match = pattern.search(content)
+    return match.group(1) if match else ""
 
 
 def _has_bug_evidence(

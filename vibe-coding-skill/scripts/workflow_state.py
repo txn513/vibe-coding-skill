@@ -111,6 +111,8 @@ def configured_commands(workflow: dict, phase: str) -> list[list[str]]:
             argv = shlex.split(command)
         elif isinstance(command, list) and all(isinstance(part, str) for part in command):
             argv = command
+        elif isinstance(command, dict) and isinstance(command.get("command"), list) and all(isinstance(part, str) for part in command["command"]):
+            argv = command["command"]
         else:
             continue
         if argv:

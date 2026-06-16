@@ -50,6 +50,8 @@ import vibe
 import workflow_state
 
 
+VALID_SPEC_AC_ALL = "AC1 AC2 AC3"
+
 VALID_SPEC = """# example
 
 > 状态: {status} | 创建: 2026-06-13 00:00 UTC | 更新: 2026-06-13 00:00 UTC
@@ -293,6 +295,22 @@ class WorkflowTests(unittest.TestCase):
         )
         self.assertIn("policy-conflict-add", custom_item["candidate_snippet"])
 
+    def test_pending_policy_review_items_excludes_resolved_items(self) -> None:
+        contributing = self.project / "CONTRIBUTING.md"
+        contributing.write_text("project-owned conventions\n", encoding="utf-8")
+        policy_sources.scan_policy_sources(self.project, apply=True)
+        manifest = policy_sources.load_policy_sources(self.project)
+        self.assertTrue(manifest["review_items"])
+        manifest["review_items"][0]["status"] = "resolved"
+        policy_sources.manifest_file(self.project).write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
+        pending = policy_sources.pending_review_items(self.project)
+        self.assertEqual(len(pending), len(manifest["review_items"]) - 1)
+        self.assertNotIn(manifest["review_items"][0], pending)
+
     def test_doctor_warns_when_policy_difference_report_is_stale(self) -> None:
         contributing = self.project / "CONTRIBUTING.md"
         contributing.write_text("project-owned conventions\n", encoding="utf-8")
@@ -498,7 +516,8 @@ class WorkflowTests(unittest.TestCase):
             "in-progress",
         )
         record_evidence.record_evidence(
-            str(self.project), "example", "verify", "passed", "project checks passed"
+            str(self.project), "example", "verify", "passed",
+            f"project checks passed，覆盖 {VALID_SPEC_AC_ALL}"
         )
         self.assertEqual(
             set_status.set_status(str(self.project), "example", "review"),
@@ -828,7 +847,8 @@ class WorkflowTests(unittest.TestCase):
             "in-progress",
         )
         record_evidence.record_evidence(
-            str(self.project), "example", "verify", "passed", "checks",
+            str(self.project), "example", "verify", "passed",
+            f"checks {VALID_SPEC_AC_ALL}",
             "alice", "builder",
         )
         self.assertEqual(
@@ -1057,7 +1077,8 @@ class WorkflowTests(unittest.TestCase):
         recommendation = project_status.recommend_next(str(self.project))
         self.assertEqual(recommendation["action"], "完成验证并记录证据")
         record_evidence.record_evidence(
-            str(self.project), "example", "verify", "passed", "checks passed"
+            str(self.project), "example", "verify", "passed",
+            f"checks passed {VALID_SPEC_AC_ALL}"
         )
         recommendation = project_status.recommend_next(str(self.project))
         self.assertEqual(recommendation["action"], "将工作项推进到 review")
@@ -1125,13 +1146,26 @@ class WorkflowTests(unittest.TestCase):
             set_status.set_status(str(self.project), "example", "review")
         )
         record_evidence.record_evidence(
-            str(self.project), "example", "verify", "passed", "",
+            str(self.project), "example", "verify", "passed",
+            f"configured checks covered {VALID_SPEC_AC_ALL}",
             configured=True,
         )
         self.assertEqual(
             set_status.set_status(str(self.project), "example", "review"),
             "review",
         )
+
+    def test_configured_commands_accept_structured_command_objects(self) -> None:
+        workflow = {
+            "commands": {
+                "verify": [
+                    {"command": [sys.executable, "-c", "print('structured')"]},
+                    {"command": "ignored string"},
+                ]
+            }
+        }
+        commands = workflow_state.configured_commands(workflow, "verify")
+        self.assertEqual(commands, [[sys.executable, "-c", "print('structured')"]])
 
     def test_dependency_cycles_block_execution_and_are_diagnosed(self) -> None:
         first = self.write_spec("first", "spec-ready")
@@ -1860,6 +1894,8 @@ _SPEC_CONTENT = """# {name}
 - [ ] 手动验收完成
 """
 
+AC_ALL = "AC1 AC2 AC3 AC4 AC5 AC6"
+
 
 def _write_spec(project: Path, name: str, risk: str = "low",
                 spec_type: str = "feature", depends_on: str = "无",
@@ -1967,13 +2003,32 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(self._advance("api", "spec-ready").returncode, 0)
         self._generate_plan("api")
         self.assertEqual(self._advance("api", "in-progress").returncode, 0)
-        self._record_evidence("api", "verify", "passed", "集成测试通过")
+        self._record_evidence("api", "verify", "passed", f"集成测试通过，覆盖 {AC_ALL}")
         self.assertEqual(self._advance("api", "review").returncode, 0)
         self.assertIn("review", spec_file.read_text(encoding="utf-8"))
 
         r = self._advance("api", "released")
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("审查", r.stdout)
+
+    def test_medium_risk_verify_requires_acceptance_clause_references(self) -> None:
+        _write_spec(self.project, "missing-ac", risk="medium")
+
+        self.assertEqual(self._advance("missing-ac", "spec-ready").returncode, 0)
+        self._generate_plan("missing-ac")
+        self.assertEqual(self._advance("missing-ac", "in-progress").returncode, 0)
+        self._record_evidence("missing-ac", "verify", "passed", "集成测试通过")
+
+        result = self._advance("missing-ac", "review")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("verify 证据", result.stdout)
+
+        self._record_evidence(
+            "missing-ac", "verify", "passed", f"集成测试通过，覆盖 {AC_ALL}"
+        )
+        self.assertEqual(
+            self._advance("missing-ac", "review").returncode, 0
+        )
 
     def test_medium_risk_full_to_done(self) -> None:
         _write_spec(self.project, "full-run", risk="medium")
@@ -1982,7 +2037,7 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(self._advance("full-run", "spec-ready").returncode, 0)
         self._generate_plan("full-run")
         self.assertEqual(self._advance("full-run", "in-progress").returncode, 0)
-        self._record_evidence("full-run", "verify", "passed", "测试通过")
+        self._record_evidence("full-run", "verify", "passed", f"测试通过，覆盖 {AC_ALL}")
         self.assertEqual(self._advance("full-run", "review").returncode, 0)
         self._approve_review("full-run")
         self._record_evidence("full-run", "release", "passed", "部署成功")
@@ -1996,7 +2051,7 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(self._advance("feature-x", "spec-ready").returncode, 0)
         self._generate_plan("feature-x")
         self.assertEqual(self._advance("feature-x", "in-progress").returncode, 0)
-        self._record_evidence("feature-x", "verify", "passed", "测试通过")
+        self._record_evidence("feature-x", "verify", "passed", f"测试通过，覆盖 {AC_ALL}")
         self.assertEqual(self._advance("feature-x", "review").returncode, 0)
         self._approve_review("feature-x")
         self._record_evidence("feature-x", "release", "passed", "部署成功")
@@ -2034,7 +2089,7 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(self._advance("critical", "spec-ready").returncode, 0)
         self._generate_plan("critical")
         self.assertEqual(self._advance("critical", "in-progress").returncode, 0)
-        self._record_evidence("critical", "verify", "passed", "验证通过")
+        self._record_evidence("critical", "verify", "passed", f"验证通过，覆盖 {AC_ALL}")
         self.assertEqual(self._advance("critical", "review").returncode, 0)
         self._approve_review("critical")
         self._record_evidence("critical", "release", "passed", "部署成功")
@@ -2534,7 +2589,10 @@ class VibeCliTests(unittest.TestCase):
         self._cli("advance", "retro-auto", "spec-ready")
         self._cli("plan", "retro-auto")
         self._cli("advance", "retro-auto", "in-progress")
-        self._cli("evidence", "retro-auto", "verify", "passed", "ok")
+        self._cli(
+            "evidence", "retro-auto", "verify", "passed",
+            f"ok {VALID_SPEC_AC_ALL}",
+        )
         self._cli("advance", "retro-auto", "review")
         self._cli(
             "review-decision", "retro-auto",
@@ -2554,7 +2612,10 @@ class VibeCliTests(unittest.TestCase):
         self._cli("advance", "retro-active", "spec-ready")
         self._cli("plan", "retro-active")
         self._cli("advance", "retro-active", "in-progress")
-        self._cli("evidence", "retro-active", "verify", "passed", "ok")
+        self._cli(
+            "evidence", "retro-active", "verify", "passed",
+            f"ok {VALID_SPEC_AC_ALL}",
+        )
         self._cli("advance", "retro-active", "review")
 
         result = self._cli("retrospective")

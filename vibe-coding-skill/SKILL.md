@@ -164,6 +164,12 @@ artifacts merely because a template exists.
     spec's ID recorded, or (c) explicitly abandoned with no planned follow-up.
     Items tagged as follow-up that remain without a corresponding spec beyond
     one iteration cycle must be explained in the retro.
+    **Storage-cleanup sub-rule**: When a spec introduces a new storage location,
+    data path, database file, or serialization format, the Out of Scope section
+    must also include cleanup, disposal, or deprecation of the previous storage
+    location. The verify evidence must confirm the old location is no longer
+    referenced by production code and, when applicable, that its data is
+    migrated or the file is removed.
 27. **User guide must stay current**: Whenever a new command, trigger, capability,
     or rule is added to the Skill, [references/user-guide.md](references/user-guide.md)
     must be updated to reflect it. The user guide is the user-facing reference

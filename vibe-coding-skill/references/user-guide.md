@@ -90,7 +90,7 @@
 
 | 你说 | Skill 做什么 |
 |---|---|
-| `Skill 有哪些规则` | 列出 SKILL.md 中的 28 条核心规则 |
+| `Skill 有哪些规则` | 列出 SKILL.md 中的核心规则 |
 | `这个规则是什么意思` | 解释某条具体规则 |
 | `Skill 有哪些辅助工具` | 列出 reviewer、debugger 等辅助 Skill |
 | `安装辅助 Skill` | 运行 `vibe install-auxiliary --all` |
@@ -123,9 +123,10 @@
 - Bug 修复自动要求复现+回归证据（Rule 10）
 - 高风险变更自动要求观察证据（Rule 6）
 - Out of Scope 项自动跟踪去向（Rule 26）
+- 引入新存储位置的 spec 自动要求旧位置清理步骤（Rule 26 子规则）
 - 验证自动要求用户可感知证据（Rule 28）
 - 子 spec 全部 done 后自动要求父 spec 意图对账（Rule 29）
-- 验证证据自动要求引用验收标准条款（Rule 30）
+- 验证证据自动要求引用验收标准条款；medium/high 风险会被门禁检查 AC 覆盖（Rule 30）
 - 重要操作前自动检查上下文是否过期（Rule 31）
 - 依赖未完成的 spec 自动阻止进入实施（Rule 32）
 - 切换任务前自动记录当前 spec 进度（Rule 33，你不需要说"先记一下"）
