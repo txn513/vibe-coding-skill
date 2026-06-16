@@ -45,20 +45,20 @@ def record_review(
     )
     content = re.sub(
         r"Reviewer:\s*[^|\n]+",
-        f"Reviewer: {reviewer} ",
+        lambda _: f"Reviewer: {reviewer} ",
         content,
         count=1,
     )
     content = re.sub(
         r"^-\s*结论依据:.*$",
-        f"- 结论依据: {basis}",
+        lambda _: f"- 结论依据: {basis}",
         content,
         count=1,
         flags=re.MULTILINE,
     )
     content = re.sub(
         r"^-\s*已核对的验证证据:.*$",
-        f"- 已核对的验证证据: {evidence}",
+        lambda _: f"- 已核对的验证证据: {evidence}",
         content,
         count=1,
         flags=re.MULTILINE,
@@ -66,7 +66,7 @@ def record_review(
     payload = "\n".join([conclusion, basis, evidence, reviewer])
     content = re.sub(
         r"^>\s*Decision-Record:\s*.*$",
-        f"> Decision-Record: {text_digest(payload)}",
+        lambda _: f"> Decision-Record: {text_digest(payload)}",
         content,
         count=1,
         flags=re.MULTILINE,

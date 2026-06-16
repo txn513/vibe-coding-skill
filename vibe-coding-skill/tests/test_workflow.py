@@ -1226,6 +1226,24 @@ class WorkflowTests(unittest.TestCase):
             set_status.set_status(str(self.project), "example", "released")
         )
 
+    def test_review_decision_accepts_backslashes_in_evidence(self) -> None:
+        self.write_spec(status="review")
+        generate_review.generate_review(str(self.project), "example", "reviewer-a")
+        review_path = Path(
+            record_review.record_review(
+                str(self.project),
+                "example",
+                "approved",
+                r"reviewed regex \d+ path",
+                r"C:\Users\test\document.txt",
+                "reviewer-a",
+            )
+        )
+
+        content = review_path.read_text(encoding="utf-8")
+        self.assertIn(r"C:\Users\test\document.txt", content)
+        self.assertIn(r"reviewed regex \d+ path", content)
+
     def test_prompt_rejects_stale_plan(self) -> None:
         spec = self.write_spec(status="spec-ready")
         generate_plan.generate_plan(str(self.project), "example")
