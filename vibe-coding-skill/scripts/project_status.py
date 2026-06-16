@@ -29,6 +29,8 @@ STATUS_ICONS = {
     "cancelled": "⏹", "superseded": "↪",
     "released": "🚀",
 }
+PLAN_PROGRESS_STALE_STATUSES = {"review", "released", "done"}
+PLAN_PROGRESS_WARNING_THRESHOLD = 80
 
 
 def project_status(project_root: str) -> None:
@@ -104,6 +106,8 @@ def project_status(project_root: str) -> None:
             if p["total"] > 0:
                 bar = "█" * int(p["done"] / p["total"] * 10)
                 print(f"   {bar:10s} {p['name']}: {p['done']}/{p['total']}")
+        for warning in _plan_progress_warnings(plans, specs):
+            print(f"   ⚠️  {warning}")
         print()
 
     # Retros
@@ -612,6 +616,26 @@ def _list_plans(dir: str) -> list[dict]:
                 "total": total,
             })
     return result
+
+
+def _plan_progress_warnings(plans: list[dict], specs: list[dict]) -> list[str]:
+    specs_by_name = {spec["name"]: spec for spec in specs}
+    warnings = []
+    for plan in plans:
+        total = plan.get("total", 0)
+        if total <= 0:
+            continue
+        spec = specs_by_name.get(plan["name"])
+        if not spec or spec["status"] not in PLAN_PROGRESS_STALE_STATUSES:
+            continue
+        pct = int(plan["done"] / total * 100)
+        if pct < PLAN_PROGRESS_WARNING_THRESHOLD:
+            warnings.append(
+                f"plan progress may be stale: {plan['name']} is "
+                f"{spec['status']} but plan is {plan['done']}/{total} tasks "
+                f"({pct}%). Sync checkboxes or record moved/deferred tasks."
+            )
+    return warnings
 
 
 def _count_files(dir: str) -> int:

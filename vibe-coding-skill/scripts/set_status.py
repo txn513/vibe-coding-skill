@@ -48,6 +48,7 @@ ALLOWED_TRANSITIONS = {
     "cancelled": set(),
     "superseded": set(),
 }
+PLAN_PROGRESS_WARNING_THRESHOLD = 80
 
 
 def set_status(
@@ -254,6 +255,8 @@ def set_status(
 
     transition = f"{current_status} → {new_status}"
     print(f"✅ {spec_name}: {transition}")
+    if new_status == "review" and not force:
+        _print_plan_progress_reminder(project_root, spec_name)
 
     # Auto-generate changelog on a successful released transition.
     # Skipped on --force (user opted out of the workflow) and when
@@ -270,6 +273,32 @@ def set_status(
             print(f"⚠️  自动 changelog 失败（状态已推进）: {exc}", file=__import__("sys").stderr)
 
     return new_status
+
+
+def _print_plan_progress_reminder(project_root: str, spec_name: str) -> None:
+    progress = _plan_progress(project_root, spec_name)
+    if not progress or progress["total"] <= 0:
+        return
+    pct = int(progress["done"] / progress["total"] * 100)
+    if pct >= PLAN_PROGRESS_WARNING_THRESHOLD:
+        return
+    print(
+        "⚠️  Plan checkbox progress is "
+        f"{progress['done']}/{progress['total']} tasks ({pct}%). "
+        "Sync checkboxes or record moved/deferred tasks so vibe status stays trustworthy."
+    )
+
+
+def _plan_progress(project_root: str, spec_name: str) -> dict | None:
+    plan_file = os.path.join(project_root, ".agents", "plans", f"{spec_name}.md")
+    if not os.path.exists(plan_file):
+        return None
+    with open(plan_file, encoding="utf-8") as handle:
+        content = handle.read()
+    return {
+        "done": len(re.findall(r"- \[x\]", content)),
+        "total": len(re.findall(r"- \[.\]", content)),
+    }
 
 
 def _has_approved_review(

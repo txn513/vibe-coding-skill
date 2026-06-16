@@ -2084,6 +2084,40 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(self._advance("full-run", "done").returncode, 0)
         self.assertIn("done", spec_file.read_text(encoding="utf-8"))
 
+    def test_advance_review_warns_when_plan_progress_is_stale(self) -> None:
+        _write_spec(self.project, "stale-review-plan", risk="medium")
+
+        self.assertEqual(self._advance("stale-review-plan", "spec-ready").returncode, 0)
+        self._generate_plan("stale-review-plan")
+        self.assertEqual(self._advance("stale-review-plan", "in-progress").returncode, 0)
+        self._record_evidence(
+            "stale-review-plan", "verify", "passed", f"测试通过，覆盖 {AC_ALL}"
+        )
+
+        result = self._advance("stale-review-plan", "review")
+        self.assertEqual(result.returncode, 0, msg=_combined(result))
+        self.assertIn("Plan checkbox progress", result.stdout)
+
+    def test_status_warns_when_completed_spec_has_stale_plan_progress(self) -> None:
+        _write_spec(self.project, "stale-done-plan", risk="medium")
+
+        self.assertEqual(self._advance("stale-done-plan", "spec-ready").returncode, 0)
+        self._generate_plan("stale-done-plan")
+        self.assertEqual(self._advance("stale-done-plan", "in-progress").returncode, 0)
+        self._record_evidence(
+            "stale-done-plan", "verify", "passed", f"测试通过，覆盖 {AC_ALL}"
+        )
+        self.assertEqual(self._advance("stale-done-plan", "review").returncode, 0)
+        self._approve_review("stale-done-plan")
+        self._record_evidence("stale-done-plan", "release", "passed", "部署成功")
+        self.assertEqual(self._advance("stale-done-plan", "released").returncode, 0)
+        self.assertEqual(self._advance("stale-done-plan", "done").returncode, 0)
+
+        result = self._vibe("status", str(self.project))
+        self.assertEqual(result.returncode, 0, msg=_combined(result))
+        self.assertIn("plan progress may be stale", result.stdout)
+        self.assertIn("stale-done-plan", result.stdout)
+
     def test_changelog_auto_generated_on_release(self) -> None:
         _write_spec(self.project, "feature-x", risk="medium")
 
