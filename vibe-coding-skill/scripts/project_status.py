@@ -55,6 +55,7 @@ def project_status(project_root: str) -> None:
                 phase = m.group(1).strip()
 
     print(f"📊 {project_name}")
+    print(f"   项目: {project_root}")
     print(f"   阶段: {phase}")
     print(f"   时间: {now}")
     print()
@@ -138,6 +139,7 @@ def project_status(project_root: str) -> None:
 def project_next(project_root: str) -> dict:
     """Print only the highest-priority governed next action."""
     project_root = os.path.abspath(project_root)
+    print(f"📍 项目: {project_root}")
     if not os.path.exists(os.path.join(project_root, ".agents")):
         recommendation = _recommendation(
             "接入已有项目或初始化新项目",

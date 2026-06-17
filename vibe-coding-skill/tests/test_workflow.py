@@ -2216,6 +2216,7 @@ class IntegrationTests(unittest.TestCase):
         self._advance("one", "spec-ready")
         r = self._vibe("status", str(self.project))
         self.assertEqual(r.returncode, 0, msg=_combined(r))
+        self.assertIn(str(self.project), r.stdout)
         self.assertIn("one", r.stdout)
         self.assertIn("two", r.stdout)
 
@@ -2223,8 +2224,27 @@ class IntegrationTests(unittest.TestCase):
         _write_spec(self.project, "next-test")
         r = self._vibe("next", str(self.project))
         self.assertEqual(r.returncode, 0, msg=_combined(r))
+        self.assertIn(str(self.project), r.stdout)
         self.assertIn("next-test", r.stdout)
         self.assertLess(len(r.stdout), 4096)
+
+    def test_next_reports_bound_project_when_switching_projects(self) -> None:
+        other_tempdir = tempfile.TemporaryDirectory()
+        self.addCleanup(other_tempdir.cleanup)
+        other_project = Path(other_tempdir.name)
+        init_project.init_project(str(other_project), "web")
+        _write_spec(self.project, "first-project")
+        _write_spec(other_project, "second-project")
+
+        first = self._vibe("next", str(self.project))
+        second = self._vibe("next", str(other_project))
+
+        self.assertEqual(first.returncode, 0, msg=_combined(first))
+        self.assertEqual(second.returncode, 0, msg=_combined(second))
+        self.assertIn(str(self.project), first.stdout)
+        self.assertIn(str(other_project), second.stdout)
+        self.assertIn("first-project", first.stdout)
+        self.assertIn("second-project", second.stdout)
 
     def test_retro_is_created_for_done_spec(self) -> None:
         _write_spec(self.project, "retro-me", risk="low")

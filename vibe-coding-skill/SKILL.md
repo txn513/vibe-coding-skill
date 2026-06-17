@@ -228,6 +228,15 @@ artifacts merely because a template exists.
     to initialize git before proceeding with any spec creation, advance,
     or evidence recording. Many governance features (clean worktree checks,
     commit-based evidence, changelog generation) depend on git being present.
+35. **Bind the current project before project actions**: Before answering
+    `next`, `status`, `acceptance`, `retrospective`, `advance`, or any action
+    that reads or writes `.agents/`, the Agent must identify the current
+    project root from the active repository or an explicit user path. It must
+    not reuse a prior project's context merely because the same Skill or Agent
+    session was used earlier. If the active root differs from the previous
+    session context, switch silently and report the bound project; ask only
+    when multiple candidate roots are plausible or no project root can be
+    determined.
 
 ## State Model
 
