@@ -136,6 +136,7 @@
 - 记录命令证据时，如果 `--purpose`/`--configured` 这类会改变证据语义的参数误放在 `--command` 后面，会直接报错并提示顺序（Rule 36）
 - 复盘里的 Bug、失败行为或回归结论必须引用证据，或者标注为未复验历史观察（Rule 37）
 - 创建 spec 后会显示项目规则来源，并立即输出 draft 校验报告（Rule 38）
+- `下一步做什么` 会给出 vendor-neutral 的模型档位建议（lite/standard/strong/review）；具体模型可在项目配置中映射，不配置也能使用（Rule 39）
 
 ---
 

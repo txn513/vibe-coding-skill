@@ -928,10 +928,12 @@ class WorkflowTests(unittest.TestCase):
         self.assertTrue(result["workflow_changed"])
         migrated = legacy.read_text(encoding="utf-8")
         self.assertIn("> 风险: medium", migrated)
+        migrated_workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
         self.assertEqual(
-            json.loads(workflow_path.read_text(encoding="utf-8"))["schema_version"],
+            migrated_workflow["schema_version"],
             workflow_state.SCHEMA_VERSION,
         )
+        self.assertIn("model_tiers", migrated_workflow)
         self.assertFalse(doctor_project.doctor(str(self.project))["issues"])
         self.assertIsNone(
             set_status.set_status(str(self.project), "legacy", "cancelled")
@@ -1098,6 +1100,7 @@ class WorkflowTests(unittest.TestCase):
         self.write_spec(status="spec-ready")
         recommendation = project_status.recommend_next(str(self.project))
         self.assertEqual(recommendation["action"], "生成或刷新实施计划")
+        self.assertEqual(recommendation["model"]["tier"], "standard")
         self.assertTrue(recommendation["checks"])
         self.assertIn("不能直接实施", recommendation["why_not"])
         generate_plan.generate_plan(str(self.project), "example")
@@ -1109,12 +1112,53 @@ class WorkflowTests(unittest.TestCase):
         self.write_spec(status="in-progress")
         recommendation = project_status.recommend_next(str(self.project))
         self.assertEqual(recommendation["action"], "完成验证并记录证据")
+        self.assertEqual(recommendation["model"]["tier"], "lite")
         record_evidence.record_evidence(
             str(self.project), "example", "verify", "passed",
             f"checks passed {VALID_SPEC_AC_ALL}"
         )
         recommendation = project_status.recommend_next(str(self.project))
         self.assertEqual(recommendation["action"], "将工作项推进到 review")
+        self.assertEqual(recommendation["model"]["tier"], "review")
+
+    def test_next_model_effort_uses_project_mapping_when_configured(self) -> None:
+        workflow_path = self.project / ".agents" / "workflow.json"
+        workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
+        workflow["model_tiers"] = {"standard": "example-standard-model"}
+        workflow_path.write_text(json.dumps(workflow), encoding="utf-8")
+        self.write_spec(status="spec-ready")
+
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPTS_DIR / "vibe.py"),
+                "next",
+                str(self.project),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("模型建议: standard", completed.stdout)
+        self.assertIn("具体模型: example-standard-model", completed.stdout)
+
+    def test_next_model_effort_suggests_strong_for_bug_regression(self) -> None:
+        spec = self.write_spec(status="in-progress")
+        content = spec.read_text(encoding="utf-8")
+        content = content.replace(
+            "> 状态: in-progress | 创建: 2026-06-13 00:00 UTC | 更新: 2026-06-13 00:00 UTC",
+            "> 状态: in-progress | 创建: 2026-06-13 00:00 UTC | 更新: 2026-06-13 00:00 UTC\n"
+            "> 类型: bug\n"
+            "> 回归来源: prior-spec",
+        )
+        spec.write_text(content, encoding="utf-8")
+
+        recommendation = project_status.recommend_next(str(self.project))
+
+        self.assertEqual(recommendation["action"], "补齐 Bug 的复现与修复回归证据")
+        self.assertEqual(recommendation["model"]["tier"], "strong")
 
     def test_next_command_prints_one_explained_action(self) -> None:
         self.write_spec(status="spec-ready")
@@ -1135,6 +1179,9 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("前置检查:", completed.stdout)
         self.assertIn("暂不选择:", completed.stdout)
         self.assertIn("备选:", completed.stdout)
+        self.assertIn("模型建议:", completed.stdout)
+        self.assertIn("具体模型: 未配置", completed.stdout)
+        self.assertIn("升级条件:", completed.stdout)
         self.assertNotIn("整体进度", completed.stdout)
 
     def test_unified_dispatcher_executes_and_records_command_evidence(self) -> None:

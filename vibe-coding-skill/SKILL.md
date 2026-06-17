@@ -254,6 +254,12 @@ artifacts merely because a template exists.
     adopted project rules, then run an initial draft validation report. This
     gives the Agent immediate feedback in draft instead of waiting for a later
     status gate.
+39. **Model effort is advisory and vendor-neutral**: `next` recommendations
+    may include a suggested model effort tier (`lite`, `standard`, `strong`,
+    or `review`) with a reason and upgrade condition. The Skill must not hard
+    code vendor model names. Concrete model mappings belong in project-local
+    or user-local configuration and must remain advisory; they are cost and
+    workflow guidance, not status gates.
 
 ## State Model
 

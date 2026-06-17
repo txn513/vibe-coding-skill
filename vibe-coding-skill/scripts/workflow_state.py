@@ -9,7 +9,7 @@ from pathlib import Path
 
 from common import atomic_write_json
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 def default_workflow(project_name: str) -> dict:
@@ -54,6 +54,7 @@ def default_workflow(project_name: str) -> dict:
             },
         },
         "commands": {"verify": [], "release": [], "observe": []},
+        "model_tiers": {},
         "repositories": [],
     }
 
@@ -75,7 +76,10 @@ def ensure_workflow(project_root: str) -> tuple[dict, bool]:
 def migrate(value: dict, project_name: str) -> bool:
     changed = False
     defaults = default_workflow(project_name)
-    for key in ("project_id", "roles", "risk_profiles", "commands", "repositories"):
+    for key in (
+        "project_id", "roles", "risk_profiles", "commands", "model_tiers",
+        "repositories",
+    ):
         if key not in value:
             value[key] = defaults[key]
             changed = True

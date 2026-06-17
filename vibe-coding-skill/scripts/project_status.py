@@ -133,7 +133,9 @@ def project_status(project_root: str) -> None:
         print(f"📦 已生成 {cl_count} 个 changelog")
 
     print()
-    _print_recommendation(recommend_next(project_root, specs))
+    recommendation = recommend_next(project_root, specs)
+    _apply_model_mapping(project_root, recommendation)
+    _print_recommendation(recommendation)
 
 
 def project_next(project_root: str) -> dict:
@@ -156,6 +158,7 @@ def project_next(project_root: str) -> dict:
             project_root,
             _list_specs(os.path.join(project_root, ".agents", "specs")),
         )
+    _apply_model_mapping(project_root, recommendation)
     _print_recommendation(recommendation)
     return recommendation
 
@@ -536,7 +539,11 @@ def _recommendation(
     checks: list[str] | None = None,
     why_not: str = "",
     alternative: dict | None = None,
+    model: dict | None = None,
 ) -> dict:
+    model = model or _model_effort_for_action(
+        action, reason, checks or [], blocker, spec
+    )
     return {
         "action": action,
         "reason": reason,
@@ -545,6 +552,7 @@ def _recommendation(
         "checks": checks or [],
         "why_not": why_not,
         "alternative": alternative or {},
+        "model": model,
     }
 
 
@@ -578,6 +586,81 @@ def _print_recommendation(recommendation: dict) -> None:
             f"   备选: {alternative['action']}{alternative_target}；"
             f"{alternative.get('reason', '')}"
         )
+    model = recommendation.get("model") or {}
+    if model.get("tier"):
+        print(f"   模型建议: {model['tier']}")
+        if model.get("configured_model"):
+            print(f"   具体模型: {model['configured_model']}")
+        elif model.get("configured_model") == "":
+            print("   具体模型: 未配置（可在 .agents/workflow.json 的 model_tiers 中映射）")
+        if model.get("reason"):
+            print(f"   模型理由: {model['reason']}")
+        if model.get("upgrade_if"):
+            print(f"   升级条件: {model['upgrade_if']}")
+
+
+def _apply_model_mapping(project_root: str, recommendation: dict) -> None:
+    model = recommendation.get("model") or {}
+    tier = model.get("tier")
+    if not tier or not os.path.exists(os.path.join(project_root, ".agents")):
+        return
+    workflow, _ = ensure_workflow(project_root)
+    configured = workflow.get("model_tiers", {})
+    value = configured.get(tier, "")
+    if isinstance(value, str) and value.strip():
+        model["configured_model"] = value.strip()
+    else:
+        model["configured_model"] = ""
+    recommendation["model"] = model
+
+
+def _model_effort_for_action(
+    action: str,
+    reason: str,
+    checks: list[str],
+    blocker: str,
+    spec: str,
+) -> dict:
+    action_text = action.lower()
+    text = " ".join([action, reason, blocker, " ".join(checks)]).lower()
+    if any(
+        token in text
+        for token in (
+            "高风险", "high", "冲突", "循环依赖", "依赖环", "回归",
+            "regression", "安全", "权限", "迁移", "blocked", "阻塞",
+        )
+    ):
+        return {
+            "tier": "strong",
+            "reason": "下一步涉及跨边界判断、风险收敛或因果分析，低档模型容易漏条件。",
+            "upgrade_if": "如果还需要独立验收或上线判断，改用 review 档。",
+        }
+    if any(
+        token in action_text
+        for token in ("审查", "review", "验收", "复盘", "retrospective")
+    ):
+        return {
+            "tier": "review",
+            "reason": "下一步是判断型工作，需要独立视角核对规格、证据或结论。",
+            "upgrade_if": "如果审查发现架构、安全或回归疑点，切到 strong。",
+        }
+    if any(
+        token in text
+        for token in (
+            "记录证据", "执行项目配置", "changelog", "context-refresh",
+            "状态", "checkbox", "回顾", "retro", "self_analyze", "self-analyze",
+        )
+    ):
+        return {
+            "tier": "lite",
+            "reason": "下一步主要是运行已有命令、整理状态或记录产物，不需要高强度推理。",
+            "upgrade_if": "如果命令失败、证据含义不清或出现回归线索，切到 standard。",
+        }
+    return {
+        "tier": "standard",
+        "reason": "下一步是常规规格推进或实现准备，需要理解项目上下文但风险未升高。",
+        "upgrade_if": "如果涉及跨模块设计、安全/数据边界或复杂 bug，切到 strong。",
+    }
 
 
 def _list_specs(dir: str) -> list[dict]:
