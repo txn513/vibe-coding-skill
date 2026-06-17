@@ -23,6 +23,7 @@ from workflow_state import configured_commands, ensure_workflow, spec_metadata
 PHASES = {"verify", "release", "observe"}
 RESULTS = {"passed", "failed", "not-applicable"}
 PURPOSES = {"standard", "reproduction", "fix-regression"}
+VIBE_OPTIONS_AFTER_COMMAND = {"--configured", "--purpose"}
 
 
 def record_evidence(
@@ -46,6 +47,12 @@ def record_evidence(
         raise ValueError(f"无效证据用途: {purpose}")
     if phase != "verify" and purpose != "standard":
         raise ValueError("只有 verify 阶段支持证据用途")
+    misplaced = misplaced_vibe_options(command or [])
+    if misplaced:
+        raise ValueError(
+            "Vibe evidence options must appear before --command: "
+            + ", ".join(misplaced)
+        )
     evidence = " ".join(evidence.split())
     if not evidence and not command and not configured:
         raise ValueError("证据说明不能为空")
@@ -161,6 +168,13 @@ def _redact_output(output: str) -> str:
     )
 
 
+def misplaced_vibe_options(command: list[str] | None) -> list[str]:
+    """Return Vibe-owned options accidentally captured by --command."""
+    if not command:
+        return []
+    return [token for token in command if token in VIBE_OPTIONS_AFTER_COMMAND]
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Record verification or release evidence")
     parser.add_argument("project_root", help="Project root directory")
@@ -174,6 +188,12 @@ if __name__ == "__main__":
     parser.add_argument("--configured", action="store_true", help="Run all configured commands for the phase")
     parser.add_argument("--purpose", choices=sorted(PURPOSES), default="standard")
     args = parser.parse_args()
+    misplaced = misplaced_vibe_options(args.command)
+    if misplaced:
+        parser.error(
+            "Vibe evidence options must appear before --command: "
+            + ", ".join(misplaced)
+        )
     record_evidence(
         os.path.abspath(args.project_root),
         args.spec_name,

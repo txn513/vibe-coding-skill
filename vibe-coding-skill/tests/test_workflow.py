@@ -447,6 +447,18 @@ class WorkflowTests(unittest.TestCase):
             (self.project / ".agents" / "audit.md").read_text(encoding="utf-8"),
         )
 
+    def test_create_spec_surfaces_project_rules_and_initial_validation(self) -> None:
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            create_spec.create_spec(str(self.project), "visibility-check")
+
+        stdout = output.getvalue()
+        self.assertIn("项目规则上下文", stdout)
+        self.assertIn("AGENTS.md found", stdout)
+        self.assertIn("adopted rules", stdout)
+        self.assertIn("初始规格校验", stdout)
+        self.assertIn("visibility-check", stdout)
+
     def test_plan_and_prompt_require_ready_status(self) -> None:
         self.write_spec(status="draft")
         self.assertIsNone(generate_plan.generate_plan(str(self.project), "example"))
@@ -1150,6 +1162,34 @@ class WorkflowTests(unittest.TestCase):
             self.project / ".agents" / "evidence" / "example" / "verify.md"
         ).read_text(encoding="utf-8")
         self.assertIn("dispatcher-ok", evidence)
+
+    def test_evidence_rejects_vibe_options_after_command(self) -> None:
+        self.write_spec()
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPTS_DIR / "vibe.py"),
+                "evidence",
+                str(self.project),
+                "example",
+                "verify",
+                "passed",
+                "repro command",
+                "--command",
+                sys.executable,
+                "-c",
+                "print('should-not-run')",
+                "--purpose",
+                "reproduction",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("before --command", completed.stderr)
+        evidence = self.project / ".agents" / "evidence" / "example" / "verify.md"
+        self.assertFalse(evidence.exists())
 
     def test_configured_commands_are_required_by_evidence_gate(self) -> None:
         workflow_path = self.project / ".agents" / "workflow.json"
@@ -2261,7 +2301,34 @@ class IntegrationTests(unittest.TestCase):
         self.assertTrue(retro_file.exists())
         retro_content = retro_file.read_text(encoding="utf-8")
         self.assertIn("## 失败模式分类", retro_content)
+        self.assertIn("## 结论证据", retro_content)
         self.assertIn("## 沉淀落点", retro_content)
+
+    def test_retro_claims_need_evidence_or_unverified_marker(self) -> None:
+        missing = """# demo
+
+## 做错了什么
+
+- 线上保存失败
+
+## Agent 表现评估
+"""
+        self.assertTrue(create_retro.claim_evidence_warnings(missing))
+
+        with_evidence = """# demo
+
+## 做错了什么
+
+- 线上保存失败
+
+## 结论证据
+
+- **证据引用**: .agents/evidence/demo/verify.md
+- **未复验结论**: none
+
+## Agent 表现评估
+"""
+        self.assertEqual(create_retro.claim_evidence_warnings(with_evidence), [])
 
 
     def test_doctor_smoke_runs_configured_commands(self) -> None:

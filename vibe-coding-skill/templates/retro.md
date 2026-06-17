@@ -28,6 +28,13 @@
 - {{WENT_WRONG_2}}
 - {{WENT_WRONG_3}}
 
+## 结论证据
+
+如果上面的失败、Bug、回归或行为异常结论已经复验，请引用证据；如果只是历史观察，请明确标注未复验。
+
+- **证据引用**: {{CLAIM_EVIDENCE}}
+- **未复验结论**: {{UNVERIFIED_CLAIMS}}
+
 ## Agent 表现评估
 
 ### 实现 Agent

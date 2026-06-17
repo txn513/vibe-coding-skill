@@ -237,6 +237,23 @@ artifacts merely because a template exists.
     session context, switch silently and report the bound project; ask only
     when multiple candidate roots are plausible or no project root can be
     determined.
+36. **Evidence command semantics must be unambiguous**: When recording evidence
+    with a captured command, Vibe-owned options that change evidence semantics,
+    such as `--purpose` and `--configured`, must appear before `--command`.
+    If one is captured after `--command`, fail fast and explain the ordering
+    instead of executing the project command and recording misleading failed
+    evidence.
+37. **Retrospective claims need evidence discipline**: A retrospective may
+    discuss process, planning, or collaboration without reproduction proof.
+    But any claim that a bug, failed behavior, or regression existed must cite
+    evidence such as an evidence path, command output, log, screenshot, or
+    recorded interaction; otherwise it must be clearly marked as an unverified
+    historical note before it is used to seed new bug work.
+38. **Spec creation must surface project guidance early**: Creating a spec must
+    show the bound project guidance sources, including AGENTS.md presence and
+    adopted project rules, then run an initial draft validation report. This
+    gives the Agent immediate feedback in draft instead of waiting for a later
+    status gate.
 
 ## State Model
 

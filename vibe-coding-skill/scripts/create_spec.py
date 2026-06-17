@@ -9,7 +9,8 @@ import argparse
 import os
 from datetime import datetime, timezone
 
-from common import atomic_write, validate_artifact_name
+from common import adopted_project_rule_paths, atomic_write, validate_artifact_name
+import validate_spec
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 SKILL_DIR = os.path.dirname(SCRIPT_DIR)
@@ -58,6 +59,8 @@ def create_spec(
 
     type_label = {"feature": "功能", "bug": "Bug 修复", "refactor": "重构"}.get(spec_type, "功能")
     print(f"✅ {type_label}规格已创建: {spec_file}")
+    _print_project_guidance_summary(project_root)
+    _print_initial_validation(spec_file)
     if spec_type == "bug":
         print(f"🐛 专注：复现步骤、根因分析、修复方案、回归测试")
         if regression_from:
@@ -65,6 +68,23 @@ def create_spec(
     elif spec_type == "refactor":
         print(f"🔧 专注：重构目标、不动行为、测试保护")
     return spec_file
+
+
+def _print_project_guidance_summary(project_root: str) -> None:
+    agents_path = os.path.join(project_root, "AGENTS.md")
+    rules = adopted_project_rule_paths(project_root)
+    agents_status = "found" if os.path.exists(agents_path) else "missing"
+    print(f"📚 项目规则上下文: AGENTS.md {agents_status}; adopted rules: {len(rules)}")
+    if rules:
+        rel = [os.path.relpath(path, project_root) for path in rules[:5]]
+        suffix = " ..." if len(rules) > 5 else ""
+        print(f"   {', '.join(rel)}{suffix}")
+    print("   生成执行 prompt 时会绑定 AGENTS.md 与 adopted 项目规则。")
+
+
+def _print_initial_validation(spec_file: str) -> None:
+    print("🔍 初始规格校验:")
+    validate_spec.print_result(validate_spec.validate_spec(spec_file))
 
 
 def _get_type_defaults(

@@ -114,6 +114,9 @@ def _write_retrospective_report(
     secondary_failure_mode = _extract_bullet_value(retro_content, "次级失败模式")
     rationale = _extract_bullet_value(retro_content, "为什么归到这个类别")
     project_updates = _extract_bullet_value(retro_content, "项目内应更新什么")
+    claim_evidence = _extract_bullet_value(retro_content, "证据引用")
+    unverified_claims = _extract_bullet_value(retro_content, "未复验结论")
+    claim_warnings = create_retro.claim_evidence_warnings(retro_content)
     skill_candidate = _extract_bullet_value(retro_content, "是否形成 Skill 治理候选")
     skill_candidate_summary = _extract_bullet_value(
         retro_content, "如果形成，候选摘要是什么"
@@ -134,6 +137,12 @@ def _write_retrospective_report(
         "## 项目沉淀",
         "",
         f"- **项目内应更新什么**: {project_updates or '(待填写)'}",
+        "",
+        "## 结论证据",
+        "",
+        f"- **证据引用**: {claim_evidence or '(待填写)'}",
+        f"- **未复验结论**: {unverified_claims or '(待填写)'}",
+        f"- **证据状态**: {'需要补充' if claim_warnings else '已填写或暂无失败结论'}",
         "",
         "## Skill 候选",
         "",

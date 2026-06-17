@@ -267,6 +267,12 @@ def main() -> None:
         if result is None:
             raise SystemExit(1)
     elif args.operation == "evidence":
+        misplaced = record_evidence.misplaced_vibe_options(args.exec_command)
+        if misplaced:
+            parser.error(
+                "vibe evidence options must appear before --command: "
+                + ", ".join(misplaced)
+            )
         result = record_evidence.record_evidence(
             root, args.spec_name, args.phase, args.result, args.description,
             args.actor, args.role, args.exec_command,
