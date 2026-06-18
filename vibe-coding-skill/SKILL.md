@@ -102,22 +102,29 @@ artifacts merely because a template exists.
 11. When a change can affect existing behavior, require regression coverage or
     an explicit equivalent verification path. Prefer adding the test with the
     fix rather than deferring validation to a later cleanup.
-12. When a flow contains multi-step fallback or degradation paths, verify not
-    only that each level works independently, but that failure of an upstream
-    level actually routes execution to the intended downstream level, and that
-    the terminal fallback remains usable when higher levels fail.
+12. **Composed-path verification for fallback and cross-component flows**: When a
+    flow contains multi-step fallback or degradation paths, or when validation
+    spans multiple components or boundaries, per-function or per-level checks
+    are necessary but not sufficient. The Agent must additionally verify a
+    composed path:
+
+    - For each fallback or degradation level: confirm it works independently,
+      then confirm that failure of an upstream level actually routes execution
+      to the intended downstream level, and that the terminal fallback remains
+      usable when every higher level fails.
+    - For each cross-component handoff (user choice, frontend branch, backend
+      endpoint, adapter, fallback target): confirm the end-to-end path
+      resolves the same request through every component involved, and that
+      each critical handoff preserves the intended semantics, ordering, and
+      authorization state.
 13. When behavior depends on time-sensitive or freshness-sensitive state such
     as cache TTL, token expiry, propagation delay, or refresh windows, verify
     at least three states: valid, expired or stale, and recovered after refresh
     or re-resolution.
-14. When validation spans multiple components or boundaries, require a composed
-    path check rather than only per-function checks. If a user choice, frontend
-    branch, backend endpoint, adapter, or fallback target can change the
-    effective behavior, verify the end-to-end path and confirm each critical
-    handoff preserves the intended semantics.
-15. When a spec touches fallback chains, expiry-sensitive state, cross-component
-    selection paths, or state-changing frontend requests, the Agent must check
-    whether the project's testing rules already define the verification method.
+15. When a spec touches topics covered by Rule 12 (composed-path verification for
+    fallback or cross-component flows) or Rule 13 (time-sensitive or
+    freshness-sensitive state), the Agent must check whether the project's
+    testing rules already define the verification method for those scenarios.
     If the relevant testing rule is still unspecified, the Agent must pause
     before claiming `verify` is complete and either record the project-local
     rule or explicitly surface the missing rule as a blocker.
