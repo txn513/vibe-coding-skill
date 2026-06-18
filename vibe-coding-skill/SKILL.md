@@ -125,9 +125,12 @@ artifacts merely because a template exists.
     fallback or cross-component flows) or Rule 13 (time-sensitive or
     freshness-sensitive state), the Agent must check whether the project's
     testing rules already define the verification method for those scenarios.
-    If the relevant testing rule is still unspecified, the Agent must pause
-    before claiming `verify` is complete and either record the project-local
-    rule or explicitly surface the missing rule as a blocker.
+    The check fires at the draft → spec-ready transition, not at verify time,
+    so missing testing rules are surfaced when the spec is cheapest to revise.
+    If the relevant testing rule is still unspecified at either gate, the
+    Agent must pause and either record the project-local rule or explicitly
+    surface the missing rule as a blocker. The verify gate re-checks the same
+    condition as a second-line defence, not as the first discovery point.
 16. During a retrospective triggered inside a project, the Agent must first
     attempt to update the project's own rules, docs, retros, or testing policy
     before proposing a Skill-core change. A Skill update is allowed only for
@@ -313,6 +316,17 @@ artifacts merely because a template exists.
     appears stale, the Agent must surface a warning and prompt to sync the plan
     or record moved/deferred tasks. Plan progress is advisory visibility, not a
     hard acceptance gate.
+44. **Write specs must surface read-path impact**: When a spec introduces a write
+    operation, a state mutation, a schema change, a new storage location, or any
+    change that can be observed by an existing read path, the spec's scope
+    section must list every read path that may be affected, or explicitly mark
+    "no read path affected" with a one-line reason. The Agent must not leave
+    this section empty or skip it. The list exists to make the cross-component
+    handoff visible at spec-ready time so Rule 12's composed-path verification
+    can be planned for, not discovered at verify. Whether a read path is
+    actually affected is a project-specific decision; this rule only requires
+    the spec to surface the consideration explicitly rather than rely on later
+    verification to catch an implicit impact.
 
 ## State Model
 
