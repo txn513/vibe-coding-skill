@@ -7,6 +7,7 @@ Usage:
 
 import argparse
 import os
+import pathlib
 from datetime import datetime, timezone
 
 from common import adopted_project_rule_paths, atomic_write, validate_artifact_name
@@ -71,14 +72,41 @@ def create_spec(
 
 
 def _print_project_guidance_summary(project_root: str) -> None:
+    """Surface AGENTS.md + adopted rules so the Agent can cite them in the spec.
+
+    Implements Skill治理升级候选 3: 让 Agent 在 spec 创建那一瞬就能看到项目规则
+    摘要(不只是状态),避免 '5 份 retro 点名 AGENTS.md 缺失作为做错了什么' 的循环。
+    """
+    import re
     agents_path = os.path.join(project_root, "AGENTS.md")
     rules = adopted_project_rule_paths(project_root)
     agents_status = "found" if os.path.exists(agents_path) else "missing"
     print(f"📚 项目规则上下文: AGENTS.md {agents_status}; adopted rules: {len(rules)}")
+    if agents_status == "found":
+        # 抓 AGENTS.md 的 H2 段标题,告诉 Agent 哪些约束可引用
+        try:
+            content = pathlib.Path(agents_path).read_text(encoding="utf-8")
+            h2_sections = re.findall(r"^##\s+(.+)$", content, re.MULTILINE)
+            if h2_sections:
+                preview = ", ".join(h2_sections[:6])
+                suffix = " ..." if len(h2_sections) > 6 else ""
+                print(f"   AGENTS.md 章节: {preview}{suffix}")
+        except OSError:
+            pass
     if rules:
-        rel = [os.path.relpath(path, project_root) for path in rules[:5]]
+        for rule_path in rules[:5]:
+            rel = os.path.relpath(rule_path, project_root)
+            try:
+                content = pathlib.Path(rule_path).read_text(encoding="utf-8")
+                # 抓规则文件第一行非 frontmatter 的标题作为摘要
+                lines = content.splitlines()
+                title = next((ln.lstrip("# ").strip() for ln in lines if ln.strip() and not ln.startswith("---") and not ln.startswith(">")), "(无标题)")
+                print(f"   {rel}: {title}")
+            except OSError:
+                print(f"   {rel}: (读取失败)")
         suffix = " ..." if len(rules) > 5 else ""
-        print(f"   {', '.join(rel)}{suffix}")
+        if suffix:
+            print(f"   (+{len(rules) - 5} more){suffix}")
     print("   生成执行 prompt 时会绑定 AGENTS.md 与 adopted 项目规则。")
 
 
