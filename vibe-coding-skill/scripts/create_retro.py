@@ -107,7 +107,10 @@ def claim_evidence_warnings(content: str) -> list[str]:
 def _print_claim_evidence_warnings(content: str) -> None:
     for warning in claim_evidence_warnings(content):
         print(f"⚠️  {warning}")
-        print("   请补 evidence 路径、日志、测试、截图，或标注 unverified historical note。")
+        # 候选 2 落地: 列出全部 evidence 类型,Agent 一眼能选
+        print("   请补以下任一 evidence 引用,或显式标注 '未复验历史观察':")
+        print("   - 复现命令 / logcat / dumpsys / 单元测试 / 截图 / 调用栈 / diff")
+        print("   - 或显式 'unverified historical note' 标注")
 
 
 def _section(content: str, title: str) -> str:
@@ -133,6 +136,18 @@ def _real_bullets_in_section(content: str, title: str) -> list[str]:
     return result
 
 
+# 候选 2 retro 列出 + eink-app-dev 卫生修复观察补充的 evidence 关键字
+# 大小写不敏感; 中文关键字直接匹配原文
+EVIDENCE_KEYWORDS_EN = (
+    "evidence", "log", "test", "screenshot", "unverified",
+    "logcat", "dumpsys", "repro", "reproduce", "trace", "stack", "diff",
+)
+EVIDENCE_KEYWORDS_CN = (
+    "证据", "日志", "测试", "截图", "未复验", "记录",
+    "复现命令", "复现步骤", "验证", "堆栈", "调用栈",
+)
+
+
 def _has_real_claim_evidence(section: str) -> bool:
     for line in section.splitlines():
         stripped = line.strip()
@@ -143,9 +158,9 @@ def _has_real_claim_evidence(section: str) -> bool:
         lower = stripped.lower()
         if "none" in lower and "未复验" not in stripped and "unverified" not in lower:
             continue
-        if any(marker in lower for marker in ("evidence", "log", "test", "screenshot", "unverified")):
+        if any(marker in lower for marker in EVIDENCE_KEYWORDS_EN):
             return True
-        if any(marker in stripped for marker in ("证据", "日志", "测试", "截图", "未复验", "记录")):
+        if any(marker in stripped for marker in EVIDENCE_KEYWORDS_CN):
             return True
     return False
 

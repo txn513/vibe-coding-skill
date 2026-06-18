@@ -88,6 +88,7 @@ vibe ui-redesign-contract <spec> --source-type opendesign --source-artifacts des
 | `验收一下 xxx 功能` | 对比 spec 验收标准与实际 evidence，输出差距报告 |
 | `Vibe 复盘这个问题` | 自动定位最近完成的 spec，生成 retro + 结构化报告 |
 | `复盘一下 xxx 功能` | 指定 spec 复盘 |
+| `严格复盘: 复盘一下 xxx` | `vibe.py retrospective <root> <spec> --strict`, retro 缺 [复现命令/logcat/截图/unverified historical note] 任一 evidence 引用时 fail-fast (候选 2 落地, 默认仅 warning) |
 | `分析一下项目改进点` | 扫描所有 retro，找重复失败模式和治理候选 |
 | `有什么可以沉淀的吗` | 同上，分析历史回顾中的共性问题 |
 | `发现 N 条 Skill 升级候选，是否应用？` | Agent 主动询问，你说 `应用` 才会修改 Skill |

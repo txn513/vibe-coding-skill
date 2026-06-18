@@ -116,6 +116,10 @@ def main() -> None:
     retrospective_cmd = sub.add_parser("retrospective")
     retrospective_cmd.add_argument("project_root")
     retrospective_cmd.add_argument("spec_name", nargs="?", default="")
+    retrospective_cmd.add_argument(
+        "--strict", action="store_true",
+        help="严格模式: 结论证据缺失时 fail-fast (默认仅 warning, 候选 2 retro 落地)",
+    )
 
     self_analyze_cmd = sub.add_parser("self-analyze")
     self_analyze_cmd.add_argument("project_root")
@@ -287,6 +291,18 @@ def main() -> None:
         result = retrospective.run_retrospective(root, args.spec_name)
         if result is None:
             raise SystemExit(1)
+        # 候选 2 retro 落地: --strict 模式下若 retro 内容 claim_evidence_warnings 非空, fail-fast
+        if getattr(args, "strict", False):
+            retro_path = result.get("retro_file") if isinstance(result, dict) else None
+            if retro_path and os.path.exists(retro_path):
+                content = open(retro_path, encoding="utf-8").read()
+                warnings = create_retro.claim_evidence_warnings(content)
+                if warnings:
+                    print("❌ --strict 模式下 retro 校验未通过:")
+                    for warning in warnings:
+                        print(f"   {warning}")
+                    raise SystemExit(1)
+                print("✅ --strict 模式下 retro 校验通过")
     elif args.operation == "self-analyze":
         findings = self_analyze.analyze(root)
         self_analyze.print_report(findings)

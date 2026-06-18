@@ -30,6 +30,10 @@
 
 ## 结论证据
 
+> **⚠️ 必填**: 若"做错了什么"包含真实结论 (bug / 失败 / 回归 / 行为异常), 本段必须引用至少一种 evidence; 否则 `--strict` 复盘会 fail-fast。
+>
+> 可用 evidence 类型: 复现命令 / logcat / dumpsys / 单元测试 / 截图 / 堆栈 / diff / `unverified historical note` 标注。
+
 如果上面的失败、Bug、回归或行为异常结论已经复验，请引用证据；如果只是历史观察，请明确标注未复验。
 
 - **证据引用**: {{CLAIM_EVIDENCE}}
