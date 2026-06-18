@@ -156,7 +156,7 @@ vibe ui-redesign-contract <spec> --source-type opendesign --source-artifacts des
 - 推进状态前自动检查门禁（Rule 22）
 - 推进后自动汇报状态（Rule 22）
 - 运行 `下一步做什么`、`检查状态`、验收、复盘或推进前，自动绑定当前项目根目录；跨项目切换时不沿用上一个项目上下文（Rule 35）
-- spec 已到 review/released/done 但 plan checkbox 进度明显滞后时，自动提示同步计划或记录移交/延期任务（Rule 22）
+- spec 已到 review/released/done 但 plan checkbox 进度明显滞后时，自动提示同步计划或记录移交/延期任务（Rule 43）
 - Bug 修复自动要求复现+回归证据（Rule 10）
 - 高风险变更自动要求观察证据（Rule 6）
 - Out of Scope 项自动跟踪去向（Rule 26）

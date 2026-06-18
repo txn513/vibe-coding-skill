@@ -146,11 +146,7 @@ artifacts merely because a template exists.
     run `vibe next` (or equivalent check) to confirm all gates for the target
     status are satisfied. After advancing, the Agent must run `vibe status` (or
     equivalent) to report the updated state. No status transition may happen
-    silently without a preceding gate check and a following status report. When
-    a spec reaches review, released, or done while its linked plan checkbox
-    progress appears stale, surface a warning and prompt the Agent to sync the
-    plan or record moved/deferred tasks. Plan progress is advisory visibility,
-    not a hard acceptance gate.
+    silently without a preceding gate check and a following status report.
 23. Use one active writer per spec. Parallelize through separate specs or
     worktrees instead of adding distributed locking to this Skill.
 24. On existing projects, inventory policy sources before proposing changes.
@@ -305,6 +301,11 @@ artifacts merely because a template exists.
     change affects a spec that is already planned, in progress, under review,
     or released, the Agent must use the normal requirement amendment or
     follow-up spec flow rather than silently changing design guidance.
+43. **Plan checkbox sync is advisory on spec advance**: When a spec reaches
+    `review`, `released`, or `done` while its linked plan checkbox progress
+    appears stale, the Agent must surface a warning and prompt to sync the plan
+    or record moved/deferred tasks. Plan progress is advisory visibility, not a
+    hard acceptance gate.
 
 ## State Model
 
