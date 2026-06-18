@@ -330,12 +330,50 @@ def recommend_next(project_root: str, specs: list[dict] | None = None) -> dict:
                 },
             )
         if profile["require_plan"] and not _current_plan(project_root, name, content):
+            staleness = _plan_staleness(project_root, name, content) or "missing"
+            if staleness == "spec":
+                return _recommendation(
+                    "刷新实施计划 (规格摘要已过期)",
+                    "Spec frontmatter 或正文已改动，计划里烧的 `规格摘要` 不再匹配。",
+                    spec=name,
+                    checks=[
+                        "Spec 已 ready",
+                        "依赖已完成",
+                        "Plan 内的 `规格摘要` 与当前 spec digest 不一致",
+                    ],
+                    why_not="现在不能直接实施，因为执行步骤绑定的是旧版 spec。",
+                    action_command=_regen_plan_command(name),
+                    alternative={
+                        "action": "先确认本次 spec 改动是有意的",
+                        "reason": "如果改动是误操作，先回滚 spec 再生成计划更稳。",
+                        "spec": name,
+                    },
+                )
+            if staleness == "context":
+                return _recommendation(
+                    "刷新实施计划 (上下文摘要已过期)",
+                    "adopted rules、AGENTS.md 或其他项目规则已改动，计划里烧的 `上下文摘要` 不再匹配。",
+                    spec=name,
+                    checks=[
+                        "Spec 已 ready",
+                        "依赖已完成",
+                        "Plan 内的 `上下文摘要` 与当前 project context digest 不一致",
+                    ],
+                    why_not="现在不能直接实施，因为计划还没有绑定到当前项目治理上下文。",
+                    action_command=_refresh_plan_command(name),
+                    alternative={
+                        "action": "先确认 rules 改动是有意的",
+                        "reason": "如果只是临时实验，可以先回滚 rules 再刷新 plan。",
+                        "spec": name,
+                    },
+                )
             return _recommendation(
                 "生成或刷新实施计划",
-                "当前风险等级要求计划，且现有计划缺失或已过期。",
+                "当前风险等级要求计划，但还没有可用的 plan；使用 `vibe plan ... --force` 生成。",
                 spec=name,
-                checks=["Spec 已 ready", "依赖已完成", "计划缺失或与当前上下文不一致"],
+                checks=["Spec 已 ready", "依赖已完成", "Plan 缺失"],
                 why_not="现在不能直接实施，因为执行步骤还没有绑定到当前规格快照。",
+                action_command=_regen_plan_command(name),
                 alternative={
                     "action": "先重新确认当前范围没有继续变化",
                     "reason": "避免刚生成计划就因需求波动过期。",
@@ -540,6 +578,7 @@ def _recommendation(
     why_not: str = "",
     alternative: dict | None = None,
     model: dict | None = None,
+    action_command: str = "",
 ) -> dict:
     model = model or _model_effort_for_action(
         action, reason, checks or [], blocker, spec
@@ -553,6 +592,7 @@ def _recommendation(
         "why_not": why_not,
         "alternative": alternative or {},
         "model": model,
+        "action_command": action_command,
     }
 
 
@@ -568,11 +608,36 @@ def _current_plan(project_root: str, name: str, content: str) -> bool:
     )
 
 
+def _plan_staleness(project_root: str, name: str, content: str) -> str | None:
+    """Return one of: "missing", "spec", "context", or None when plan is current."""
+    path = os.path.join(project_root, ".agents", "plans", f"{name}.md")
+    if not os.path.exists(path):
+        return "missing"
+    with open(path, encoding="utf-8") as handle:
+        plan = handle.read()
+    if f"规格摘要: {spec_digest(content)}" not in plan:
+        return "spec"
+    if f"上下文摘要: {project_context_digest(project_root)}" not in plan:
+        return "context"
+    return None
+
+
+def _refresh_plan_command(spec_name: str) -> str:
+    return f"vibe plan <project_root> {spec_name} --refresh-context"
+
+
+def _regen_plan_command(spec_name: str) -> str:
+    return f"vibe plan <project_root> {spec_name} --force"
+
+
 def _print_recommendation(recommendation: dict) -> None:
     print("💡 建议下一步:")
     target = f" [{recommendation['spec']}]" if recommendation.get("spec") else ""
     print(f"   {recommendation['action']}{target}")
     print(f"   原因: {recommendation['reason']}")
+    command = recommendation.get("action_command")
+    if command:
+        print(f"   命令: {command}")
     if recommendation.get("blocker"):
         print(f"   阻塞: {recommendation['blocker']}")
     if recommendation.get("checks"):

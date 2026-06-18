@@ -36,6 +36,14 @@
 
 如果上面的失败、Bug、回归或行为异常结论已经复验，请引用证据；如果只是历史观察，请明确标注未复验。
 
+**项目内路径引用格式 (项目内使用统一的单引号半角格式)**:
+
+```text
+合同: '.agents/specs/example/ui-design-contract.md'
+证据: '.agents/evidence/example/verify.md'
+复现: '.agents/evidence/example/verify-reproduction.md'
+```
+
 - **证据引用**: {{CLAIM_EVIDENCE}}
 - **未复验结论**: {{UNVERIFIED_CLAIMS}}
 

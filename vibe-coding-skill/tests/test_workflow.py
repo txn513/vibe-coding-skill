@@ -22,6 +22,7 @@ import create_design
 import create_intent
 import create_retro
 import confirm_risk
+import create_ui_contract
 import doctor_project
 import generate_changelog
 import generate_plan
@@ -2629,6 +2630,218 @@ class SpecScorerTests(unittest.TestCase):
         self.assertIn("evidence(2 files)", r)
         self.assertIn("among 3 candidates", r)
 
+    def test_create_ui_design_contract_records_source_and_ui_ac(self) -> None:
+        path = Path(
+            create_ui_contract.create_ui_contract(
+                str(self.project),
+                "checkout-ui",
+                source_type="opendesign",
+                source_artifacts="design/opendesign/DESIGN.md",
+                generated_by="Open Design",
+                model_capability="text-only",
+            )
+        )
+        self.assertTrue(path.exists())
+        self.assertEqual(
+            path,
+            self.project / ".agents" / "specs" / "checkout-ui" / "ui-design-contract.md",
+        )
+        content = path.read_text(encoding="utf-8")
+        self.assertIn("Source type: opendesign", content)
+        self.assertIn("Source artifacts: design/opendesign/DESIGN.md", content)
+        self.assertIn("Model capability: text-only", content)
+        self.assertIn("## Project UI Constraints", content)
+        self.assertIn("外部设计工具不得覆盖这些约束", content)
+        self.assertIn("## Design Revision", content)
+        self.assertIn("Version: v1", content)
+        self.assertIn("Rollback target", content)
+        self.assertIn("Spec / AC impact", content)
+        self.assertIn("UI-AC1", content)
+
+    def test_create_ui_redesign_contract_records_preserve_replace_boundary(self) -> None:
+        path = Path(
+            create_ui_contract.create_ui_contract(
+                str(self.project),
+                "settings-redesign",
+                redesign=True,
+                source_type="screenshot",
+                source_artifacts="design/current/settings.png",
+            )
+        )
+        self.assertTrue(path.exists())
+        self.assertEqual(
+            path,
+            self.project / ".agents" / "specs" / "settings-redesign" / "ui-redesign-contract.md",
+        )
+        content = path.read_text(encoding="utf-8")
+        self.assertIn("## Design Revision", content)
+        self.assertIn("## Current Behavior To Preserve", content)
+        self.assertIn("## Replace", content)
+        self.assertIn("BEHAVIOR-AC1", content)
+
+    def test_doctor_distinguishes_spec_stale_from_context_stale(self) -> None:
+        # Doctor must report spec-digest and context-digest mismatches with
+        # different commands; spec mismatch uses --force, context mismatch
+        # uses --refresh-context.
+        import doctor_project
+
+        spec_path = self.project / ".agents" / "specs" / "diagnose.md"
+        spec_path.write_text(VALID_SPEC.format(status="spec-ready"), encoding="utf-8")
+        rules_dir = self.project / ".agents" / "rules"
+        (rules_dir / "diag-rule.md").write_text(
+            "> 状态: adopted\n\n# diag rule v1\n",
+            encoding="utf-8",
+        )
+        import generate_plan
+        plan_path = Path(generate_plan.generate_plan(str(self.project), "diagnose"))
+
+        # Mutate the spec to invalidate the spec digest only.
+        spec_path.write_text(
+            VALID_SPEC.format(status="spec-ready").replace(
+                "实现一个边界清晰、可以验收的功能。",
+                    "实现一个边界清晰、可以验收的功能。\n\n额外约束：必须导出 metric A。",
+            ),
+            encoding="utf-8",
+        )
+
+        result = doctor_project.doctor(str(self.project))
+        all_messages = result["issues"] + result["warnings"]
+        self.assertTrue(
+            any("stale plan (spec digest mismatch)" in m for m in all_messages),
+            f"expected spec-stale diagnostic, got {all_messages}",
+        )
+        self.assertTrue(
+            any("--force" in m for m in all_messages),
+            f"expected --force command hint, got {all_messages}",
+        )
+
+        # Now also mutate a rule to invalidate the context digest; the spec
+        # digest is still stale, so both diagnostics must surface, with
+        # --refresh-context as the context-specific command.
+        (rules_dir / "diag-rule.md").write_text(
+            "> 状态: adopted\n\n# diag rule v2\n",
+            encoding="utf-8",
+        )
+        result = doctor_project.doctor(str(self.project))
+        all_messages = result["issues"] + result["warnings"]
+        self.assertTrue(
+            any("stale plan (spec digest mismatch)" in m for m in all_messages),
+            f"expected spec-stale diagnostic, got {all_messages}",
+        )
+        self.assertTrue(
+            any(
+                "stale project guidance" in m and "--refresh-context" in m
+                for m in all_messages
+            ),
+            f"expected context-stale diagnostic with --refresh-context, got {all_messages}",
+        )
+
+    def test_next_recommends_refresh_for_spec_digest_stale(self) -> None:
+        # After the spec is amended (digest moves) but the plan is still the
+        # old one, vibe next must recommend refreshing the plan and surface
+        # the right command.
+        import generate_plan
+        import project_status
+
+        spec_path = self.project / ".agents" / "specs" / "next-stale.md"
+        spec_path.write_text(VALID_SPEC.format(status="spec-ready"), encoding="utf-8")
+        generate_plan.generate_plan(str(self.project), "next-stale")
+
+        # Amend the spec (bump the digest).
+        spec_path.write_text(
+            VALID_SPEC.format(status="spec-ready").replace(
+                "实现一个边界清晰、可以验收的功能。",
+                    "实现一个边界清晰、可以验收的功能。\n\n追加：必须保留现有 feature flag。",
+            ),
+            encoding="utf-8",
+        )
+
+        recommendation = project_status.recommend_next(str(self.project))
+        self.assertIn("刷新实施计划 (规格摘要已过期)", recommendation["action"])
+        self.assertEqual(recommendation["spec"], "next-stale")
+        self.assertIn(
+            "--force", recommendation.get("action_command", "")
+        )
+
+    def test_next_recommends_refresh_for_context_digest_stale(self) -> None:
+        # Same idea, but the project context digest moves.
+        import generate_plan
+        import project_status
+
+        spec_path = self.project / ".agents" / "specs" / "ctx-stale.md"
+        spec_path.write_text(VALID_SPEC.format(status="spec-ready"), encoding="utf-8")
+        rules_dir = self.project / ".agents" / "rules"
+        (rules_dir / "ctx-rule.md").write_text(
+            "> 状态: adopted\n\n# ctx rule v1\n",
+            encoding="utf-8",
+        )
+        generate_plan.generate_plan(str(self.project), "ctx-stale")
+
+        (rules_dir / "ctx-rule.md").write_text(
+            "> 状态: adopted\n\n# ctx rule v2\n",
+            encoding="utf-8",
+        )
+
+        recommendation = project_status.recommend_next(str(self.project))
+        self.assertIn(
+            "刷新实施计划 (上下文摘要已过期)", recommendation["action"]
+        )
+        self.assertEqual(recommendation["spec"], "ctx-stale")
+        self.assertIn(
+            "--refresh-context", recommendation.get("action_command", "")
+        )
+
+    def test_plan_refresh_context_recovers_stale_digest(self) -> None:
+        # Generate a plan, change project guidance so the context digest moves,
+        # then confirm refresh-plan-context re-stamps the plan with the new
+        # digest and archives the previous file.
+        import generate_plan
+
+        from common import project_context_digest
+
+        spec_path = self.project / ".agents" / "specs" / "refreshable.md"
+        spec_path.write_text(VALID_SPEC.format(status="spec-ready"), encoding="utf-8")
+        rules_dir = self.project / ".agents" / "rules"
+        (rules_dir / "fresh-rule.md").write_text(
+            "> 状态: adopted\n\n# fresh rule v1\n",
+            encoding="utf-8",
+        )
+        plan_path = Path(generate_plan.generate_plan(str(self.project), "refreshable"))
+        self.assertTrue(plan_path.exists())
+        first_content = plan_path.read_text(encoding="utf-8")
+        first_digest = project_context_digest(str(self.project))
+        self.assertIn(f"上下文摘要: {first_digest}", first_content)
+
+        # Mutate adopted rule; the digest must change.
+        (rules_dir / "fresh-rule.md").write_text(
+            "> 状态: adopted\n\n# fresh rule v2\n",
+            encoding="utf-8",
+        )
+        second_digest = project_context_digest(str(self.project))
+        self.assertNotEqual(first_digest, second_digest)
+
+        refresh_result = generate_plan.refresh_plan_context(
+            str(self.project), "refreshable"
+        )
+        self.assertIsNotNone(refresh_result)
+        self.assertEqual(str(plan_path), refresh_result)
+        archive_dir = self.project / ".agents" / "archive" / "refreshable" / "plans"
+        self.assertTrue(archive_dir.exists())
+        self.assertTrue(any(archive_dir.iterdir()))
+        refreshed = plan_path.read_text(encoding="utf-8")
+        self.assertIn(f"上下文摘要: {second_digest}", refreshed)
+        self.assertNotIn(first_digest, refreshed)
+
+    def test_opendesign_adapter_reference_is_routed_from_skill(self) -> None:
+        skill = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
+        reference_path = SKILL_DIR / "references" / "adapters" / "opendesign.md"
+        reference = reference_path.read_text(encoding="utf-8")
+
+        self.assertIn("references/adapters/opendesign.md", skill)
+        self.assertIn("Open Design Adapter Reference", reference)
+        self.assertIn("Project UI Constraints", reference)
+        self.assertIn("od://app/api/health", reference)
+
 class VibeCliTests(unittest.TestCase):
     """Tests for the vibe CLI entry point."""
 
@@ -2725,8 +2938,42 @@ class VibeCliTests(unittest.TestCase):
     def test_cli_help_shows_commands(self) -> None:
         result = self._cli("--help")
         self.assertEqual(result.returncode, 0, msg=self._combined(result))
-        for cmd in ("spec", "plan", "status", "review", "advance", "evidence"):
+        for cmd in (
+            "spec", "plan", "status", "review", "advance", "evidence",
+            "ui-contract", "ui-redesign-contract",
+        ):
             self.assertIn(cmd, result.stdout, f"help missing command: {cmd}")
+
+    def test_cli_ui_contract_commands(self) -> None:
+        result = self._cli(
+            "ui-contract",
+            "profile-ui",
+            "--source-type", "opendesign",
+            "--source-artifacts", "design/opendesign/DESIGN.md",
+            "--generated-by", "Open Design",
+            "--model-capability", "text-only",
+        )
+        self.assertEqual(result.returncode, 0, msg=self._combined(result))
+        contract = (
+            self.project
+            / ".agents"
+            / "specs"
+            / "profile-ui"
+            / "ui-design-contract.md"
+        )
+        self.assertTrue(contract.exists())
+        self.assertIn("Source type: opendesign", contract.read_text(encoding="utf-8"))
+
+        result = self._cli("ui-redesign-contract", "profile-redesign")
+        self.assertEqual(result.returncode, 0, msg=self._combined(result))
+        redesign = (
+            self.project
+            / ".agents"
+            / "specs"
+            / "profile-redesign"
+            / "ui-redesign-contract.md"
+        )
+        self.assertTrue(redesign.exists())
 
     def test_cli_missing_skill_script_gives_clear_error(self) -> None:
         import shutil

@@ -85,6 +85,21 @@ def main() -> None:
         command.add_argument("spec_name")
         if name == "review":
             command.add_argument("--reviewer", default="")
+        if name == "plan":
+            command.add_argument(
+                "--force",
+                action="store_true",
+                help="Overwrite an existing plan",
+            )
+            command.add_argument(
+                "--refresh-context",
+                action="store_true",
+                help=(
+                    "Refresh an existing plan's spec and project-context "
+                    "digests after adopted rules, AGENTS.md, or other "
+                    "project guidance change; archives the previous plan."
+                ),
+            )
 
     for name in ("ui-contract", "ui-redesign-contract"):
         command = sub.add_parser(name)
@@ -264,7 +279,14 @@ def main() -> None:
             args.regression_from,
         )
     elif args.operation == "plan":
-        generate_plan.generate_plan(root, args.spec_name)
+        if getattr(args, "refresh_context", False):
+            result = generate_plan.refresh_plan_context(root, args.spec_name)
+        else:
+            result = generate_plan.generate_plan(
+                root, args.spec_name, force=getattr(args, "force", False)
+            )
+        if not result:
+            raise SystemExit(1)
     elif args.operation == "prompt":
         generate_prompt.generate_and_save(root, args.spec_name)
     elif args.operation == "review":

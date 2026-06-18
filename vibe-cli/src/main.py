@@ -85,6 +85,11 @@ def main():
     # plan
     p_plan = sub.add_parser("plan", help="从规格生成实施计划")
     p_plan.add_argument("spec_name", help="规格名称（不含 .md）")
+    p_plan.add_argument(
+        "--refresh-context",
+        action="store_true",
+        help="刷新现有 plan 的 spec 与项目上下文摘要 (adopted rules / AGENTS.md 变动后使用)",
+    )
 
     # prompt
     p_prompt = sub.add_parser("prompt", help="为规格生成实现 Agent Prompt")
@@ -99,6 +104,27 @@ def main():
     p_review = sub.add_parser("review", help="生成独立审查上下文")
     p_review.add_argument("spec_name", help="关联的规格名称（不含 .md）")
     p_review.add_argument("--reviewer", default="", help="审查人")
+
+    for command_name, help_text in (
+        ("ui-contract", "为 UI 需求生成治理化设计合同"),
+        ("ui-redesign-contract", "为老项目 UI 重设计生成保留/替换边界合同"),
+    ):
+        p_ui = sub.add_parser(command_name, help=help_text)
+        p_ui.add_argument("spec_name", help="关联的规格名称（不含 .md）")
+        p_ui.add_argument(
+            "--source-type",
+            default="manual",
+            choices=["figma", "manual", "mixed", "opendesign", "other", "penpot", "screenshot"],
+            help="设计来源类型",
+        )
+        p_ui.add_argument("--source-artifacts", default="", help="设计产物路径、链接或说明")
+        p_ui.add_argument("--generated-by", default="", help="设计来源工具、Agent 或人工来源")
+        p_ui.add_argument(
+            "--model-capability",
+            default="unknown",
+            choices=["mixed", "multimodal", "text-only", "unknown"],
+            help="后续实现模型能力",
+        )
 
     p_retro = sub.add_parser("retro", help="为已完成规格创建回顾")
     p_retro.add_argument("spec_name", help="关联的规格名称（不含 .md）")
@@ -238,7 +264,10 @@ def main():
             print("📭 暂无功能规格。使用 vibe spec <名称> 创建。")
 
     elif args.command == "plan":
-        run_skill(["plan", project_root, args.spec_name], project_root)
+        command = ["plan", project_root, args.spec_name]
+        if getattr(args, "refresh_context", False):
+            command.append("--refresh-context")
+        run_skill(command, project_root)
 
     elif args.command == "prompt":
         run_skill(["prompt", project_root, args.spec_name], project_root)
@@ -254,6 +283,20 @@ def main():
         command = ["review", project_root, args.spec_name]
         if args.reviewer:
             command.extend(["--reviewer", args.reviewer])
+        run_skill(command, project_root)
+
+    elif args.command in {"ui-contract", "ui-redesign-contract"}:
+        command = [
+            args.command,
+            project_root,
+            args.spec_name,
+            "--source-type", args.source_type,
+            "--model-capability", args.model_capability,
+        ]
+        if args.source_artifacts:
+            command.extend(["--source-artifacts", args.source_artifacts])
+        if args.generated_by:
+            command.extend(["--generated-by", args.generated_by])
         run_skill(command, project_root)
 
     elif args.command == "retro":

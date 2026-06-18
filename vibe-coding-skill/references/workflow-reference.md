@@ -197,7 +197,7 @@ python3 scripts/validate_spec.py <project_root> --all       # validate all specs
 ```
 Checks for placeholder text, missing sections, empty acceptance criteria. Returns pass/fail. **Run this before every `generate_prompt.py` call.**
 
-**`scripts/set_status.py`** — Update spec status without editing markdown:
+**`scripts/set_status.py`** — Update spec status without editing markdown. This is the underlying implementation behind the user-facing `vibe advance` command; both are valid, but prefer the dispatcher for new scripts.
 ```bash
 python3 scripts/set_status.py <project_root> <spec_name>              # show current
 python3 scripts/set_status.py <project_root> <spec_name> spec-ready   # update
@@ -224,6 +224,104 @@ python3 scripts/confirm_risk.py <project_root> <spec_name> medium \
 ```
 Risk increases and reductions both require a reason. The Skill enforces the
 decision record; it does not infer the project's correct risk.
+
+### UI Design Contracts
+
+**`scripts/create_ui_contract.py`** — Create a project-local UI contract draft
+from an external design source, screenshot, generated prototype, or manual
+brief:
+```bash
+python3 scripts/create_ui_contract.py <project_root> <spec_name> \
+  --source-type opendesign \
+  --source-artifacts design/opendesign/DESIGN.md \
+  --generated-by "Open Design" \
+  --model-capability text-only
+```
+
+For existing UI redesign work, create the stricter preserve/replace contract:
+```bash
+python3 scripts/create_ui_contract.py <project_root> <spec_name> \
+  --redesign \
+  --source-type opendesign \
+  --source-artifacts design/opendesign/
+```
+
+The dispatcher exposes these as:
+```bash
+python3 scripts/vibe.py ui-contract <project_root> <spec_name>
+python3 scripts/vibe.py ui-redesign-contract <project_root> <spec_name>
+```
+
+Use these contracts to convert tool outputs into source artifacts, layout,
+component mapping, states, accessibility expectations, numbered `UI-AC`
+clauses, and evidence plans. Do not treat generated screenshots, HTML, or
+design-tool exports as accepted requirements unless the relevant promises are
+mapped into the contract and later verified with evidence.
+
+Adapter names are not style names. Do not infer that Open Design, Penpot,
+Figma, screenshots, or another source implies a specific component system,
+visual language, animation behavior, icon strategy, shadow model, or design
+system. Read project-local guidance first and record any visual prohibitions or
+design constraints in the contract's `Project UI Constraints` section. If the
+source artifact conflicts with AGENTS.md or adopted project rules, the project
+constraint wins and the conflict must be resolved before implementation.
+
+For a new project with a user-visible UI, surface this design-first path before
+the first implementation spec:
+
+1. Clarify product intent and target user task.
+2. Identify primary flows and first screens/routes.
+3. Decide whether to use a project-local design adapter such as Open Design,
+   Penpot, Figma, screenshots, or a manual brief.
+4. Create a UI Design Contract when visual structure, states, accessibility, or
+   acceptance criteria need to survive into implementation.
+5. Create the implementation spec from the contract and map UI promises to
+   `UI-AC` clauses.
+
+This is an early workflow prompt, not a mandatory artifact for every project.
+If the user chooses a code-first spike or the project is non-UI, record that
+tradeoff in the intent or spec and continue through the normal workflow.
+
+When iterating on an existing UI design, treat the request as versioned even if
+the user only says "continue iterating" and does not explicitly say "do not
+overwrite." Do not overwrite the previous contract or source artifacts without
+preserving history. Create a new contract version, archive the replaced
+contract, or append a design revision section that records:
+
+- baseline version or source artifact
+- new stable version ID (`v2`, `v3`, or project-defined equivalent)
+- changed items
+- preserved items
+- abandoned items
+- rollback target: the prior contract/source artifact or archive path that can
+  restore the previous design version
+- affected `UI-AC` or behavior AC
+- spec/plan/implementation impact
+- updated visual or behavior evidence needs
+
+If the design revision changes a spec that is already planned, in progress,
+under review, or released, use `vibe amend` or create a follow-up spec. Do not
+silently mutate design guidance that downstream implementation or evidence was
+already bound to.
+
+Suggested natural-language trigger:
+
+```text
+Vibe，基于当前 UI Design Contract 继续迭代一版设计。
+```
+
+
+## Refresh a plan after rules or context change
+
+Plans are bound to a `规格摘要` (spec digest) and a `上下文摘要` (project-context digest). Editing any adopted rule, `AGENTS.md`, or checklist file invalidates the context digest. `vibe doctor` will report the plan as using stale project guidance. Refresh without rewriting the whole plan:
+
+```bash
+python3 scripts/vibe.py plan <project_root> <spec_name> --refresh-context
+# or via the outer CLI:
+vibe plan <spec_name> --refresh-context
+```
+
+The previous plan is archived under `.agents/archive/<spec>/plans/`. This is the recommended way to keep plans, evidence, and reviews consistent after project guidance changes.
 
 ### Verification
 
@@ -408,7 +506,7 @@ Identifies project-level checklist items (`.agents/checklists/custom.md`) and au
 4. Run `self_prune.py --dry-run` to preview removals
 5. Run `self_upgrade.py --apply --prune` to add + remove in one pass
 6. Before each `generate_prompt.py`, run `validate_spec.py` to catch placeholders
-7. Update spec status with `set_status.py` as work progresses
+7. Update spec status with `vibe advance` (or the underlying `scripts/set_status.py`) as work progresses
 8. Project accumulates its own knowledge; skill stays as the universal baseline
 9. If a pattern repeats across 3+ projects, manually promote it to the skill
 
@@ -430,6 +528,17 @@ Identifies project-level checklist items (`.agents/checklists/custom.md`) and au
 12. Never auto-promote a single project's learning into the Skill.
 13. Keep generated rules inactive until a project owner adopts them.
 14. Reconfirm risk after requirement amendments before implementation resumes.
+15. Treat external UI design tools as adapters; convert their output into
+    project-local contracts, acceptance criteria, and evidence mapping before
+    implementation or acceptance.
+16. For new user-visible UI projects, prompt for product/UX/UI design guidance
+    before the first implementation spec; allow explicit code-first or non-UI
+    opt-outs with the tradeoff recorded.
+17. Do not infer a design adapter as a visual style; project-local UI
+    constraints and prohibitions outrank adapter defaults.
+18. Version UI design iterations by default; record baseline, stable version
+    ID, rollback target, changes, preserved and abandoned decisions, affected
+    acceptance criteria, and evidence updates.
 
 ## Phase Checklists
 

@@ -260,6 +260,51 @@ artifacts merely because a template exists.
     code vendor model names. Concrete model mappings belong in project-local
     or user-local configuration and must remain advisory; they are cost and
     workflow guidance, not status gates.
+40. **External UI design tools are adapters, not acceptance sources**: When a
+    UI spec uses output from a design tool, screenshot, generated prototype,
+    or manual visual brief, the Agent must convert that source into a
+    project-local UI Design Contract or UI Redesign Contract before treating
+    it as implementation guidance. Screenshots, generated HTML, and tool
+    exports may be references or evidence, but they are not sufficient as the
+    only requirement or acceptance source. The contract must record source
+    artifacts, model capability, layout, component mapping, states,
+    accessibility expectations, numbered `UI-AC` clauses, and an evidence
+    plan. For redesign work, it must also declare preserve/replace boundaries
+    and behavior regression risks. Tool-specific setup and credentials remain
+    project-local or user-local; the Skill core only governs contracts, gates,
+    and evidence mapping. A design adapter name must not be inferred as a
+    visual style, component system, animation model, icon strategy, or design
+    system. Project-local rules and AGENTS.md constraints outrank adapter
+    defaults or model assumptions; if the project forbids a visual pattern,
+    the contract must record that constraint and the design source must be
+    interpreted within it.
+41. **New UI projects should be design-guided before first implementation**:
+    When initializing or creating the first implementation spec for a new
+    project that has a user-visible UI, the Agent must surface a design-first
+    path before coding: clarify product intent, primary user flows, screen or
+    route structure, key UI states, and whether a UI Design Contract should be
+    created. If the user names a design adapter such as Open Design, Penpot,
+    Figma, screenshot, or manual brief, follow Rule 40 and convert that source
+    into the project-local contract. This is an early workflow prompt, not a
+    universal hard gate: if the user explicitly chooses a code-first spike or
+    the project is non-UI, proceed with the normal workflow and record the
+    tradeoff in the spec or intent.
+42. **UI design iteration must be versioned, not overwritten**: Any request to
+    iterate, refine, adjust, redesign, or continue from an existing UI design
+    must be treated as a versioned design revision even if the user does not
+    explicitly say "do not overwrite." When a UI Design Contract, UI Redesign
+    Contract, design source, or visual direction is revised after an earlier
+    version exists, the Agent must preserve the prior version or archive it
+    before writing the new one. Each version must have a stable version ID
+    such as `v1`, `v2`, or a project-defined equivalent, and the project must
+    retain enough prior contract/source artifact history to roll back to a
+    previous design version. The revised contract or amendment must record the
+    baseline version, changed items, preserved items, abandoned items,
+    rollback target, affected `UI-AC` or behavior acceptance criteria,
+    implementation/spec impact, and updated evidence needs. If the design
+    change affects a spec that is already planned, in progress, under review,
+    or released, the Agent must use the normal requirement amendment or
+    follow-up spec flow rather than silently changing design guidance.
 
 ## State Model
 
@@ -339,6 +384,12 @@ guidance when the next action is already clear.
 Read [references/user-guide.md](references/user-guide.md) when the user asks
 what they can say to the Skill, forgets available triggers, or needs a quick
 reference for natural-language commands.
+
+Read [references/adapters/opendesign.md](references/adapters/opendesign.md)
+when the user explicitly asks to use Open Design, asks how to set up Open
+Design, or provides Open Design artifacts as a UI design source. Treat the file
+as adapter usage guidance only; Rule 40 still governs project constraints,
+contracts, gates, and evidence mapping.
 
 Run `doctor` before resuming an old or migrated workflow. Use migration rather
 than inventing missing project decisions. Keep the Skill baseline generic and

@@ -99,10 +99,19 @@ def doctor(project_root: str) -> dict:
             if os.path.exists(plan):
                 with open(plan, encoding="utf-8") as handle:
                     plan_content = handle.read()
-                if f"规格摘要: {spec_digest(content)}" not in plan_content:
-                    issues.append(f"{name}: stale plan")
-                if f"上下文摘要: {project_context_digest(project_root)}" not in plan_content:
-                    issues.append(f"{name}: plan uses stale project guidance")
+                spec_digest_value = spec_digest(content)
+                context_digest_value = project_context_digest(project_root)
+                if f"规格摘要: {spec_digest_value}" not in plan_content:
+                    issues.append(
+                        f"{name}: stale plan (spec digest mismatch); "
+                        "regenerate or run "
+                        "`vibe plan <project_root> <spec> --force`"
+                    )
+                if f"上下文摘要: {context_digest_value}" not in plan_content:
+                    warnings.append(
+                        f"{name}: plan uses stale project guidance; "
+                        "run `vibe plan <project_root> <spec> --refresh-context`"
+                    )
 
     rules_dir = os.path.join(project_root, ".agents", "rules")
     if os.path.exists(rules_dir):

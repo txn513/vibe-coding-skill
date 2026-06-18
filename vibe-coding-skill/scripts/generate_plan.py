@@ -109,6 +109,34 @@ if __name__ == "__main__":
     p.add_argument("project_root", help="Project root directory")
     p.add_argument("spec_name", help="Spec name (without .md)")
     p.add_argument("--force", action="store_true", help="Overwrite an existing plan")
+    p.add_argument(
+        "--refresh-context",
+        action="store_true",
+        help=(
+            "Refresh an existing plan's context digest and spec digest "
+            "after adopted rules or other project guidance change; keeps the "
+            "same plan file and archives the previous version."
+        ),
+    )
     args = p.parse_args()
     result = generate_plan(os.path.abspath(args.project_root), args.spec_name, args.force)
+    if getattr(args, "refresh_context", False):
+        result = refresh_plan_context(
+            os.path.abspath(args.project_root), args.spec_name
+        )
     sys.exit(0 if result else 1)
+
+
+def refresh_plan_context(project_root: str, spec_name: str) -> str | None:
+    """Re-render an existing plan with fresh spec and project-context digests.
+
+    The plan file must already exist; the previous version is archived. Use this
+    after editing adopted rules, AGENTS.md, or other project guidance that the
+    plan binds to. Doctor will surface a stale-context warning if you skip this.
+    """
+    spec_name = validate_artifact_name(spec_name, "规格名称")
+    plan_file = os.path.join(project_root, ".agents", "plans", f"{spec_name}.md")
+    if not os.path.exists(plan_file):
+        print(f"❌ 实施计划不存在，请先运行 plan 生成: {plan_file}")
+        return None
+    return generate_plan(project_root, spec_name, force=True)

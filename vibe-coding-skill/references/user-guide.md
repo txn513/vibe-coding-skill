@@ -140,6 +140,8 @@ vibe ui-redesign-contract <spec> --source-type opendesign --source-artifacts des
 | 想查看某个 spec 的审查记录 | `看一下 xxx 的审查` |
 | 想查看某个 spec 的证据链 | `看一下 xxx 的证据` |
 | 上下文可能过期了 | `刷新上下文`（更新 AGENTS.md） |
+| `刷新 plan 上下文摘要` | 改了 adopted rules 或 AGENTS.md 后，运行 `vibe plan <spec> --refresh-context` |
+| `改了 spec 之后 plan 怎么刷` | 改 spec frontmatter / 内容后，运行 `vibe plan <spec> --force`；`vibe next` 会按 stale 类型推荐命令 |
 | 刚在多个项目间切换 | `下一步做什么` 或 `检查状态`（输出会显示当前绑定的项目路径） |
 | 子 spec 拆分后不知道是否覆盖了原 spec | `核对一下原 spec 的意图`（触发意图对账） |
 | 验证证据不够明确 | `这条证据对应哪条验收标准`（触发条款引用检查） |
