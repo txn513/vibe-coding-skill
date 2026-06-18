@@ -15,6 +15,7 @@ import install_auxiliary
 import create_retro
 import create_intent
 import create_spec
+import create_ui_contract
 import doctor_project
 import generate_plan
 import generate_prompt
@@ -84,6 +85,23 @@ def main() -> None:
         command.add_argument("spec_name")
         if name == "review":
             command.add_argument("--reviewer", default="")
+
+    for name in ("ui-contract", "ui-redesign-contract"):
+        command = sub.add_parser(name)
+        command.add_argument("project_root")
+        command.add_argument("spec_name")
+        command.add_argument(
+            "--source-type",
+            default="manual",
+            choices=sorted(create_ui_contract.SOURCE_TYPES),
+        )
+        command.add_argument("--source-artifacts", default="")
+        command.add_argument("--generated-by", default="")
+        command.add_argument(
+            "--model-capability",
+            default="unknown",
+            choices=sorted(create_ui_contract.MODEL_CAPABILITIES),
+        )
 
     changelog_cmd = sub.add_parser("changelog")
     changelog_cmd.add_argument("project_root")
@@ -172,6 +190,12 @@ def main() -> None:
     policy_resolve.add_argument("--resolution", required=True)
     policy_resolve.add_argument("--accept", action="store_true")
 
+    policy_override = sub.add_parser("policy-override-add")
+    policy_override.add_argument("project_root")
+    policy_override.add_argument("source_id")
+    policy_override.add_argument("--reason", required=True)
+    policy_override.add_argument("--actor", default="")
+
     args = parser.parse_args()
 
     # install-auxiliary: project_root 不需要；直接转发到 install_auxiliary.main()
@@ -241,6 +265,18 @@ def main() -> None:
         generate_prompt.generate_and_save(root, args.spec_name)
     elif args.operation == "review":
         generate_review.generate_review(root, args.spec_name, args.reviewer)
+    elif args.operation in {"ui-contract", "ui-redesign-contract"}:
+        result = create_ui_contract.create_ui_contract(
+            root,
+            args.spec_name,
+            redesign=args.operation == "ui-redesign-contract",
+            source_type=args.source_type,
+            source_artifacts=args.source_artifacts,
+            generated_by=args.generated_by,
+            model_capability=args.model_capability,
+        )
+        if not result:
+            raise SystemExit(1)
     elif args.operation == "changelog":
         generate_changelog.generate_changelog(
             root, args.version, args.force, args.release_group,
@@ -315,6 +351,12 @@ def main() -> None:
             args.conflict_id,
             args.resolution,
             "accepted" if args.accept else "resolved",
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    elif args.operation == "policy-override-add":
+        actor = args.actor.strip() or os.environ.get("USER", "unknown")
+        result = policy_sources.add_override(
+            Path(root), args.source_id, args.reason, actor,
         )
         print(json.dumps(result, ensure_ascii=False, indent=2))
 

@@ -225,7 +225,7 @@ def _audit_policy_sources(
             continue
         if not isinstance(source.get("priority"), int):
             issues.append(f"{source.get('id', '?')}: policy priority must be an integer")
-        if source.get("status") == "missing":
+        if source.get("status") == "missing" and not source.get("manifest_override"):
             warnings.append(f"{source.get('id', '?')}: policy source is missing")
 
     conflicts = manifest.get("conflicts", [])

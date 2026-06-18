@@ -38,7 +38,36 @@
 
 ---
 
-## 三、Bug 修复
+## 三、UI 设计与重设计
+
+| 你说 | Skill 做什么 |
+|---|---|
+| `为这个前端需求生成 UI Design Contract` | 创建 `.agents/specs/<spec>/ui-design-contract.md`，把视觉意图转成可实现、可验收的合同 |
+| `这是新前端项目，先做 UI 设计引导` | 在首个实现 spec 前先澄清产品意图、核心流程、页面结构、UI 状态和是否需要 UI Design Contract |
+| `用 Open Design 为这个新项目探索 UI 方向` | 把 Open Design 作为项目级设计来源，要求输出落到项目本地，再转换成 UI Design Contract |
+| `用 Open Design 先探索 UI，再生成 spec` | 先把 Open Design 输出治理化为 UI Design Contract，再创建对应实现 spec |
+| `Open Design 怎么接入` | 读取 `references/adapters/opendesign.md`，按 daemon/CLI/MCP/API 检查清单接入 |
+| `从 Open Design 结果生成 UI 合同` | 读取或引用 Open Design 产物，整理 source、layout、component map、states、UI-AC 和 evidence plan |
+| `不要把 Open Design 推断成某套 UI 风格` | 明确 Open Design 只是设计来源；AGENTS.md 和项目视觉禁令优先 |
+| `从 Penpot/Figma/截图整理 UI 合同` | 将外部设计工具或截图作为 source artifact，不直接当作验收标准 |
+| `检查这个 UI spec 能不能交给纯文本模型实现` | 检查合同是否包含足够文本信息：tokens、layout、组件映射、状态、UI-AC |
+| `基于当前 UI 设计继续迭代一版` | 自动按 Rule 42 版本化处理，不覆盖旧版；生成 v2/v3 设计修订并记录 changed/preserved/abandoned/rollback/AC impact/evidence update |
+| `这版设计不要覆盖上一版` | 显式提醒版本化处理；必要时触发 amend 或 follow-up spec |
+| `盘点当前项目 UI，准备重设计` | 先整理现有路由、页面、组件、状态、截图和关键路径 |
+| `生成 UI Redesign Contract` | 创建 `.agents/specs/<spec>/ui-redesign-contract.md`，明确 preserve/replace 边界 |
+| `用 Open Design 重设计当前 UI，但保留现有业务流程` | 先要求保留行为边界，再把设计探索转换成 UI Redesign Contract |
+| `验证这个 UI 改动的视觉证据` | 检查截图、录屏、浏览器输出、Storybook capture 或 visual diff 是否映射到 UI-AC |
+
+手动命令示例：
+
+```bash
+vibe ui-contract <spec> --source-type opendesign --source-artifacts design/opendesign/DESIGN.md --model-capability text-only
+vibe ui-redesign-contract <spec> --source-type opendesign --source-artifacts design/opendesign/
+```
+
+---
+
+## 四、Bug 修复
 
 | 你说 | Skill 做什么 |
 |---|---|
@@ -50,7 +79,7 @@
 
 ---
 
-## 四、验收与复盘
+## 五、验收与复盘
 
 | 你说 | Skill 做什么 |
 |---|---|
@@ -63,7 +92,7 @@
 
 ---
 
-## 五、规范与边界
+## 六、规范与边界
 
 | 你说 | Skill 做什么 |
 |---|---|
@@ -73,10 +102,11 @@
 | `补充一下测试规则` | 帮你填写 testing.md 中的待确认项 |
 | `这个功能涉及 fallback，验证一下` | 触发降级链路验证规则 |
 | `这个功能涉及缓存过期，验证一下` | 触发 TTL/过期验证规则 |
+| `这个治理源扫描器不识别, 我手动声明保留` | 跑 `vibe policy-override-add <root> <source_id> --reason "..." --actor <you>`, 把 `manifest_override: true` + reason + actor 写进 manifest + audit.md, doctor 不再报 missing warning |
 
 ---
 
-## 六、多会话协作
+## 七、多会话协作
 
 | 你说 | Skill 做什么 |
 |---|---|
@@ -86,7 +116,7 @@
 
 ---
 
-## 七、Skill 自身
+## 八、Skill 自身
 
 | 你说 | Skill 做什么 |
 |---|---|
@@ -97,7 +127,7 @@
 
 ---
 
-## 八、特殊场景
+## 九、特殊场景
 
 | 场景 | 你说 |
 |---|---|
@@ -114,7 +144,7 @@
 
 ---
 
-## 九、你不需要记的
+## 十、你不需要记的
 
 以下事情 Skill 会自动做，不需要你手动触发：
 
@@ -137,10 +167,13 @@
 - 复盘里的 Bug、失败行为或回归结论必须引用证据，或者标注为未复验历史观察（Rule 37）
 - 创建 spec 后会显示项目规则来源，并立即输出 draft 校验报告（Rule 38）
 - `下一步做什么` 会给出 vendor-neutral 的模型档位建议（lite/standard/strong/review）；具体模型可在项目配置中映射，不配置也能使用（Rule 39）
+- UI 需求使用 Open Design、Penpot、Figma、截图或手写 brief 时，会先转换成项目本地 UI 合同；工具输出不能直接当成唯一需求或验收来源，也不能覆盖 AGENTS.md 或项目视觉禁令（Rule 40）
+- 新的用户可见 UI 项目在首个实现 spec 前，会先提示产品/UX/UI 设计引导；你明确选择 code-first spike 或非 UI 项目时可以跳过（Rule 41）
+- UI 设计反复修改时会自动版本化，不需要你额外说"不要覆盖旧版"；每版有版本号并保留回退目标，影响已计划/实施/验收的 spec 时会走 amend 或 follow-up spec（Rule 42）
 
 ---
 
-## 十、最省心的三句话
+## 十一、最省心的三句话
 
 如果你只记三句，记这三句：
 

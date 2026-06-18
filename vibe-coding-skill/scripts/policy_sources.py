@@ -188,6 +188,8 @@ def _build_review_items(manifest: dict[str, Any]) -> list[dict[str, Any]]:
             continue
         if source.get("id") == "agents-md":
             continue
+        if source.get("manifest_override") is True:
+            continue
         guidance = _review_guidance(source["id"])
         items.append(
             {
@@ -224,7 +226,12 @@ def render_policy_differences(
     missing_sources = [
         source
         for source in manifest.get("sources", [])
-        if source.get("status") == "missing"
+        if source.get("status") == "missing" and not source.get("manifest_override")
+    ]
+    override_sources = [
+        source
+        for source in manifest.get("sources", [])
+        if source.get("manifest_override") is True
     ]
     generated_at = generated_at or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
@@ -238,6 +245,7 @@ def render_policy_differences(
         f"- Pending confirmations: {len(review_items)}",
         f"- Open explicit conflicts: {len(open_conflicts)}",
         f"- Missing previously-seen sources: {len(missing_sources)}",
+        f"- Manifest overrides (explicit): {len(override_sources)}",
         "",
         "## Pending Confirmations",
         "",
@@ -278,6 +286,20 @@ def render_policy_differences(
     else:
         lines.append("- No previously-seen policy sources are currently missing.")
 
+    lines.extend(["", "## Manifest Overrides", ""])
+    if override_sources:
+        for source in override_sources:
+            reason = source.get("override_reason") or "(no reason recorded)"
+            actor = source.get("override_actor") or "(unknown)"
+            lines.append(
+                f"- {source.get('id')}: status={source.get('status')}, detected={source.get('detected')}"
+            )
+            lines.append(f"  - Path: {source.get('path', '')}")
+            lines.append(f"  - Reason: {reason}")
+            lines.append(f"  - Recorded by: {actor}")
+    else:
+        lines.append("- No policy sources currently use manifest_override.")
+
     lines.extend(
         [
             "",
@@ -285,6 +307,7 @@ def render_policy_differences(
             "",
             "- This file records governance differences only; it does not copy business rules.",
             "- Resolve real contradictions through explicit conflicts in `.agents/policy-sources.json`.",
+            "- Sources with `manifest_override: true` bypass automatic scanner detection; see `vibe.py policy-override-add`.",
         ]
     )
     return "\n".join(lines) + "\n"
@@ -413,13 +436,32 @@ def scan_policy_sources(project_root: Path, apply: bool = False) -> dict[str, An
 
     merged: list[dict[str, Any]] = []
     detected_ids = {item["id"] for item in detected}
+    # 检测到的 source: 若 previous 显式 manifest_override=true,保留 previous.status 与 override 元数据
     for item in detected:
         previous = existing.get(item["id"], {})
-        merged.append({**item, **previous, "detected": True})
+        if previous.get("manifest_override") is True:
+            override_meta = {
+                k: previous[k]
+                for k in ("manifest_override", "override_reason", "override_actor", "override_at")
+                if k in previous
+            }
+            merged.append({
+                **item,
+                **override_meta,
+                "detected": True,
+                "status": previous.get("status", item["status"]),
+            })
+        else:
+            merged.append({**item, **previous, "detected": True})
 
+    # 未检测到的 source: 若显式 manifest_override=true,保留 previous.status(不再强制 missing);
+    # 否则保持向后兼容行为,标记 missing。
     for source_id, item in existing.items():
         if source_id not in detected_ids:
-            merged.append({**item, "detected": False, "status": "missing"})
+            if item.get("manifest_override") is True:
+                merged.append({**item, "detected": False})
+            else:
+                merged.append({**item, "detected": False, "status": "missing"})
 
     result = {
         "schema_version": POLICY_SCHEMA_VERSION,
@@ -433,6 +475,45 @@ def scan_policy_sources(project_root: Path, apply: bool = False) -> dict[str, An
         atomic_write(difference_report_file(root), render_policy_differences(root, result))
         atomic_write(confirmation_draft_file(root), render_policy_confirmations(root, result))
     return result
+
+
+def add_override(
+    project_root: Path,
+    source_id: str,
+    reason: str,
+    actor: str,
+) -> dict[str, Any]:
+    """Mark a policy source as manifest-overridden.
+
+    The scanner will preserve the source's previous status instead of forcing
+    it back to `missing` when the source path cannot be auto-detected. The
+    override decision is recorded on the source entry plus audit.md so the
+    choice is auditable.
+    """
+    if not reason.strip():
+        raise ValueError("override reason must not be empty")
+    if not actor.strip():
+        raise ValueError("override actor must not be empty")
+
+    root = project_root.resolve()
+    manifest = load_policy_sources(root)
+    sources = manifest.get("sources", [])
+    target = next((s for s in sources if s.get("id") == source_id), None)
+    if target is None:
+        raise ValueError(
+            f"unknown policy source id: {source_id}. "
+            f"Run `vibe.py policy-scan {project_root}` first to register it."
+        )
+
+    target["manifest_override"] = True
+    target["override_reason"] = reason.strip()
+    target["override_actor"] = actor.strip()
+    target["override_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    manifest["review_items"] = _build_review_items(manifest)
+    atomic_write_json(manifest_file(root), manifest)
+    atomic_write(difference_report_file(root), render_policy_differences(root, manifest))
+    atomic_write(confirmation_draft_file(root), render_policy_confirmations(root, manifest))
+    return target
 
 
 def add_conflict(
