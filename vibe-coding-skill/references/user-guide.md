@@ -31,6 +31,7 @@
 | `推进到 review` / `推进到 done` | 推进状态（会先检查门禁） |
 | `跳过检查直接推进` | --force 推进（会记录强制原因） |
 | `记录验证证据：xxx passed` | 记录 verify 阶段的证据 |
+| `记录 evidence 并跑命令验证` | 必须 `--purpose` / `--configured` 放在 `--command` 之前,否则 fail-fast (record_evidence 强制顺序约束, Rule 36) |
 | `通过审查` | 审查通过，推进到 released |
 | `审查不通过，原因是 xxx` | 审查驳回，记录原因 |
 | `生成 changelog` | 为已 released 的 spec 生成变更日志 |
