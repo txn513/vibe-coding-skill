@@ -311,17 +311,26 @@ Vibe，基于当前 UI Design Contract 继续迭代一版设计。
 ```
 
 
-## Refresh a plan after rules or context change
+## Refresh a plan after spec or context change
 
-Plans are bound to a `规格摘要` (spec digest) and a `上下文摘要` (project-context digest). Editing any adopted rule, `AGENTS.md`, or checklist file invalidates the context digest. `vibe doctor` will report the plan as using stale project guidance. Refresh without rewriting the whole plan:
+Plans are bound to two digests and can go stale for different reasons. `vibe doctor` and `vibe next` distinguish them and recommend the matching refresh command:
+
+| What changed                            | Stale digest     | Doctor message                                          | Refresh command                |
+|-----------------------------------------|------------------|---------------------------------------------------------|--------------------------------|
+| Spec frontmatter or body                | `规格摘要` | `stale plan (spec digest mismatch); regenerate or run vibe plan <root> <spec> --force` | `vibe plan <root> <spec> --force`        |
+| adopted rule, `AGENTS.md`, checklist    | `上下文摘要` | `stale project guidance; run ... --refresh-context`     | `vibe plan <root> <spec> --refresh-context` |
+| No plan file yet                        | n/a              | `Plan 缺失`                                              | `vibe plan <root> <spec> --force`        |
+
+Use `--force` when the spec itself changed: the plan's spec digest no longer matches the current spec, so the steps need to be re-bound. Use `--refresh-context` when only project guidance changed: the steps still match the spec, but the captured context digest is out of date.
 
 ```bash
-python3 scripts/vibe.py plan <project_root> <spec_name> --refresh-context
-# or via the outer CLI:
-vibe plan <spec_name> --refresh-context
+# Spec changed (frontmatter, body, status, dependencies, scope, AC)
+vibe plan <root> <spec> --force
+# Project guidance changed (adopted rules, AGENTS.md, checklist)
+vibe plan <root> <spec> --refresh-context
 ```
 
-The previous plan is archived under `.agents/archive/<spec>/plans/`. This is the recommended way to keep plans, evidence, and reviews consistent after project guidance changes.
+The previous plan is archived under `.agents/archive/<spec>/plans/`. After a refresh, re-run `vibe next` to confirm the new plan is bound to the current snapshot before any advance.
 
 ### Verification
 
@@ -402,7 +411,11 @@ python3 scripts/vibe.py next <project_root>
 ```
 `status` shows the overview. `next` returns one prioritized, gate-aware action
 with its reason and blocker. It accounts for dependencies, required plans,
-current evidence, review approval, release/observation gates, and retros.
+current evidence, review approval, release/observation gates, and retros. When a
+plan is stale, `next` classifies the staleness (spec digest vs context digest vs
+missing) and prints the matching refresh command alongside the recommended
+action, so the agent does not advance against a plan that is no longer bound to
+the current snapshot.
 
 **`scripts/refresh_context.py`** — Update AGENTS.md from current codebase state:
 ```bash
