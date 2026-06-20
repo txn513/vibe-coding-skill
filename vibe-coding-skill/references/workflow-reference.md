@@ -389,6 +389,32 @@ python3 scripts/record_review.py <project_root> <spec_name> approved \
 Use this instead of editing the conclusion manually. It writes a recomputable
 decision-integrity marker and the reviewer role used by status gates.
 
+### Risk-based rule readiness
+
+Spec-ready is gated by a project-configured list of required rule stems per
+risk level. The default is empty (no project-level requirement), but projects
+can declare their own list:
+
+```json
+"risk_required_rules": {
+  "high": ["security", "auth"],
+  "medium": ["security"],
+  "low": []
+}
+```
+
+When a spec advances to `spec-ready`, the gate checks every stem listed under
+its risk level: the file `.agents/rules/<stem>.md` must exist and its frontmatter
+status must be `adopted` (not `proposed` or `deprecated`). When the gate fails,
+the spec is held back and the Agent receives one message per missing or
+non-adopted stem, so it can either fill the gap or remove the stem from the
+project's required list. The Skill never assumes a specific filename — the
+project's declared stems are the source of truth.
+
+The Skill never silently infers which rules a project "should" have; it only
+enforces the list the project itself declared. Adding or removing stems is a
+deliberate workflow.json edit, not an automated inference (Rule 15 extension).
+
 ### Maintenance
 
 **`scripts/archive_status.py`** — Find and archive stale `.agents/` artifacts:

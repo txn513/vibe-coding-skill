@@ -37,6 +37,7 @@
 | `证据命令含空格/引号时怎么写` | `--command` 后直接写完整命令即可,CLI 会用 shlex 自动拆分;`--command "node /tmp/x.cjs"` 与 `--command node /tmp/x.cjs` 等价 |
 | `清理 .agents/ 下的陈旧文件` | `vibe archive-stale <project_root>` 预览;加 `--apply` 执行归档到 `.agents/archive/<时间戳>/`(Rule 45) |
 | `spec 卡在某个阶段很久了` | 直接说「`下一步做什么`」或「`检查状态`」;Skill 会按 spec 的 risk 与 stage_stall_sla 显示已经停留多久(Rule 46) |
+| `高风险 spec 进 spec-ready 报缺规则` | 在 `.agents/workflow.json` 的 `risk_required_rules.high` 列表里加上 / 删除对应 stem;然后在 `.agents/rules/<stem>.md` 写规则并标记为 adopted(Rule 15) |
 | `通过审查` | 审查通过，推进到 released |
 | `审查不通过，原因是 xxx` | 审查驳回，记录原因 |
 | `生成 changelog` | 为已 released 的 spec 生成变更日志 |

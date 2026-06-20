@@ -2237,6 +2237,128 @@ class StageStallTests(unittest.TestCase):
         self.assertEqual(project_status.stage_stall_warnings(str(self.project)), [])
 
 
+class RiskRequiredRulesTests(unittest.TestCase):
+    """Cover the spec-ready gate extension that enforces risk_required_rules."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name)
+        init_project.init_project(str(self.project), "web")
+        subprocess.run(["git", "init", "-q", str(self.project)], check=False, capture_output=True)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _write_spec(self, name: str, risk: str = "high") -> Path:
+        path = self.project / ".agents" / "specs" / f"{name}.md"
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        path.write_text(
+            f"# {name}\n\n> 状态: draft | 创建: {now} | 更新: {now}\n> 风险: {risk}\n",
+            encoding="utf-8",
+        )
+        return path
+
+    def _set_required_rules(self, **by_risk: list[str]) -> None:
+        import json as _json
+        wf_path = self.project / ".agents" / "workflow.json"
+        wf = _json.loads(wf_path.read_text(encoding="utf-8"))
+        wf["risk_required_rules"] = by_risk
+        wf_path.write_text(_json.dumps(wf), encoding="utf-8")
+
+    def _write_rule(self, stem: str, status: str = "adopted") -> None:
+        path = self.project / ".agents" / "rules" / f"{stem}.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            f"# {stem}\n\n> 状态: {status}\n\nbody\n",
+            encoding="utf-8",
+        )
+
+    def test_blocks_when_required_rule_missing(self) -> None:
+        self._set_required_rules(high=["security"])
+        self._write_spec("needs-sec")
+        result = set_status.set_status(str(self.project), "needs-sec", "spec-ready")
+        self.assertIsNone(result, "expected spec-ready to be refused")
+        # Re-read the captured stdout is harder, but the returned value None is enough signal.
+        # Advance a second time to confirm the spec was NOT promoted.
+        spec = self.project / ".agents" / "specs" / "needs-sec.md"
+        self.assertIn("draft", spec.read_text(encoding="utf-8"))
+
+    def test_blocks_when_rule_status_is_proposed(self) -> None:
+        self._set_required_rules(high=["security"])
+        self._write_rule("security", status="proposed")
+        self._write_spec("needs-sec")
+        result = set_status.set_status(str(self.project), "needs-sec", "spec-ready")
+        self.assertIsNone(result)
+
+    def test_passes_when_required_rules_are_adopted(self) -> None:
+        self._set_required_rules(high=["security", "auth"])
+        self._write_rule("security", status="adopted")
+        self._write_rule("auth", status="adopted")
+        self._write_spec("hi-feat")
+        # spec should at least reach the validate_spec step. Use a well-formed spec.
+        spec_path = self.project / ".agents" / "specs" / "hi-feat.md"
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        spec_path.write_text(
+            "# hi-feat\n\n> 状态: draft | 创建: " + now + " | 更新: " + now + "\n"
+            "> 风险: high\n"
+            "> 风险确认: confirmed\n\n"
+            "## 意图 (Intent)\n\ntext\n\n"
+            "## 涉及范围\n\n- **新增文件**: none\n- **修改文件**: none\n- **不动文件**: none\n"
+            "- **受影响的读路径**: 无读路径影响 (no read path affected)\n\n"
+            "### 正常路径\n\n"
+            "1. concrete acceptance item\n\n"
+            "## 验收标准\n\n"
+            "- [ ] AC1 body\n"
+            "- [ ] AC2 body\n"
+            "- [ ] AC3 body\n\n"
+            "## 验证方式\n\n"
+            "- [ ] 相关回归测试已新增或更新\n"
+            "- [ ] 关键行为的验证路径已定义\n",
+            encoding="utf-8",
+        )
+        result = set_status.set_status(str(self.project), "hi-feat", "spec-ready")
+        self.assertEqual(result, "spec-ready")
+
+    def test_skips_when_required_list_empty(self) -> None:
+        self._set_required_rules(high=[])
+        self._write_spec("hi-feat", risk="high")
+        # Even with no required rules, the spec must still pass validate_spec.
+        # Build a minimally valid spec.
+        spec_path = self.project / ".agents" / "specs" / "hi-feat.md"
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        spec_path.write_text(
+            "# hi-feat\n\n> 状态: draft | 创建: " + now + " | 更新: " + now + "\n"
+            "> 风险: high\n"
+            "> 风险确认: confirmed\n\n"
+            "## 意图 (Intent)\n\ntext\n\n"
+            "## 涉及范围\n\n- **新增文件**: none\n- **修改文件**: none\n- **不动文件**: none\n"
+            "- **受影响的读路径**: 无读路径影响 (no read path affected)\n\n"
+            "### 正常路径\n\n"
+            "1. concrete acceptance item\n\n"
+            "## 验收标准\n\n"
+            "- [ ] AC1 body\n\n"
+            "## 验证方式\n\n"
+            "- [ ] 相关回归测试已新增或更新\n",
+            encoding="utf-8",
+        )
+        result = set_status.set_status(str(self.project), "hi-feat", "spec-ready")
+        self.assertEqual(result, "spec-ready")
+
+    def test_check_function_lists_all_missing(self) -> None:
+        self._set_required_rules(high=["security", "auth", "pii"])
+        self._write_rule("security", status="adopted")
+        self._write_rule("auth", status="proposed")  # wrong status
+        # pii is missing entirely
+        spec = self._write_spec("hi-feat", risk="high")
+        blockers = set_status._check_risk_required_rules(
+            str(self.project), spec.read_text(encoding="utf-8")
+        )
+        self.assertEqual(len(blockers), 2)
+        joined = " ".join(blockers)
+        self.assertIn("auth", joined)
+        self.assertIn("pii", joined)
+
+
 class InstallAuxiliaryTests(unittest.TestCase):
     """Cover the install-auxiliary command that wires sibling Skills."""
 

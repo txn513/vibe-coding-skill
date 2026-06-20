@@ -133,7 +133,15 @@ artifacts merely because a template exists.
     If the relevant testing rule is still unspecified at either gate, the
     Agent must pause and either record the project-local rule or explicitly
     surface the missing rule as a blocker. The verify gate re-checks the same
-    condition as a second-line defence, not as the first discovery point.
+    condition as a second-line defence, not as the first discovery point. In
+    addition, when the project's `workflow.json` declares
+    `risk_required_rules[<risk>]` (a list of rule stems that the project
+    requires for specs of that risk), the spec-ready gate refuses the
+    transition unless each declared stem exists as an adopted project rule
+    under `.agents/rules/`. The Skill never assumes a specific rule filename
+    such as `security.md`; the project's declared stems are the source of
+    truth, so a project can require `["security"]`, `["auth", "pii"]`, or
+    any other stem that matches its governance model.
 16. During a retrospective triggered inside a project, the Agent must first
     attempt to update the project's own rules, docs, retros, or testing policy
     before proposing a Skill-core change. A Skill update is allowed only for

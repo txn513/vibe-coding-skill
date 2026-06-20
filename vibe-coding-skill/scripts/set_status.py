@@ -19,6 +19,7 @@ from common import (
     command_digest,
     git_snapshot,
     project_context_digest,
+    project_rule_status,
     spec_digest,
     text_digest,
     validate_artifact_name,
@@ -132,6 +133,17 @@ def set_status(
         if validation["errors"] or validation["warnings"]:
             print("❌ 规格尚未达到 spec-ready")
             validate_spec.print_result(validation)
+            return None
+        # Rule 15 extension: high-risk (or any risk with required rules) must
+        # have the rule stems listed in workflow.json.risk_required_rules[risk]
+        # present as adopted project rules before spec-ready is granted.
+        rule_blockers = _check_risk_required_rules(project_root, content)
+        if rule_blockers:
+            print("❌ 高风险 / 项目要求规则的 readiness 未通过:")
+            for blocker in rule_blockers:
+                print(f"   - {blocker}")
+            print("   在 .agents/rules/ 补齐对应 rule 文件并标记为 adopted")
+            print("   (或在 workflow.json.risk_required_rules 里移除该 stem)")
             return None
 
     if new_status == "in-progress" and not force:
@@ -353,6 +365,49 @@ def _has_approved_review(
             ):
                 return True
     return False
+
+
+def _check_risk_required_rules(project_root: str, spec_content: str) -> list[str]:
+    """Return a list of blocking messages when this spec violates risk_required_rules.
+
+    A spec violates risk_required_rules when its risk level is one of
+    {"low", "medium", "high"} AND workflow.json.risk_required_rules[<risk>]
+    contains rule stems that are not present as adopted project rules.
+
+    Returns [] when the spec passes. The function never raises; missing
+    files and unreadable rule stems are surfaced as blocking messages
+    rather than silently passed.
+    """
+    risk_match = re.search(r"^>\s*风险:\s*(\S+)", spec_content, re.MULTILINE)
+    risk = risk_match.group(1).strip().lower() if risk_match else "medium"
+    if risk not in {"low", "medium", "high"}:
+        return []
+    workflow, _ = ensure_workflow(project_root)
+    required = workflow.get("risk_required_rules", {}).get(risk, []) or []
+    if not required:
+        return []
+    rules_dir = os.path.join(project_root, ".agents", "rules")
+    blockers: list[str] = []
+    for stem in required:
+        path = os.path.join(rules_dir, f"{stem}.md")
+        if not os.path.exists(path):
+            blockers.append(
+                f"risk={risk} requires rule file '{stem}.md' under .agents/rules/, "
+                "but it does not exist"
+            )
+            continue
+        try:
+            with open(path, encoding="utf-8") as handle:
+                status = project_rule_status(handle.read())
+        except OSError:
+            blockers.append(f"rule file '{stem}.md' exists but could not be read")
+            continue
+        if status != "adopted":
+            blockers.append(
+                f"risk={risk} requires rule '{stem}.md' to be adopted, "
+                f"but its current status is '{status}'"
+            )
+    return blockers
 
 
 def _record_override(
