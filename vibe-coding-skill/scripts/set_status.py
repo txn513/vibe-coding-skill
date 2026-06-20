@@ -376,6 +376,19 @@ def _record_override(
     atomic_write(audit_file, content + entry)
 
 
+def _allowed_result_for_purpose(purpose: str) -> str:
+    """Result values accepted by the evidence frontmatter for a given purpose.
+
+    Standard and fix-regression demand the change worked (`passed` or
+    `not-applicable`). Reproduction additionally accepts `failed` because the
+    point of reproduction evidence is to prove the bug exists, which by
+    definition means the command exits non-zero.
+    """
+    if purpose == "reproduction":
+        return "passed|failed|not-applicable"
+    return "passed|not-applicable"
+
+
 def _has_current_evidence(
     project_root: str,
     spec_name: str,
@@ -439,7 +452,7 @@ def _has_current_evidence(
         and f"规格摘要: {expected_digest}" in evidence
         and f"阶段: {phase}" in evidence
         and f"用途: {purpose}" in evidence
-        and re.search(r"\|\s*结果:\s*(?:passed|not-applicable)\s*$", evidence, re.MULTILINE)
+        and re.search(rf"\|\s*结果:\s*(?:{_allowed_result_for_purpose(purpose)})\s*$", evidence, re.MULTILINE)
         and context_ok
         and snapshot_ok
         and clean_ok

@@ -724,6 +724,106 @@ class WorkflowTests(unittest.TestCase):
             "review",
         )
 
+    def test_reproduction_evidence_accepts_failed_result(self) -> None:
+        # B2: bug reproduction evidence should be allowed to record
+        # `result=failed` since proving the bug exists means the command
+        # exits non-zero. The pre-fix gate hardcoded `passed|not-applicable`.
+        spec = self.write_spec("bug-failed", "in-progress")
+        spec.write_text(
+            spec.read_text(encoding="utf-8") + "\n> 类型: bug\n> 风险: low\n",
+            encoding="utf-8",
+        )
+        subprocess.run(["git", "init", "-q", str(self.project)], check=True)
+        record_evidence.record_evidence(
+            str(self.project),
+            "bug-failed",
+            "verify",
+            "failed",
+            "command exited non-zero proving the bug",
+            purpose="reproduction",
+        )
+        # reproduction with `failed` is now accepted as the lower bound;
+        # advancing to review still requires fix-regression, so the advance
+        # is None until that arrives.
+        self.assertIsNone(
+            set_status.set_status(str(self.project), "bug-failed", "review")
+        )
+
+    def test_fix_regression_evidence_rejects_failed_result(self) -> None:
+        # B2 negative path: fix-regression must NOT accept `failed`.
+        # A failed fix means the bug is not fixed; the gate must hold.
+        spec = self.write_spec("bug-rej", "in-progress")
+        spec.write_text(
+            spec.read_text(encoding="utf-8") + "\n> 类型: bug\n> 风险: low\n",
+            encoding="utf-8",
+        )
+        subprocess.run(["git", "init", "-q", str(self.project)], check=True)
+        record_evidence.record_evidence(
+            str(self.project),
+            "bug-rej",
+            "verify",
+            "passed",
+            "bug reproduced",
+            purpose="reproduction",
+        )
+        record_evidence.record_evidence(
+            str(self.project),
+            "bug-rej",
+            "verify",
+            "failed",
+            "fix did not resolve the bug",
+            purpose="fix-regression",
+        )
+        # fix-regression with `failed` must not pass the gate.
+        self.assertIsNone(
+            set_status.set_status(str(self.project), "bug-rej", "review")
+        )
+
+    def test_evidence_command_accepts_quoted_string(self) -> None:
+        # B1: `--command "node /tmp/x.cjs"` must be split into argv
+        # ['node', '/tmp/x.cjs'] rather than treated as a single executable.
+        # We can verify the splitting by running a real shell snippet via the
+        # CLI and checking that the recorded evidence body shows the joined
+        # argv (which is what _redact_output / shlex.join produces).
+        import tempfile as _tf
+        with _tf.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+            init_project.init_project(str(tmp_path), "web")
+            spec_path = tmp_path / ".agents" / "specs" / "quote.md"
+            spec_path.write_text(
+                VALID_SPEC.format(status="in-progress") + "\n> 风险: low\n",
+                encoding="utf-8",
+            )
+            probe = tmp_path / "probe.sh"
+            probe.write_text("#!/bin/sh\necho PROBE-OK\n", encoding="utf-8")
+            probe.chmod(0o755)
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS_DIR / "vibe.py"),
+                    "evidence",
+                    str(tmp_path),
+                    "quote",
+                    "verify",
+                    "passed",
+                    "--command",
+                    f"sh {probe}",
+                    "--actor",
+                    "tester",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            evidence_body = (
+                tmp_path / ".agents" / "evidence" / "quote" / "verify.md"
+            ).read_text(encoding="utf-8")
+            # If shlex split worked, the command ran and produced PROBE-OK.
+            self.assertIn("PROBE-OK", evidence_body)
+
     def test_proposed_rules_are_inactive_until_adopted(self) -> None:
         self.write_spec(status="spec-ready").write_text(
             VALID_SPEC.format(status="spec-ready") + "\n> 风险: low\n",

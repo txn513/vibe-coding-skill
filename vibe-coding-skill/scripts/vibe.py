@@ -26,6 +26,7 @@ import manage_specs
 import migrate_project
 import policy_sources
 import project_status
+import shlex
 import record_evidence
 import record_review
 import refresh_context
@@ -347,9 +348,16 @@ def main() -> None:
                 "vibe evidence options must appear before --command: "
                 + ", ".join(misplaced)
             )
+        # argparse.REMAINDER keeps quoted strings as one token. Resplit with
+        # shlex so a quoted command such as `node /tmp/x.cjs` becomes the
+        # argv list ['node', '/tmp/x.cjs']. If the user already passed an
+        # unquoted argv, joining then splitting is a no-op.
+        exec_command = None
+        if args.exec_command:
+            exec_command = shlex.split(" ".join(args.exec_command))
         result = record_evidence.record_evidence(
             root, args.spec_name, args.phase, args.result, args.description,
-            args.actor, args.role, args.exec_command,
+            args.actor, args.role, exec_command,
             args.configured, args.purpose,
         )
         if result is None:
