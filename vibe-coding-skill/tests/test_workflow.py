@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import ast
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import contextlib
 import io
 import json
@@ -2143,6 +2143,98 @@ class PostVerifyHintTests(unittest.TestCase):
         # record_evidence may return None or raise on failed-without-command;
         # either way the stdout should not contain the "verify passed" hint.
         self.assertNotIn("不会自动推进", completed.stdout)
+
+
+class StageStallTests(unittest.TestCase):
+    """Cover stage-stall warnings parsed from .agents/activity.md."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name)
+        init_project.init_project(str(self.project), "web")
+        subprocess.run(["git", "init", "-q", str(self.project)], check=False, capture_output=True)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _write_spec(self, name: str, risk: str) -> Path:
+        path = self.project / ".agents" / "specs" / f"{name}.md"
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        path.write_text(
+            f"# {name}\n\n> 状态: in-progress | 创建: {now} | 更新: {now}\n> 风险: {risk}\n",
+            encoding="utf-8",
+        )
+        return path
+
+    def _write_activity(self, spec: str, target_status: str, when: str) -> None:
+        path = self.project / ".agents" / "activity.md"
+        path.write_text(
+            "# Workflow Activity\n\n"
+            f"- **{when}** `{spec}`: `spec-ready` \u2192 `{target_status}` | Actor: t | Role: b\n",
+            encoding="utf-8",
+        )
+
+    def _capture(self, func, *args, **kwargs) -> str:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            func(*args, **kwargs)
+        return buf.getvalue()
+
+    def test_warns_when_high_risk_spec_exceeds_sla(self) -> None:
+        # high-risk SLA default = 8h; pretend the entry was 9h ago.
+        self._write_spec("stuck-hi", "high")
+        nine_hours_ago = (datetime.now(timezone.utc) - timedelta(hours=9)).strftime("%Y-%m-%d %H:%M UTC")
+        self._write_activity("stuck-hi", "in-progress", nine_hours_ago)
+        warnings = project_status.stage_stall_warnings(str(self.project))
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("stuck-hi", warnings[0])
+        self.assertIn("high-risk", warnings[0])
+        self.assertIn("9h", warnings[0])
+
+    def test_silent_when_within_sla(self) -> None:
+        self._write_spec("ok-med", "medium")
+        one_hour_ago = (datetime.now(timezone.utc) - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M UTC")
+        self._write_activity("ok-med", "in-progress", one_hour_ago)
+        self.assertEqual(project_status.stage_stall_warnings(str(self.project)), [])
+
+    def test_silent_when_no_activity_entry(self) -> None:
+        # Spec exists but never had a status change recorded.
+        self._write_spec("no-act", "medium")
+        self.assertEqual(project_status.stage_stall_warnings(str(self.project)), [])
+
+    def test_threshold_is_project_configurable(self) -> None:
+        # Default medium SLA = 24h. Tighten to 1h and re-test with a 2h-old entry.
+        import json as _json
+        wf_path = self.project / ".agents" / "workflow.json"
+        wf = _json.loads(wf_path.read_text(encoding="utf-8"))
+        wf["stage_stall_sla"]["medium_hours"] = 1
+        wf_path.write_text(_json.dumps(wf), encoding="utf-8")
+        self._write_spec("tight-med", "medium")
+        two_hours_ago = (datetime.now(timezone.utc) - timedelta(hours=2)).strftime("%Y-%m-%d %H:%M UTC")
+        self._write_activity("tight-med", "in-progress", two_hours_ago)
+        warnings = project_status.stage_stall_warnings(str(self.project))
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("tight-med", warnings[0])
+
+    def test_status_output_includes_stall_section(self) -> None:
+        self._write_spec("status-stall", "high")
+        nine_hours_ago = (datetime.now(timezone.utc) - timedelta(hours=9)).strftime("%Y-%m-%d %H:%M UTC")
+        self._write_activity("status-stall", "in-progress", nine_hours_ago)
+        output = self._capture(project_status.project_status, str(self.project))
+        self.assertIn("Stage-stall", output)
+        self.assertIn("status-stall", output)
+
+    def test_terminal_statuses_are_skipped(self) -> None:
+        # done specs are never warned about regardless of age.
+        spec = self._write_spec("done-spec", "high")
+        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        spec.write_text(
+            f"# done-spec\n\n> 状态: done | 创建: {now_str} | 更新: {now_str}\n> 风险: high\n",
+            encoding="utf-8",
+        )
+        very_old = (datetime.now(timezone.utc) - timedelta(days=10)).strftime("%Y-%m-%d %H:%M UTC")
+        self._write_activity("done-spec", "done", very_old)
+        self.assertEqual(project_status.stage_stall_warnings(str(self.project)), [])
 
 
 class InstallAuxiliaryTests(unittest.TestCase):

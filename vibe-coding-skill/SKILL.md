@@ -347,6 +347,17 @@ artifacts merely because a template exists.
     artifacts land in `.agents/archive/<UTC-timestamp>/<original-relative-path>`
     with a `manifest.json` describing each move. This rule keeps archive a
     visible, reversible action: no implicit project-state mutation.
+46. **Stage-stall is observable, not blocking**: When a spec stays in the same
+    stage longer than its risk SLA (default: low 72h, medium 24h, high 8h),
+    `status` and `next` print a low-priority advisory listing the spec, current
+    stage, and elapsed hours. The Skill reads the entered-at timestamp from
+    `.agents/activity.md` (auto-written by `set_status` whenever status changes);
+    specs without an activity entry are skipped because the Skill cannot reason
+    about duration without a timestamp. The per-risk threshold is configurable
+    in `workflow.json` under `stage_stall_sla`. The advisory never blocks
+    advancement — `vibe advance` still runs as long as its own gates pass; the
+    hint exists so the Agent notices a spec that has been stuck and can decide
+    whether to advance, amend, or cancel it.
 
 ## State Model
 

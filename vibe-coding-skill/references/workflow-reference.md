@@ -421,6 +421,18 @@ directories participate without editing the Skill.
 The command is always explicit. `doctor` and `next` only surface the count as
 an advisory; the Skill never archives silently (Rule 45).
 
+**Stage-stall observability** — A spec that stays in the same stage longer than its risk SLA appears as a low-priority advisory after `vibe status` and `vibe next`. The thresholds live in `workflow.json` under `stage_stall_sla`:
+
+```json
+"stage_stall_sla": {
+  "low_hours": 72,
+  "medium_hours": 24,
+  "high_hours": 8
+}
+```
+
+The entered-at timestamp is read from `.agents/activity.md`, which `set_status` already auto-writes on every status change. Specs without an activity entry are skipped (the Skill cannot reason about duration without a timestamp). The advisory never blocks `vibe advance`; it exists so the Agent can notice a stuck spec and decide whether to advance, amend, or cancel it (Rule 46).
+
 **`scripts/doctor_project.py`** — Check schema, dependencies, and stale artifacts:
 ```bash
 python3 scripts/doctor_project.py <project_root>

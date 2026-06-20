@@ -139,6 +139,7 @@ def project_status(project_root: str) -> None:
     _apply_model_mapping(project_root, recommendation)
     _print_recommendation(recommendation)
     _print_stale_archive_hint(project_root)
+    _print_stage_stall_warnings(project_root, specs)
 
 
 def project_next(project_root: str) -> dict:
@@ -182,6 +183,22 @@ def _print_stale_archive_hint(project_root: str) -> None:
     print(f"🧹 提醒: 发现 {len(stale)} 个陈旧 .agents/ 文件,可考虑归档")
     print("   命令: vibe archive-stale <project_root> --apply")
     print("   (Rule 45: 归档是显式动作,Skill 不会自动搬文件)")
+
+
+def _print_stage_stall_warnings(project_root: str, specs: list[dict] | None = None) -> None:
+    """Print stage-stall advisories as low-priority hints after primary status / next output."""
+    try:
+        warnings = stage_stall_warnings(project_root, specs)
+    except Exception:  # noqa: BLE001
+        # Hint is advisory; never let a stall-scan error block status/next.
+        return
+    if not warnings:
+        return
+    print()
+    print("⏰ Stage-stall 提醒:")
+    for warning in warnings:
+        print(f"   - {warning}")
+    print("   阈值可在 .agents/workflow.json 的 stage_stall_sla 调整。")
 
 
 def recommend_next(project_root: str, specs: list[dict] | None = None) -> dict:
@@ -959,6 +976,82 @@ def post_verify_hint(project_root: str, spec_name: str) -> None:
         print(f"✅ verify passed — {spec_name} (risk={risk})")
         print("   完整门禁仍以 `vibe next` 为准。")
     print(f"   命令: vibe next <project_root> {spec_name}")
+
+
+def _parse_activity_entered_at(project_root: str, spec_name: str, status: str) -> datetime | None:
+    """Return the UTC datetime when `spec_name` most recently entered `status`,
+    parsed from `.agents/activity.md` (already auto-written by set_status).
+
+    Returns None when the activity log is missing or has no matching entry.
+    """
+    activity_path = os.path.join(project_root, ".agents", "activity.md")
+    if not os.path.exists(activity_path):
+        return None
+    try:
+        with open(activity_path, encoding="utf-8") as handle:
+            content = handle.read()
+    except OSError:
+        return None
+    # activity entries look like:
+    # - **2026-06-13 00:00 UTC** `spec-x`: `in-progress` → `review` | Actor: ...
+    pattern = (
+        r"\*\*(\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC)\*\*\s+"
+        r"`" + re.escape(spec_name) + r"`:\s+`[^`]+`\s+→\s+`"
+        + re.escape(status) + r"`"
+    )
+    matches = re.findall(pattern, content)
+    if not matches:
+        return None
+    try:
+        return datetime.strptime(matches[-1], "%Y-%m-%d %H:%M UTC").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def stage_stall_warnings(project_root: str, specs: list[dict] | None = None) -> list[str]:
+    """Return one warning per spec whose current stage has exceeded the risk SLA.
+
+    The threshold for each risk is configurable in workflow.json under
+    `stage_stall_sla`: low_hours / medium_hours / high_hours. The Skill default
+    is conservative (72h / 24h / 8h). The entered-at timestamp is read from
+    `.agents/activity.md` (auto-maintained by `set_status`); when no activity
+    entry exists for the spec's current status, the spec is skipped (we cannot
+    reason about duration without a timestamp).
+    """
+    specs = specs if specs is not None else _list_specs(
+        os.path.join(project_root, ".agents", "specs")
+    )
+    workflow, _ = ensure_workflow(project_root)
+    sla = workflow.get("stage_stall_sla") or {}
+    threshold_hours_by_risk = {
+        "low": int(sla.get("low_hours", 72)),
+        "medium": int(sla.get("medium_hours", 24)),
+        "high": int(sla.get("high_hours", 8)),
+    }
+    now = datetime.now(timezone.utc)
+    warnings: list[str] = []
+    for spec in specs:
+        status = spec.get("status", "draft")
+        if status in {"done", "cancelled", "superseded"}:
+            continue
+        # Read risk from the spec content; default to medium.
+        content = spec.get("content", "")
+        risk = "medium"
+        match = re.search(r"^>\s*风险:\s*(\S+)", content, re.MULTILINE)
+        if match:
+            risk = match.group(1).strip().lower()
+        threshold = threshold_hours_by_risk.get(risk, threshold_hours_by_risk["medium"])
+        entered = _parse_activity_entered_at(project_root, spec["name"], status)
+        if entered is None:
+            continue
+        hours = max(0, int((now - entered).total_seconds() // 3600))
+        if hours < threshold:
+            continue
+        warnings.append(
+            f"{spec['name']} ({risk}-risk) has been in `{status}` for "
+            f"{hours}h (SLA {threshold}h) — surface in `vibe next` or update activity.md"
+        )
+    return warnings
 
 
 if __name__ == "__main__":
