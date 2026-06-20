@@ -168,6 +168,11 @@ def main():
     p_advance.add_argument("--changelog-version", default="",
                            help="released 推进时使用的 changelog 版本号")
 
+    p_archive_stale = sub.add_parser("archive-stale", help="扫描并归档陈旧 .agents/ 文件 (Rule 45)")
+    p_archive_stale.add_argument("project_root", nargs="?", default="", help="项目根目录；省略时使用当前目录或 AGENTS.md 自动探测")
+    p_archive_stale.add_argument("--apply", action="store_true", help="实际移动文件到 .agents/archive/<时间戳>/，默认 dry-run")
+    p_archive_stale.add_argument("--json", action="store_true", help="输出机器可读 JSON")
+
     p_evidence = sub.add_parser("evidence", help="记录验证、发布或观察证据")
     p_evidence.add_argument("spec_name", help="规格名称（不含 .md）")
     p_evidence.add_argument("phase", help="阶段：verify/release/observe")
@@ -369,6 +374,14 @@ def main():
         if args.changelog_version:
             command.extend(["--changelog-version", args.changelog_version])
         run_skill(command, project_root)
+
+    elif args.command == "archive-stale":
+        command = ["archive-stale", args.project_root or project_root]
+        if args.apply:
+            command.append("--apply")
+        if args.json:
+            command.append("--json")
+        run_skill(command, args.project_root or project_root)
 
     elif args.command == "evidence":
         command = ["evidence", project_root, args.spec_name, args.phase, args.result]

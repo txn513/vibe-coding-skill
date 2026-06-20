@@ -3110,9 +3110,9 @@ class VibeCliTests(unittest.TestCase):
             cwd=str(self.project),
         )
 
-    def _write_spec(self, name: str) -> Path:
+    def _write_spec(self, name: str, status: str = "draft") -> Path:
         path = self.project / ".agents" / "specs" / f"{name}.md"
-        path.write_text(VALID_SPEC.format(status="draft"), encoding="utf-8")
+        path.write_text(VALID_SPEC.format(status=status), encoding="utf-8")
         return path
 
     def _combined(self, result: subprocess.CompletedProcess) -> str:
@@ -3126,6 +3126,24 @@ class VibeCliTests(unittest.TestCase):
     def test_cli_status_works(self) -> None:
         result = self._cli("status")
         self.assertEqual(result.returncode, 0, msg=self._combined(result))
+
+    def test_cli_archive_stale_dry_run(self) -> None:
+        result = self._cli("archive-stale", str(self.project))
+        self.assertEqual(result.returncode, 0, msg=self._combined(result))
+        # Fresh project: nothing to archive, but the command must not error.
+        self.assertIn("没有发现陈旧文件", result.stdout)
+
+    def test_cli_archive_stale_apply(self) -> None:
+        spec = self._write_spec("cli-stale", "released")
+        evidence = self.project / ".agents" / "evidence" / "cli-stale" / "verify.md"
+        evidence.parent.mkdir(parents=True, exist_ok=True)
+        evidence.write_text("# verify\n", encoding="utf-8")
+        import os as _os, time as _time
+        old = _time.time() - 365 * 86400
+        _os.utime(evidence, (old, old))
+        result = self._cli("archive-stale", str(self.project), "--apply")
+        self.assertEqual(result.returncode, 0, msg=self._combined(result))
+        self.assertFalse(evidence.exists())
 
     def test_cli_next_works(self) -> None:
         self._write_spec("test-cli")
