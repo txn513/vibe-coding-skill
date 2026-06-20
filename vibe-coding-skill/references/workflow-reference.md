@@ -391,6 +391,36 @@ decision-integrity marker and the reviewer role used by status gates.
 
 ### Maintenance
 
+**`scripts/archive_status.py`** — Find and archive stale `.agents/` artifacts:
+
+```bash
+python3 scripts/archive_status.py <project_root>            # dry-run preview
+python3 scripts/archive_status.py <project_root> --apply    # actually move files
+# or via the outer CLI:
+vibe archive-stale <project_root>
+vibe archive-stale <project_root> --apply
+```
+
+Three kinds of staleness are checked, each with its own threshold in
+`workflow.json` under `archive.thresholds_days`:
+
+- `evidence` (default 90 days): verify / observe / release evidence for specs
+  whose status is `released`, `done`, `superseded`, or `cancelled`.
+- `rule_unreferenced` (default 180 days): rule files whose filename stem does
+  not appear in any spec, plan, retro, intent, or design document.
+- `spec_untouched` (default 365 days): spec files for `cancelled` or
+  `superseded` specs whose frontmatter `更新:` field is older than the
+  threshold.
+
+The script never recurses into `.agents/archive/` and never deletes files;
+`--apply` moves them into `.agents/archive/<UTC-timestamp>/<original-relative-path>`
+with a `manifest.json` describing each move. `archive.scan_paths` and
+`archive.exclude_paths` in `workflow.json` let a project tune which
+directories participate without editing the Skill.
+
+The command is always explicit. `doctor` and `next` only surface the count as
+an advisory; the Skill never archives silently (Rule 45).
+
 **`scripts/doctor_project.py`** — Check schema, dependencies, and stale artifacts:
 ```bash
 python3 scripts/doctor_project.py <project_root>

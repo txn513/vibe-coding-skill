@@ -19,6 +19,8 @@ from workflow_state import (
     dependency_cycles, ensure_workflow, risk_profile, spec_last_touched, spec_metadata,
 )
 
+import archive_status
+
 STATUS_ORDER = [
     "draft", "spec-ready", "in-progress", "review", "released", "blocked",
     "done", "cancelled", "superseded",
@@ -136,6 +138,7 @@ def project_status(project_root: str) -> None:
     recommendation = recommend_next(project_root, specs)
     _apply_model_mapping(project_root, recommendation)
     _print_recommendation(recommendation)
+    _print_stale_archive_hint(project_root)
 
 
 def project_next(project_root: str) -> dict:
@@ -160,7 +163,25 @@ def project_next(project_root: str) -> dict:
         )
     _apply_model_mapping(project_root, recommendation)
     _print_recommendation(recommendation)
+    _print_stale_archive_hint(project_root)
     return recommendation
+
+
+def _print_stale_archive_hint(project_root: str) -> None:
+    """Low-priority advisory: stale .agents/ files eligible for archive."""
+    if not os.path.exists(os.path.join(project_root, ".agents")):
+        return
+    try:
+        stale = archive_status.find_stale(project_root)
+    except Exception:  # noqa: BLE001
+        # Hint is advisory; never let a stale-scan error block next.
+        return
+    if not stale:
+        return
+    print()
+    print(f"🧹 提醒: 发现 {len(stale)} 个陈旧 .agents/ 文件,可考虑归档")
+    print("   命令: vibe archive-stale <project_root> --apply")
+    print("   (Rule 45: 归档是显式动作,Skill 不会自动搬文件)")
 
 
 def recommend_next(project_root: str, specs: list[dict] | None = None) -> dict:

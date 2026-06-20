@@ -33,6 +33,8 @@ from workflow_state import (
     spec_metadata,
 )
 
+import archive_status
+
 # Auxiliary Skills that ship with this suite. If any of them is missing from
 # ~/.codex/skills/ alongside the core, doctor will surface a warning so the
 # user does not have to remember to run install-auxiliary themselves.
@@ -140,6 +142,13 @@ def doctor(project_root: str) -> dict:
         warnings.append(
             "archive retention review recommended: "
             f"{len(archive_files)} files, {archive_bytes // (1024 * 1024)} MiB"
+        )
+
+    stale = archive_status.find_stale(project_root)
+    if stale:
+        warnings.append(
+            f"{len(stale)} stale .agents/ file(s) eligible for archive — "
+            "run `vibe archive-stale <root> [--apply]` (Rule 45)"
         )
 
     for name in _missing_auxiliaries():

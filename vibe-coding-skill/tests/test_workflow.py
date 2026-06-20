@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import re
+from datetime import datetime, timezone
 import contextlib
 import io
 import json
@@ -33,6 +34,7 @@ import knowledge_gate
 import manage_specs
 import migrate_project
 import onboard_project
+import archive_status
 import policy_sources
 import project_status
 import record_evidence
@@ -1887,6 +1889,150 @@ class DoctorAuxiliaryTests(unittest.TestCase):
         result = doctor_project.doctor(str(self.project))
         aux_warnings = [w for w in result["warnings"] if "auxiliary" in w.lower()]
         self.assertEqual(aux_warnings, [])
+
+
+class ArchiveStatusTests(unittest.TestCase):
+    """Cover stale .agents/ artifact detection and explicit archive."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name)
+        init_project.init_project(str(self.project), "web")
+        # Touch git so archive_status doesn't trip on missing snapshots.
+        subprocess.run(["git", "init", "-q", str(self.project)], check=False, capture_output=True)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _age_file(self, path: Path, days: int) -> None:
+        import os as _os
+        import time as _time
+        old = _time.time() - days * 86400
+        _os.utime(path, (old, old))
+
+    def _set_threshold(self, key: str, days: int) -> None:
+        import json as _json
+        wf_path = self.project / ".agents" / "workflow.json"
+        wf = _json.loads(wf_path.read_text(encoding="utf-8"))
+        wf["archive"]["thresholds_days"][key] = days
+        wf_path.write_text(_json.dumps(wf), encoding="utf-8")
+
+    def _make_spec(self, name: str, status: str) -> Path:
+        path = self.project / ".agents" / "specs" / f"{name}.md"
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        path.write_text(
+            f"# {name}\n\n> 状态: {status} | 创建: {now} | 更新: {now}\n> 风险: low\n",
+            encoding="utf-8",
+        )
+        return path
+
+    def test_dry_run_finds_stale_evidence_without_moving(self) -> None:
+        spec = self._make_spec("feature-x", "released")
+        evidence = self.project / ".agents" / "evidence" / "feature-x" / "verify.md"
+        evidence.parent.mkdir(parents=True, exist_ok=True)
+        evidence.write_text("# verify\n", encoding="utf-8")
+        self._age_file(evidence, 120)
+        findings = archive_status.find_stale(str(self.project))
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["kind"], "evidence")
+        # find_stale is a pure scan; it must never touch the filesystem.
+        self.assertTrue(evidence.exists())
+
+    def test_apply_moves_stale_evidence_into_archive_directory(self) -> None:
+        spec = self._make_spec("feature-y", "done")
+        evidence = self.project / ".agents" / "evidence" / "feature-y" / "verify.md"
+        evidence.parent.mkdir(parents=True, exist_ok=True)
+        evidence.write_text("# verify\n", encoding="utf-8")
+        self._age_file(evidence, 100)
+        findings = archive_status.find_stale(str(self.project))
+        self.assertEqual(len(findings), 1)
+        moved = archive_status.archive(str(self.project), findings)
+        self.assertEqual(moved, [".agents/evidence/feature-y/verify.md"])
+        self.assertFalse(evidence.exists())
+        archive_root = next((self.project / ".agents" / "archive").iterdir())
+        archived = archive_root / ".agents" / "evidence" / "feature-y" / "verify.md"
+        self.assertTrue(archived.exists())
+        manifest = archive_root / "manifest.json"
+        self.assertTrue(manifest.exists())
+        import json as _json
+        manifest_data = _json.loads(manifest.read_text(encoding="utf-8"))
+        self.assertEqual(len(manifest_data["items"]), 1)
+
+    def test_threshold_is_project_configurable(self) -> None:
+        spec = self._make_spec("feature-z", "released")
+        evidence = self.project / ".agents" / "evidence" / "feature-z" / "verify.md"
+        evidence.parent.mkdir(parents=True, exist_ok=True)
+        evidence.write_text("# verify\n", encoding="utf-8")
+        self._age_file(evidence, 40)
+        # Default 90 days: not stale yet
+        self.assertEqual(archive_status.find_stale(str(self.project)), [])
+        # Tighten threshold to 30 days: now stale
+        self._set_threshold("evidence", 30)
+        findings = archive_status.find_stale(str(self.project))
+        self.assertEqual(len(findings), 1)
+
+    def test_does_not_recurse_into_archive_directory(self) -> None:
+        # Pretend an old file already lives in .agents/archive/<stamp>/.
+        archived = (
+            self.project / ".agents" / "archive" / "20200101T000000Z"
+            / ".agents" / "evidence" / "ghost" / "verify.md"
+        )
+        archived.parent.mkdir(parents=True, exist_ok=True)
+        archived.write_text("# old\n", encoding="utf-8")
+        self._age_file(archived, 365 * 3)
+        findings = archive_status.find_stale(str(self.project))
+        self.assertEqual(findings, [])
+
+    def test_unreferenced_rule_is_flagged(self) -> None:
+        # Tighten rule_unreferenced threshold to make test fast.
+        self._set_threshold("rule_unreferenced", 30)
+        rule = self.project / ".agents" / "rules" / "orphan-rule.md"
+        rule.parent.mkdir(parents=True, exist_ok=True)
+        rule.write_text("# orphan\n", encoding="utf-8")
+        self._age_file(rule, 60)
+        findings = archive_status.find_stale(str(self.project))
+        flagged = [f for f in findings if f["kind"] == "rule_unreferenced"]
+        self.assertEqual(len(flagged), 1)
+        self.assertIn("orphan-rule", flagged[0]["reason"])
+
+    def test_referenced_rule_is_not_flagged(self) -> None:
+        self._set_threshold("rule_unreferenced", 30)
+        rule = self.project / ".agents" / "rules" / "linked-rule.md"
+        rule.parent.mkdir(parents=True, exist_ok=True)
+        rule.write_text("# linked\n", encoding="utf-8")
+        self._age_file(rule, 60)
+        spec = self._make_spec("using-rule", "draft")
+        spec.write_text(
+            spec.read_text(encoding="utf-8") + "\nlinked-rule referenced here\n",
+            encoding="utf-8",
+        )
+        findings = archive_status.find_stale(str(self.project))
+        flagged = [f for f in findings if f["kind"] == "rule_unreferenced"]
+        self.assertEqual(flagged, [])
+
+    def test_doctor_surfaces_stale_artifact_advisory(self) -> None:
+        spec = self._make_spec("stale-feat", "released")
+        evidence = self.project / ".agents" / "evidence" / "stale-feat" / "verify.md"
+        evidence.parent.mkdir(parents=True, exist_ok=True)
+        evidence.write_text("# verify\n", encoding="utf-8")
+        self._age_file(evidence, 200)
+        result = doctor_project.doctor(str(self.project))
+        archive_warnings = [w for w in result["warnings"] if "stale" in w.lower() and "archive" in w.lower()]
+        self.assertTrue(archive_warnings, f"expected stale-archive warning, got {result['warnings']}")
+        self.assertIn("archive-stale", archive_warnings[0])
+
+    def test_next_prints_low_priority_stale_hint(self) -> None:
+        spec = self._make_spec("hint-feat", "released")
+        evidence = self.project / ".agents" / "evidence" / "hint-feat" / "verify.md"
+        evidence.parent.mkdir(parents=True, exist_ok=True)
+        evidence.write_text("# verify\n", encoding="utf-8")
+        self._age_file(evidence, 200)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            project_status.project_next(str(self.project))
+        output = buf.getvalue()
+        self.assertIn("陈旧", output)
+        self.assertIn("archive-stale", output)
 
 
 class InstallAuxiliaryTests(unittest.TestCase):

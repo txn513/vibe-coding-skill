@@ -34,6 +34,7 @@
 | `记录验证证据：xxx passed` | 记录 verify 阶段的证据 |
 | `记录 evidence 并跑命令验证` | 必须 `--purpose` / `--configured` 放在 `--command` 之前,否则 fail-fast (record_evidence 强制顺序约束, Rule 36) |
 | `证据命令含空格/引号时怎么写` | `--command` 后直接写完整命令即可,CLI 会用 shlex 自动拆分;`--command "node /tmp/x.cjs"` 与 `--command node /tmp/x.cjs` 等价 |
+| `清理 .agents/ 下的陈旧文件` | `vibe archive-stale <project_root>` 预览;加 `--apply` 执行归档到 `.agents/archive/<时间戳>/`(Rule 45) |
 | `通过审查` | 审查通过，推进到 released |
 | `审查不通过，原因是 xxx` | 审查驳回，记录原因 |
 | `生成 changelog` | 为已 released 的 spec 生成变更日志 |
@@ -176,6 +177,7 @@ vibe ui-redesign-contract <spec> --source-type opendesign --source-artifacts des
 - UI 需求使用 Open Design、Penpot、Figma、截图或手写 brief 时，会先转换成项目本地 UI 合同；工具输出不能直接当成唯一需求或验收来源，也不能覆盖 AGENTS.md 或项目视觉禁令（Rule 40）
 - 新的用户可见 UI 项目在首个实现 spec 前，会先提示产品/UX/UI 设计引导；你明确选择 code-first spike 或非 UI 项目时可以跳过（Rule 41）
 - UI 设计反复修改时会自动版本化，不需要你额外说"不要覆盖旧版"；每版有版本号并保留回退目标，影响已计划/实施/验收的 spec 时会走 amend 或 follow-up spec（Rule 42）
+- `doctor` 和 `下一步做什么` 会提示 `.agents/` 下陈旧文件数量，但不会自动归档；要执行归档运行 `vibe archive-stale <project_root> --apply`(Rule 45)
 
 ---
 

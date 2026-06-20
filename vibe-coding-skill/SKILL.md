@@ -92,7 +92,10 @@ artifacts merely because a template exists.
    different identities.
 6. Require actor, `override_approver` role, and reason for every forced
    transition.
-7. Archive replaced or superseded evidence and downstream artifacts.
+7. Archive replaced or superseded evidence and downstream artifacts. Stale
+    `.agents/` artifacts that no longer participate in any active spec are
+    surfaced by `doctor` and `next` but are only moved by an explicit
+    `vibe archive-stale` invocation; the Skill never archives files silently.
 8. Redact common credential-shaped values before persisting command output.
 9. Keep retrospective learning project-local. Add only evidence-backed rules,
    mark them proposed until adopted, and prune stale guidance.
@@ -327,6 +330,18 @@ artifacts merely because a template exists.
     actually affected is a project-specific decision; this rule only requires
     the spec to surface the consideration explicitly rather than rely on later
     verification to catch an implicit impact.
+45. **Stale artifact archive is explicit, not automatic**: `doctor` and `next`
+    surface stale `.agents/` artifacts (evidence for `released`/`done` specs,
+    unreferenced rules, untouched `cancelled`/`superseded` specs) but never
+    move them. The threshold for each kind is configurable in the project's
+    `workflow.json` under `archive.thresholds_days`; the Skill default is
+    conservative (evidence 90 days, rule unreferenced 180 days, spec untouched
+    365 days). The Agent runs `vibe archive-stale <project_root>` to preview
+    and `vibe archive-stale <project_root> --apply` to execute. The script
+    never recurses into `.agents/archive/` and never deletes anything; archived
+    artifacts land in `.agents/archive/<UTC-timestamp>/<original-relative-path>`
+    with a `manifest.json` describing each move. This rule keeps archive a
+    visible, reversible action: no implicit project-state mutation.
 
 ## State Model
 

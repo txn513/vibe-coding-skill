@@ -24,6 +24,7 @@ import generate_changelog
 import knowledge_gate
 import manage_specs
 import migrate_project
+import archive_status
 import policy_sources
 import project_status
 import shlex
@@ -153,6 +154,13 @@ def main() -> None:
                         help="released 推进时不自动生成 changelog")
     advance.add_argument("--changelog-version", default="",
                         help="released 推进时使用的 changelog 版本号（默认按时间戳）")
+
+    archive_stale = sub.add_parser("archive-stale")
+    archive_stale.add_argument("project_root")
+    archive_stale.add_argument("--apply", action="store_true",
+                               help="实际移动文件到 .agents/archive/<时间戳>/，默认 dry-run")
+    archive_stale.add_argument("--json", action="store_true",
+                               help="输出机器可读 JSON")
 
     evidence = sub.add_parser("evidence")
     evidence.add_argument("project_root")
@@ -341,6 +349,26 @@ def main() -> None:
         )
         if result is None:
             raise SystemExit(1)
+    elif args.operation == "archive-stale":
+        import json as _json
+        findings = archive_status.find_stale(args.project_root)
+        if args.json:
+            print(_json.dumps({"stale": findings, "applied": args.apply}, ensure_ascii=False, indent=2))
+            if not args.apply or not findings:
+                return
+        if not findings:
+            print("✅ 没有发现陈旧文件 (.agents/archive 不会被扫描)")
+            return
+        print(f"📦 发现 {len(findings)} 个陈旧文件:")
+        for finding in findings:
+            print(f"   - [{finding['kind']}] {finding['path']}  ({finding['age_days']}d / 阈值 {finding['threshold_days']}d)")
+            print(f"       {finding['reason']}")
+        if not args.apply:
+            print("\nℹ️  这是 dry-run。要执行归档，运行: vibe archive-stale <project_root> --apply")
+            return
+        moved = archive_status.archive(args.project_root, findings)
+        print(f"\n✅ 已归档 {len(moved)} 个文件。")
+
     elif args.operation == "evidence":
         misplaced = record_evidence.misplaced_vibe_options(args.exec_command)
         if misplaced:
