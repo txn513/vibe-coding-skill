@@ -159,7 +159,12 @@ artifacts merely because a template exists.
     run `vibe next` (or equivalent check) to confirm all gates for the target
     status are satisfied. After advancing, the Agent must run `vibe status` (or
     equivalent) to report the updated state. No status transition may happen
-    silently without a preceding gate check and a following status report.
+    silently without a preceding gate check and a following status report. When
+    `vibe evidence <spec> verify passed` records a passing verification, the
+    CLI prints a compact next-action hint summarising the spec's risk profile
+    and remaining gates (review / release / observe). The hint is read-only
+    guidance, never an implicit advance — review and observation gates must
+    still be triggered explicitly.
 23. Use one active writer per spec. Parallelize through separate specs or
     worktrees instead of adding distributed locking to this Skill.
 24. On existing projects, inventory policy sources before proposing changes.

@@ -903,6 +903,64 @@ def _session_continuity_hint(specs):
     )
 
 
+def post_verify_hint(project_root: str, spec_name: str) -> None:
+    """Compact post-verify hint printed by `vibe evidence <spec> verify passed`.
+
+    Reads the spec's risk profile and remaining gates, then prints one of:
+      - low-risk:  advance to done (skip released) if all gates pass
+      - medium/high:  blocked by review / release / observe gates
+      - any-risk:  generic fallback when we cannot determine the spec state
+
+    The hint is deliberately shorter than `vibe next` and explicitly says
+    "next action will NOT auto-advance" so the agent does not skip review
+    or observe gates. Always read `vibe next <root> <spec>` for the full
+    gate list before running `vibe advance`.
+    """
+    spec_path = os.path.join(project_root, ".agents", "specs", f"{spec_name}.md")
+    if not os.path.exists(spec_path):
+        return
+    try:
+        with open(spec_path, encoding="utf-8") as handle:
+            content = handle.read()
+    except OSError:
+        return
+    try:
+        meta = spec_metadata(content)
+        risk = meta.get("risk", "medium")
+    except Exception:  # noqa: BLE001
+        risk = "medium"
+    workflow, _ = ensure_workflow(project_root)
+    profile = workflow.get("risk_profiles", {}).get(risk, workflow["risk_profiles"]["medium"])
+
+    remaining = []
+    if profile.get("require_review"):
+        remaining.append("独立 review")
+    if profile.get("require_release"):
+        remaining.append("release 推进")
+    if profile.get("require_observe"):
+        remaining.append("observe 证据")
+
+    print()
+    if risk == "low":
+        print(f"✅ verify passed — {spec_name} (low-risk)")
+        if remaining:
+            print(f"   剩余 gate: {' / '.join(remaining)}")
+        else:
+            print("   可直接: vibe advance <project_root> " + spec_name + " done")
+        print("   完整门禁仍以 `vibe next` 为准;这一步不会自动推进。")
+    elif risk in {"medium", "high"}:
+        print(f"✅ verify passed — {spec_name} ({risk}-risk)")
+        if remaining:
+            print(f"   剩余 gate: {' / '.join(remaining)}")
+        else:
+            print("   已无剩余 gate;可运行 `vibe next` 拿到完整推荐动作。")
+        print("   verify 不会自动 advance;review / release / observe 必须显式触发。")
+    else:
+        print(f"✅ verify passed — {spec_name} (risk={risk})")
+        print("   完整门禁仍以 `vibe next` 为准。")
+    print(f"   命令: vibe next <project_root> {spec_name}")
+
+
 if __name__ == "__main__":
     p = argparse.ArgumentParser(description="Show project status overview")
     p.add_argument("project_root", help="Project root directory")

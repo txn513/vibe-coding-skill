@@ -390,6 +390,17 @@ def main() -> None:
         )
         if result is None:
             raise SystemExit(1)
+        # Verify passed → print a compact next-action hint (Rule 22 follow-through).
+        # Only fire when evidence actually recorded AND it was verify+passed, so
+        # failed reproduction or release/observe evidence don't get a "advance"
+        # suggestion they shouldn't act on.
+        if (
+            result is not None
+            and args.phase == "verify"
+            and args.result == "passed"
+            and args.purpose == "standard"
+        ):
+            project_status.post_verify_hint(root, args.spec_name)
     elif args.operation == "review-decision":
         result = record_review.record_review(
             root, args.spec_name, args.conclusion, args.basis,

@@ -32,6 +32,7 @@
 | `推进到 review` / `推进到 done` | 推进状态（会先检查门禁） |
 | `跳过检查直接推进` | --force 推进（会记录强制原因） |
 | `记录验证证据：xxx passed` | 记录 verify 阶段的证据 |
+| `verify 完成后下一步是什么` | 直接说 "记录 xxx verify passed" 即可，CLI 会在 verify 通过后自动打印 risk-aware 的剩余 gate 提示（Rule 22） |
 | `记录 evidence 并跑命令验证` | 必须 `--purpose` / `--configured` 放在 `--command` 之前,否则 fail-fast (record_evidence 强制顺序约束, Rule 36) |
 | `证据命令含空格/引号时怎么写` | `--command` 后直接写完整命令即可,CLI 会用 shlex 自动拆分;`--command "node /tmp/x.cjs"` 与 `--command node /tmp/x.cjs` 等价 |
 | `清理 .agents/ 下的陈旧文件` | `vibe archive-stale <project_root>` 预览;加 `--apply` 执行归档到 `.agents/archive/<时间戳>/`(Rule 45) |

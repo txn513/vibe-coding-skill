@@ -2035,6 +2035,116 @@ class ArchiveStatusTests(unittest.TestCase):
         self.assertIn("archive-stale", output)
 
 
+class PostVerifyHintTests(unittest.TestCase):
+    """Cover the compact next-action hint printed after a passing verify."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name)
+        init_project.init_project(str(self.project), "web")
+        subprocess.run(["git", "init", "-q", str(self.project)], check=False, capture_output=True)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _write_spec(self, name: str, risk: str) -> Path:
+        path = self.project / ".agents" / "specs" / f"{name}.md"
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        path.write_text(
+            f"# {name}\n\n> 状态: in-progress | 创建: {now} | 更新: {now}\n> 风险: {risk}\n",
+            encoding="utf-8",
+        )
+        return path
+
+    def _capture(self, func, *args, **kwargs) -> str:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            func(*args, **kwargs)
+        return buf.getvalue()
+
+    def test_low_risk_hint_suggests_done_when_no_remaining_gates(self) -> None:
+        # Tighten low-risk to skip review/release/observe so done is the only gate.
+        import json as _json
+        wf_path = self.project / ".agents" / "workflow.json"
+        wf = _json.loads(wf_path.read_text(encoding="utf-8"))
+        wf["risk_profiles"]["low"]["require_review"] = False
+        wf["risk_profiles"]["low"]["require_release"] = False
+        wf["risk_profiles"]["low"]["require_observe"] = False
+        wf_path.write_text(_json.dumps(wf), encoding="utf-8")
+        self._write_spec("low-feat", "low")
+        output = self._capture(project_status.post_verify_hint, str(self.project), "low-feat")
+        self.assertIn("low-risk", output)
+        self.assertIn("可直接: vibe advance", output)
+        self.assertIn("不会自动推进", output)
+
+    def test_medium_risk_hint_lists_remaining_gates(self) -> None:
+        self._write_spec("med-feat", "medium")
+        output = self._capture(project_status.post_verify_hint, str(self.project), "med-feat")
+        self.assertIn("medium-risk", output)
+        # medium-risk default profile requires review + release but not observe
+        self.assertIn("独立 review", output)
+        self.assertIn("release 推进", output)
+        self.assertNotIn("observe 证据", output)
+        self.assertIn("verify 不会自动 advance", output)
+        self.assertIn("vibe next", output)
+
+    def test_high_risk_hint_includes_observe(self) -> None:
+        self._write_spec("hi-feat", "high")
+        output = self._capture(project_status.post_verify_hint, str(self.project), "hi-feat")
+        self.assertIn("high-risk", output)
+        self.assertIn("独立 review", output)
+        self.assertIn("release 推进", output)
+        self.assertIn("observe 证据", output)
+
+    def test_hint_silent_when_spec_missing(self) -> None:
+        output = self._capture(project_status.post_verify_hint, str(self.project), "ghost")
+        self.assertEqual(output, "")
+
+    def test_vibe_evidence_verify_passed_prints_hint(self) -> None:
+        # End-to-end: run the inner CLI and assert the hint appears.
+        spec = self._write_spec("e2e-feat", "low")
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPTS_DIR / "vibe.py"),
+                "evidence",
+                str(self.project),
+                "e2e-feat",
+                "verify",
+                "passed",
+                f"checks {VALID_SPEC_AC_ALL}",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("verify passed", completed.stdout)
+        self.assertIn("不会自动推进", completed.stdout)
+
+    def test_vibe_evidence_failed_does_not_print_hint(self) -> None:
+        # Failed verify must NOT print the next-action hint.
+        spec = self._write_spec("e2e-fail", "low")
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPTS_DIR / "vibe.py"),
+                "evidence",
+                str(self.project),
+                "e2e-fail",
+                "verify",
+                "failed",
+                "exit 1",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        # record_evidence may return None or raise on failed-without-command;
+        # either way the stdout should not contain the "verify passed" hint.
+        self.assertNotIn("不会自动推进", completed.stdout)
+
+
 class InstallAuxiliaryTests(unittest.TestCase):
     """Cover the install-auxiliary command that wires sibling Skills."""
 
