@@ -151,6 +151,7 @@ vibe ui-redesign-contract <spec> --source-type opendesign --source-artifacts des
 | 子 spec 拆分后不知道是否覆盖了原 spec | `核对一下原 spec 的意图`（触发意图对账） |
 | 验证证据不够明确 | `这条证据对应哪条验收标准`（触发条款引用检查） |
 | 依赖的 spec 还没做完 | `检查一下依赖`（触发依赖门禁检查） |
+| `验证证据覆盖了哪些 AC` / `xxx 的 AC 覆盖情况` | 直接说 spec 名,Skill 会读 spec 的 AC 列表 + 最新 verify 证据,逐条告诉你哪些 AC 已被证据引用、哪些缺失(Rule 30) |
 
 ---
 

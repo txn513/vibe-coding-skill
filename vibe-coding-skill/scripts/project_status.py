@@ -1054,6 +1054,107 @@ def stage_stall_warnings(project_root: str, specs: list[dict] | None = None) -> 
     return warnings
 
 
+def ac_coverage(project_root: str, spec_name: str) -> dict:
+    """Return per-AC coverage status for the latest verify evidence of `spec_name`.
+
+    Result shape:
+      {
+        "spec": str,
+        "risk": str,
+        "criteria": [{"id": "AC1", "covered": bool}, ...],
+        "missing": list[str],
+        "evidence_path": str | None,
+      }
+
+    The function reads `.agents/specs/<spec_name>.md` for the AC list and risk,
+    then reads the latest `.agents/evidence/<spec_name>/verify.md` (or
+    `verify-reproduction.md` / `verify-fix-regression.md` if those exist).
+    An AC is "covered" if its id appears anywhere in the evidence text. For
+    low-risk specs every AC is reported as covered without checking, matching
+    Rule 30's "low-risk specs get a brief note" exception. When the spec has
+    no AC list or no evidence file yet, the function returns an empty
+    criteria list and evidence_path=None.
+    """
+    import set_status as _set_status
+    spec_path = os.path.join(project_root, ".agents", "specs", f"{spec_name}.md")
+    if not os.path.exists(spec_path):
+        return {"spec": spec_name, "risk": "medium", "criteria": [], "missing": [], "evidence_path": None}
+    try:
+        with open(spec_path, encoding="utf-8") as handle:
+            spec_content = handle.read()
+    except OSError:
+        return {"spec": spec_name, "risk": "medium", "criteria": [], "missing": [], "evidence_path": None}
+    risk_match = re.search(r"^>\s*风险:\s*(\S+)", spec_content, re.MULTILINE)
+    risk = risk_match.group(1).strip().lower() if risk_match else "medium"
+
+    # Discover the latest evidence file under .agents/evidence/<spec_name>/
+    evidence_root = os.path.join(project_root, ".agents", "evidence", spec_name)
+    evidence_path: str | None = None
+    evidence_text = ""
+    if os.path.isdir(evidence_root):
+        candidates: list[str] = []
+        for phase in ("verify", "release", "observe"):
+            for suffix in ("", "-reproduction", "-fix-regression"):
+                candidates.append(os.path.join(evidence_root, f"{phase}{suffix}.md"))
+        # Pick the most recently modified evidence file across all candidates
+        existing = [(p, os.path.getmtime(p)) for p in candidates if os.path.exists(p)]
+        if existing:
+            existing.sort(key=lambda item: item[1], reverse=True)
+            evidence_path = existing[0][0]
+            try:
+                with open(evidence_path, encoding="utf-8") as handle:
+                    evidence_text = handle.read()
+            except OSError:
+                evidence_text = ""
+
+    criteria_ids = _set_status._acceptance_criteria_ids(spec_content)
+    criteria = [{"id": f"AC{index}", "covered": False} for index in criteria_ids]
+    if not criteria:
+        return {"spec": spec_name, "risk": risk, "criteria": [], "missing": [], "evidence_path": evidence_path}
+
+    if risk == "low":
+        # Rule 30 exception: low-risk specs are exempt from per-AC mapping.
+        for entry in criteria:
+            entry["covered"] = True
+        return {"spec": spec_name, "risk": risk, "criteria": criteria, "missing": [], "evidence_path": evidence_path}
+
+    evidence_tokens = set(re.findall(r"\bAC\s*-?\s*(\d+)\b", evidence_text, re.IGNORECASE))
+    for entry in criteria:
+        index = int(entry["id"][2:])
+        entry["covered"] = str(index) in evidence_tokens
+
+    missing = [entry["id"] for entry in criteria if not entry["covered"]]
+    return {
+        "spec": spec_name,
+        "risk": risk,
+        "criteria": criteria,
+        "missing": missing,
+        "evidence_path": evidence_path,
+    }
+
+
+def print_ac_coverage(coverage: dict) -> None:
+    """Pretty-print the result of ac_coverage() for the user."""
+    if not coverage["criteria"]:
+        if coverage["evidence_path"]:
+            print(f"ℹ️  {coverage['spec']}: 没有找到 AC 列表（spec 可能不要求 AC）")
+        else:
+            print(f"ℹ️  {coverage['spec']}: 还没有 verify 证据")
+        return
+    if coverage["risk"] == "low":
+        print(f"✅ {coverage['spec']} (low-risk): AC 覆盖详情不要求逐条引用")
+        return
+    missing = coverage["missing"]
+    if not missing:
+        print(f"✅ {coverage['spec']} ({coverage['risk']}-risk): 全部 {len(coverage['criteria'])} 条 AC 已被 verify 证据引用")
+    else:
+        print(f"⚠️  {coverage['spec']} ({coverage['risk']}-risk): {len(missing)}/{len(coverage['criteria'])} 条 AC 未在 verify 证据中引用")
+        print(f"   缺失: {', '.join(missing)}")
+    if coverage["evidence_path"]:
+        rel = os.path.relpath(coverage["evidence_path"])
+        print(f"   证据: {rel}")
+
+
 if __name__ == "__main__":
     p = argparse.ArgumentParser(description="Show project status overview")
     p.add_argument("project_root", help="Project root directory")

@@ -2359,6 +2359,95 @@ class RiskRequiredRulesTests(unittest.TestCase):
         self.assertIn("pii", joined)
 
 
+class AcCoverageTests(unittest.TestCase):
+    """Cover the on-demand AC coverage helper (follow-up to existing record-time warning)."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name)
+        init_project.init_project(str(self.project), "web")
+        subprocess.run(["git", "init", "-q", str(self.project)], check=False, capture_output=True)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _write_spec(self, name: str, risk: str = "medium") -> Path:
+        path = self.project / ".agents" / "specs" / f"{name}.md"
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        path.write_text(
+            f"# {name}\n\n> 状态: in-progress | 创建: {now} | 更新: {now}\n> 风险: {risk}\n\n"
+            "## 验收标准\n\n"
+            "- [ ] AC1 body\n"
+            "- [ ] AC2 body\n"
+            "- [ ] AC3 body\n",
+            encoding="utf-8",
+        )
+        return path
+
+    def _write_verify(self, spec: str, body: str) -> Path:
+        path = self.project / ".agents" / "evidence" / spec / "verify.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+        return path
+
+    def test_reports_all_ac_covered_when_evidence_references_each(self) -> None:
+        self._write_spec("full", "medium")
+        self._write_verify("full", "checks passed AC1, AC2, AC3")
+        coverage = project_status.ac_coverage(str(self.project), "full")
+        self.assertEqual([c["covered"] for c in coverage["criteria"]], [True, True, True])
+        self.assertEqual(coverage["missing"], [])
+
+    def test_reports_missing_ac_when_evidence_skips_them(self) -> None:
+        self._write_spec("partial", "high")
+        self._write_verify("partial", "checks passed AC1 only")
+        coverage = project_status.ac_coverage(str(self.project), "partial")
+        self.assertEqual(coverage["missing"], ["AC2", "AC3"])
+
+    def test_low_risk_specs_are_marked_covered_without_checking(self) -> None:
+        self._write_spec("lite", "low")
+        self._write_verify("lite", "summary only, no AC tokens")
+        coverage = project_status.ac_coverage(str(self.project), "lite")
+        # Rule 30 exception: low-risk skips per-AC check.
+        self.assertEqual([c["covered"] for c in coverage["criteria"]], [True, True, True])
+        self.assertEqual(coverage["missing"], [])
+
+    def test_empty_when_spec_has_no_ac_section(self) -> None:
+        path = self.project / ".agents" / "specs" / "no-ac.md"
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        path.write_text(
+            f"# no-ac\n\n> 状态: in-progress | 创建: {now} | 更新: {now}\n> 风险: medium\n",
+            encoding="utf-8",
+        )
+        coverage = project_status.ac_coverage(str(self.project), "no-ac")
+        self.assertEqual(coverage["criteria"], [])
+
+    def test_handles_missing_spec_gracefully(self) -> None:
+        coverage = project_status.ac_coverage(str(self.project), "ghost")
+        self.assertEqual(coverage["criteria"], [])
+        self.assertEqual(coverage["missing"], [])
+
+    def test_picks_most_recent_evidence_file_when_multiple_exist(self) -> None:
+        # Verify with only AC1 first, then a release.md that mentions AC2+AC3.
+        self._write_spec("multi", "medium")
+        self._write_verify("multi", "verify stage only covered AC1")
+        release = self.project / ".agents" / "evidence" / "multi" / "release.md"
+        release.write_text("release also covered AC2, AC3", encoding="utf-8")
+        coverage = project_status.ac_coverage(str(self.project), "multi")
+        # release.md is newer, so AC1 should be reported as missing.
+        self.assertEqual(coverage["missing"], ["AC1"])
+
+    def test_print_function_emits_missing_marker(self) -> None:
+        self._write_spec("med", "high")
+        self._write_verify("med", "only AC1")
+        coverage = project_status.ac_coverage(str(self.project), "med")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            project_status.print_ac_coverage(coverage)
+        output = buf.getvalue()
+        self.assertIn("AC2, AC3", output)
+        self.assertIn("缺失", output)
+
+
 class InstallAuxiliaryTests(unittest.TestCase):
     """Cover the install-auxiliary command that wires sibling Skills."""
 
