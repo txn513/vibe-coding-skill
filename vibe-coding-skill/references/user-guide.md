@@ -149,6 +149,7 @@ vibe ui-redesign-contract <spec> --source-type opendesign --source-artifacts des
 | `改了 spec 之后 plan 怎么刷` | 改 spec frontmatter / 内容后，运行 `vibe plan <spec> --force`；`vibe next` 会按 stale 类型推荐命令 |
 | 刚在多个项目间切换 | `下一步做什么` 或 `检查状态`（输出会显示当前绑定的项目路径） |
 | 子 spec 拆分后不知道是否覆盖了原 spec | `核对一下原 spec 的意图`（触发意图对账） |
+| `xxx 的 plan 任务粒度是不是太粗` / `拆一下 xxx 的 plan` | Agent 重读 spec 的 AC,把"展示/查看"和"操作/支持"拆成独立 plan 任务;已经合并的任务重新打开,分别打勾 |
 | 验证证据不够明确 | `这条证据对应哪条验收标准`（触发条款引用检查） |
 | 依赖的 spec 还没做完 | `检查一下依赖`（触发依赖门禁检查） |
 | `验证证据覆盖了哪些 AC` / `xxx 的 AC 覆盖情况` | 直接说 spec 名,Skill 会读 spec 的 AC 列表 + 最新 verify 证据,逐条告诉你哪些 AC 已被证据引用、哪些缺失(Rule 30) |

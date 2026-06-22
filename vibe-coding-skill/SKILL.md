@@ -208,9 +208,20 @@ artifacts merely because a template exists.
     prove the feature is reachable from the user-facing surface. Configurable
     behavior introduced by the spec (e.g. new env vars, feature flags, default
     values) must be exercised under a realistic configuration, not just the
-    safe default that disables the feature. This rule governs evidence
-    *format* (what counts as proof) and applies independently of evidence
-    *structure* requirements below.
+    safe default that disables the feature. For acceptance criteria whose
+    verb is "show", "display", "render", "include", "list", "expose", "呈现",
+    "展示", "显示", "包含" or similar UI-presentation verbs, the user-perceivable
+    evidence must be a UI-layer artifact — a real screenshot of the rendered
+    surface, a Live HTTP response carrying the actual rendered HTML/DOM, a
+    frontend component test that asserts what is visible, or an equivalent
+    recording of the user-facing surface. A passing backend API test alone is
+    never sufficient evidence for a UI-presentation AC, even when the API
+    happens to return the data being shown; the AC promises what the user
+    sees, not what the database contains. Specs that mix a presentation AC
+    with an action AC in the same criterion must split them at spec-ready or
+    verification time so each side carries its own evidence. This rule governs
+    evidence *format* (what counts as proof) and applies independently of
+    evidence *structure* requirements below.
 29. **Sub-spec Intent reconciliation gate**: When a spec is decomposed into
     multiple sub-specs, the final sub-spec advancing to `done` must complete
     a reconciliation of the parent spec's Intent and Acceptance Criteria.
