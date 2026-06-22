@@ -195,12 +195,18 @@ def set_status(
                 return None
 
     if new_status in {"released", "done"} and not force:
-        if profile["require_review"] and not _has_approved_review(
-            project_root, spec_name, content, profile, workflow
-        ):
-            print("❌ 标记 done 前需要一份结论为 approved 的关联审查记录")
-            print("   先运行 generate_review.py，并由独立审查者填写结论")
-            return None
+        if profile["require_review"]:
+            review_ok, review_reason = _has_approved_review(
+                project_root, spec_name, content, profile, workflow
+            )
+            if not review_ok:
+                if review_reason:
+                    print(f"❌ {review_reason}")
+                    print("   调整 workflow.json.review_separation.required_for 或使用不同身份重审")
+                else:
+                    print("❌ 标记 done 前需要一份结论为 approved 的关联审查记录")
+                    print("   先运行 generate_review.py，并由独立审查者填写结论")
+                return None
         if new_status == "released" and profile["require_release"] and not _has_current_evidence(
             project_root, spec_name, content, "release", profile, workflow
         ):
@@ -319,13 +325,18 @@ def _has_approved_review(
     spec_content: str,
     profile: dict,
     workflow: dict,
-) -> bool:
+) -> tuple[bool, str | None]:
+    """Return (ok, reason). reason is non-None only when ok is False and the
+    caller may want to surface a specific blocker to the user (currently the
+    review-separation case). All other failures collapse to (False, None).
+    """
     reviews_dir = os.path.join(project_root, ".agents", "reviews")
     if not os.path.exists(reviews_dir):
-        return False
+        return False, None
     expected_digest = spec_digest(spec_content)
     expected_context = project_context_digest(project_root)
     git = git_snapshot(project_root)
+    separation_reason: str | None = None
     for filename in os.listdir(reviews_dir):
         if not filename.endswith(".md"):
             continue
@@ -345,10 +356,20 @@ def _has_approved_review(
                 workflow, "reviewer", reviewer, reviewer_role
             )
             decision_ok = _review_decision_valid(review)
+            spec_risk = spec_metadata(spec_content).get("risk", "medium")
+            required_for = (
+                workflow.get("review_separation", {}).get("required_for")
+                or ["high"]
+            )
             separated = True
-            if profile["require_role_separation"]:
+            if spec_risk in required_for:
                 builder = _last_actor(project_root, spec_name, "in-progress")
                 separated = bool(reviewer and builder and reviewer != builder)
+                if not separated:
+                    separation_reason = (
+                        f"审查身份与构建者身份相同；当前 risk 等级 ({spec_risk}) 在 "
+                        "workflow.json.review_separation.required_for 中要求独立审查者。"
+                    )
             clean_ok = not profile["require_clean_worktree"] or git["worktree"] == "clean"
             if (
                 f"规格: {spec_name}" in review
@@ -363,8 +384,8 @@ def _has_approved_review(
                 and separated
                 and clean_ok
             ):
-                return True
-    return False
+                return True, None
+    return False, separation_reason
 
 
 def _check_risk_required_rules(project_root: str, spec_content: str) -> list[str]:

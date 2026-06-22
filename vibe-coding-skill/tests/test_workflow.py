@@ -3755,5 +3755,179 @@ class VibeCliTests(unittest.TestCase):
         self.assertIn("状态为 review", result.stdout)
 
 
+class ReviewSeparationTests(unittest.TestCase):
+    """Cover the configurable review-separation gate (Rule 5 extension).
+
+    Default behaviour preserves the prior hard-coded "high only" rule so
+    existing projects are unaffected. New projects opt in by adding
+    ``medium`` (or ``low``) to ``workflow.json.review_separation.required_for``.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name)
+        init_project.init_project(str(self.project), "web")
+        subprocess.run(
+            ["git", "init", "-q", str(self.project)], check=False, capture_output=True
+        )
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _workflow(self) -> dict:
+        return json.loads(
+            (self.project / ".agents" / "workflow.json").read_text(encoding="utf-8")
+        )
+
+    def _set_separation(self, required_for: list[str]) -> None:
+        wf = self._workflow()
+        wf["review_separation"] = {"required_for": required_for}
+        (self.project / ".agents" / "workflow.json").write_text(
+            json.dumps(wf), encoding="utf-8"
+        )
+
+    def _cli(self, *args: str) -> subprocess.CompletedProcess:
+        """Wrapper around vibe.py. Inject project_root after the subcommand
+        for those subcommands (advance) that need it positionally; for
+        others (plan, evidence, retrospective, status) it is a no-op pass.
+        """
+        argv = [sys.executable, str(SKILL_DIR / "scripts" / "vibe.py"), *args]
+        # Subcommands that take project_root positionally; "plan" does too
+        if args and args[0] in {"advance", "plan", "evidence", "retrospective", "status"}:
+            argv.insert(3, str(self.project))
+        return subprocess.run(
+            argv,
+            cwd=str(self.project),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def _write_medium_spec(self, name: str) -> Path:
+        path = self.project / ".agents" / "specs" / f"{name}.md"
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        path.write_text(
+            "# " + name + "\n\n"
+            "> 状态: draft | 创建: " + now + " | 更新: " + now + "\n"
+            "> 风险: medium\n"
+            "> 风险确认: confirmed\n\n"
+            "## 意图 (Intent)\n\ntext\n\n"
+            "## 涉及范围\n\n"
+            "- **新增文件**: none\n- **修改文件**: none\n- **不动文件**: none\n"
+            "- **受影响的读路径**: 无读路径影响 (no read path affected)\n\n"
+            "### 正常路径\n\n1. concrete acceptance item\n\n"
+            "## 验收标准\n\n- [ ] AC1 body\n\n"
+            "## 验证方式\n\n- [ ] 相关回归测试已新增或更新\n",
+            encoding="utf-8",
+        )
+        return path
+
+    def _write_high_spec(self, name: str) -> Path:
+        path = self.project / ".agents" / "specs" / f"{name}.md"
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        path.write_text(
+            "# " + name + "\n\n"
+            "> 状态: draft | 创建: " + now + " | 更新: " + now + "\n"
+            "> 风险: high\n"
+            "> 风险确认: confirmed\n\n"
+            "## 意图 (Intent)\n\ntext\n\n"
+            "## 涉及范围\n\n"
+            "- **新增文件**: none\n- **修改文件**: none\n- **不动文件**: none\n"
+            "- **受影响的读路径**: 无读路径影响 (no read path affected)\n\n"
+            "### 正常路径\n\n1. concrete acceptance item\n\n"
+            "## 验收标准\n\n- [ ] AC1 body\n\n"
+            "## 验证方式\n\n- [ ] 相关回归测试已新增或更新\n",
+            encoding="utf-8",
+        )
+        return path
+
+    def _drive_to_review(self, name: str) -> None:
+        self._cli("advance", name, "spec-ready")
+        self._cli("plan", name)
+        self._cli("advance", name, "in-progress")
+        self._cli(
+            "evidence", name, "verify", "passed",
+            f"checks passed {VALID_SPEC_AC_ALL}",
+        )
+        self._cli("advance", name, "review")
+        # Default risk profiles (medium & high) both require release evidence.
+        self._cli(
+            "evidence", name, "release", "not-applicable",
+            "no separate release step in this project",
+        )
+
+    def test_default_does_not_block_medium_self_review(self) -> None:
+        """Default required_for=["high"] preserves prior medium-risk behaviour."""
+        self._write_medium_spec("m-feat")
+        self._drive_to_review("m-feat")
+        generate_review.generate_review(str(self.project), "m-feat")
+        record_review.record_review(
+            str(self.project), "m-feat", "approved",
+            "scope reviewed", "verify evidence", "self",
+        )
+        # Same identity (self) must be allowed for medium under the default config.
+        result = self._cli("advance", "m-feat", "released")
+        self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+
+    def test_medium_required_blocks_same_identity(self) -> None:
+        """Opting in to medium separation blocks self-review and surfaces reason."""
+        self._set_separation(["high", "medium"])
+        self._write_medium_spec("m-feat")
+        self._drive_to_review("m-feat")
+        activity = self.project / ".agents" / "activity.md"
+        content = activity.read_text(encoding="utf-8")
+        content = content.replace("| Actor: 未记录 |", "| Actor: self |")
+        activity.write_text(content, encoding="utf-8")
+        generate_review.generate_review(str(self.project), "m-feat")
+        record_review.record_review(
+            str(self.project), "m-feat", "approved",
+            "scope reviewed", "verify evidence", "self",
+        )
+        result = self._cli("advance", "m-feat", "released")
+        self.assertNotEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+        combined = result.stdout + result.stderr
+        self.assertIn("审查身份与构建者身份相同", combined)
+        self.assertIn("review_separation.required_for", combined)
+
+    def test_medium_required_passes_with_distinct_identity(self) -> None:
+        self._set_separation(["high", "medium"])
+        self._write_medium_spec("m-feat")
+        self._drive_to_review("m-feat")
+        # Run another advance to record a different in-progress actor is not
+        # necessary; we just need a reviewer different from the builder.
+        # Builder was implicit (CLI default). Patch activity log to inject a
+        # known builder actor, then have a distinct reviewer sign off.
+        activity = self.project / ".agents" / "activity.md"
+        content = activity.read_text(encoding="utf-8")
+        content = content.replace("| Actor: 未记录 |", "| Actor: builder-bob |")
+        activity.write_text(content, encoding="utf-8")
+        generate_review.generate_review(str(self.project), "m-feat")
+        record_review.record_review(
+            str(self.project), "m-feat", "approved",
+            "scope reviewed", "verify evidence", "reviewer-alice",
+        )
+        result = self._cli("advance", "m-feat", "released")
+        self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+
+    def test_high_separation_still_enforced_by_default(self) -> None:
+        """Regression: high-risk separation behaviour is unchanged by the upgrade."""
+        self._write_high_spec("h-feat")
+        self._drive_to_review("h-feat")
+        # Inject a known builder actor ("self") so the same-identity check triggers.
+        activity = self.project / ".agents" / "activity.md"
+        content = activity.read_text(encoding="utf-8")
+        content = content.replace("| Actor: 未记录 |", "| Actor: self |")
+        activity.write_text(content, encoding="utf-8")
+        generate_review.generate_review(str(self.project), "h-feat")
+        record_review.record_review(
+            str(self.project), "h-feat", "approved",
+            "scope reviewed", "verify evidence", "self",
+        )
+        result = self._cli("advance", "h-feat", "released")
+        self.assertNotEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+        combined = result.stdout + result.stderr
+        self.assertIn("审查身份与构建者身份相同", combined)
+
+
 if __name__ == "__main__":
     unittest.main()

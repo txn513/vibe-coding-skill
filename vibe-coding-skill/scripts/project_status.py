@@ -480,9 +480,36 @@ def recommend_next(project_root: str, specs: list[dict] | None = None) -> dict:
         )
 
     if status == "review":
-        if profile["require_review"] and not set_status._has_approved_review(
-            project_root, name, content, profile, workflow
-        ):
+        if profile["require_review"]:
+            _r_ok, _r_reason = set_status._has_approved_review(
+                project_root, name, content, profile, workflow
+            )
+            if not _r_ok:
+                if _r_reason:
+                    return _recommendation(
+                        "使用不同身份生成审查并重新提交",
+                        _r_reason,
+                        spec=name,
+                        checks=["verify 门禁已满足", "approved review 仍缺失"],
+                        why_not="当前 risk 等级要求独立审查者；review 与 build 身份必须不同。",
+                        alternative={
+                            "action": "调整 workflow.json.review_separation.required_for",
+                            "reason": "如确需同身份自审，把当前 risk 等级从该列表中移除。",
+                            "spec": name,
+                        },
+                    )
+                return _recommendation(
+                    "生成独立审查并提交结构化结论",
+                    "尚无当前版本的有效批准记录。",
+                    spec=name,
+                    checks=["verify 门禁已满足", "approved review 仍缺失"],
+                    why_not="现在不能发布或完成，因为还缺少独立审查结论。",
+                    alternative={
+                        "action": "先检查审查上下文是否过期",
+                        "reason": "如果代码或证据已变，先刷新 review 上下文更稳。",
+                        "spec": name,
+                    },
+                )
             return _recommendation(
                 "生成独立审查并提交结构化结论",
                 "尚无当前版本的有效批准记录。",

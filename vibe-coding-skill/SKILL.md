@@ -88,8 +88,22 @@ artifacts merely because a template exists.
    requirement/policy freshness; they must not cause false invalidation.
 4. Execute configured project commands for mechanical checks. A written claim
    cannot replace configured command evidence.
-5. Validate actor and declared role. High-risk separated roles must use
-   different identities.
+5. Validate actor and declared role. Separated roles (reviewer, releaser,
+   observer) must use a different identity from the builder, and the spec's
+   risk level determines which transitions enforce this. The set of risk
+   levels that require identity separation is configurable per project via
+   `workflow.json.review_separation.required_for` and defaults to `["high"]`
+   so existing projects keep their current behaviour. New projects and
+   projects that opt in can add `medium` (and, less commonly, `low`) to that
+   list to require an independent reviewer on every review transition. The
+   reviewer does not have to be a separate human; an independent sub-agent
+   or a separate session of the same Agent qualifies, as long as the
+   reviewer identity recorded in the review document differs from the
+   builder identity recorded in the activity log. The Skill never assumes
+   a specific sub-agent mechanism (Task tool, helper Skill, fresh session)
+   — the project / Agent runtime picks whatever works in its environment;
+   what matters is that the recorded identities are different. The advance
+   gate refuses a transition when separation is required and not present.
 6. Require actor, `override_approver` role, and reason for every forced
    transition.
 7. Archive replaced or superseded evidence and downstream artifacts. Stale
