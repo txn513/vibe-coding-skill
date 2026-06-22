@@ -134,6 +134,26 @@ artifacts merely because a template exists.
       resolves the same request through every component involved, and that
       each critical handoff preserves the intended semantics, ordering, and
       authorization state.
+    - For each multi-process link in the architecture (a reverse proxy, ingress,
+      sidecar, message broker, or any role whose job is to forward traffic to an
+      upstream process): plan the degradation path at spec-ready, not at verify
+      time. The forwarder must surface a structured error (an HTTP 5xx with a
+      JSON body whose `error` field carries a code and a message is the
+      recommended shape) when the upstream is unreachable, instead of the
+      forwarder tool's default 5xx + text/plain. Front-end error handling must
+      distinguish "network / process unreachable" from "HTTP business error" so
+      the user sees a domain-specific message, not the raw status code or the
+      forwarder tool's default text. After the upstream recovers, the retry
+      path must succeed immediately, without being blocked by stale
+      front-end caches, CDN caches, or service workers. The Skill never
+      assumes a specific forwarder implementation (dev-server proxy, ingress
+      controller, service mesh, cloud load balancer), a specific error-code
+      vocabulary, or a specific process-isolation mechanism (container, PID
+      namespace, sidecar pattern); the project decides all three. The three
+      states to verify follow the Rule 13 pattern: valid (upstream reachable
+      and returning the expected response), degraded (upstream unreachable
+      and the forwarder returning a structured error the front-end can
+      render), and recovered (upstream back online and retry succeeding).
 13. When behavior depends on time-sensitive or freshness-sensitive state such
     as cache TTL, token expiry, propagation delay, or refresh windows, verify
     at least three states: valid, expired or stale, and recovered after refresh
