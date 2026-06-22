@@ -3929,5 +3929,71 @@ class ReviewSeparationTests(unittest.TestCase):
         self.assertIn("审查身份与构建者身份相同", combined)
 
 
+class BilingualHeadingTests(unittest.TestCase):
+    """Cover the bilingual heading recognition in validate_spec.
+
+    Older specs may use pure-English headings ("## Intent", "## Scope",
+    "## Acceptance Criteria"). The bilingual template introduced
+    Chinese-first headings ("## 意图 (Intent)"). The validator must
+    accept both forms so legacy specs are not falsely rejected.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = Path(self.tmp.name) / "spec.md"
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _write(self, body: str) -> None:
+        self.path.write_text(body, encoding="utf-8")
+
+    def _errors(self) -> list[str]:
+        import validate_spec
+        result = validate_spec.validate_spec(str(self.path))
+        return [issue["msg"] for issue in result["issues"] if issue["severity"] == "error"]
+
+    def test_pure_chinese_headings_pass(self) -> None:
+        self._write(
+            "# sample\n\n> 状态: draft\n\n"
+            "## 意图\n\ntext body here\n\n"
+            "## 涉及范围\n\n- **新增文件**: none\n\n"
+            "## 验收标准\n\n- [ ] AC1\n"
+        )
+        self.assertEqual(self._errors(), [])
+
+    def test_pure_english_headings_pass(self) -> None:
+        self._write(
+            "# sample\n\n> 状态: draft\n\n"
+            "## Intent\n\ntext body here\n\n"
+            "## Scope\n\n- **新增文件**: none\n\n"
+            "## Acceptance Criteria\n\n- [ ] AC1\n"
+        )
+        self.assertEqual(self._errors(), [])
+
+    def test_bilingual_template_headings_pass(self) -> None:
+        # The exact form the spec template produces.
+        self._write(
+            "# sample\n\n> 状态: draft\n\n"
+            "## 意图 (Intent)\n\ntext body here\n\n"
+            "## 涉及范围\n\n- **新增文件**: none\n\n"
+            "## 验收标准 (Acceptance Criteria)\n\n- [ ] AC1\n"
+        )
+        self.assertEqual(self._errors(), [])
+
+    def test_missing_canonical_section_still_errors(self) -> None:
+        # Missing 涉及范围 must still be reported under its canonical name,
+        # even if the user used a non-recognised alias.
+        self._write(
+            "# sample\n\n> 状态: draft\n\n"
+            "## 意图 (Intent)\n\ntext body here\n\n"
+            "## Some Random Heading\n\nbody\n\n"
+            "## 验收标准 (Acceptance Criteria)\n\n- [ ] AC1\n"
+        )
+        errors = self._errors()
+        self.assertTrue(any("涉及范围" in e for e in errors),
+                        f"expected 涉及范围 in errors, got {errors}")
+
+
 if __name__ == "__main__":
     unittest.main()
