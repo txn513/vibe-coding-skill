@@ -187,7 +187,15 @@ vibe ui-redesign-contract <spec> --source-type opendesign --source-artifacts des
 
 ---
 
-## 十一、最省心的三句话
+## 十一、分界速查(Skill 核心 vs 项目规则)
+
+如果你不确定某条约束来自 Skill 核心还是项目级约定,先看:
+
+- [skill-vs-project-boundary.md](skill-vs-project-boundary.md) — 通用决策表 + 5 问判断法 + 易混场景
+- `Vibe 边界审计` / `Vibe 跑一次 boundary` — 对当前项目跑一次 `vibe.py boundary`
+
+## 十二、最省心的三句话
+
 
 如果你只记三句，记这三句：
 
