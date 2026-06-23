@@ -3995,5 +3995,150 @@ class BilingualHeadingTests(unittest.TestCase):
                         f"expected 涉及范围 in errors, got {errors}")
 
 
+class RetroGapScanTests(unittest.TestCase):
+    """Cover the read-only retro gap scanner.
+
+    The scanner is the data layer for P2 (retro auto-tracking). It must
+    be read-only, never guess closure without a structured signal, and
+    accept bilingual section titles (same alias-tolerance principle as
+    the spec heading validator).
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name)
+        self.retros_dir = self.project / ".agents" / "retros"
+        self.retros_dir.mkdir(parents=True)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _write_retro(self, name: str, body: str) -> Path:
+        path = self.retros_dir / f"{name}.md"
+        path.write_text(body, encoding="utf-8")
+        return path
+
+    def test_no_retros_dir_returns_empty(self) -> None:
+        import importlib
+        # Force re-import to clear module-level state
+        import retro_gap_scan
+        importlib.reload(retro_gap_scan)
+        empty_project = Path(self.tmp.name) / "no-agents"
+        empty_project.mkdir()
+        result = retro_gap_scan.scan_retro_gaps(str(empty_project), "auth-refactor")
+        self.assertEqual(result, [])
+
+    def test_no_gap_section_returns_empty(self) -> None:
+        import retro_gap_scan
+        self._write_retro("retro-2026-06-15", "# Regular retro\n\nNo gap section here.\n")
+        result = retro_gap_scan.scan_retro_gaps(str(self.project), "auth-refactor")
+        self.assertEqual(result, [])
+
+    def test_chinese_gap_section_extracted(self) -> None:
+        import retro_gap_scan
+        self._write_retro(
+            "retro-2026-06-15",
+            "# retro\n\n## 开放 gap\n\n- 端到端还没做 (auth-refactor)\n- 另一项\n",
+        )
+        result = retro_gap_scan.scan_retro_gaps(str(self.project), "auth-refactor")
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].matched_spec, "auth-refactor")
+        self.assertEqual(result[0].section_title, "开放 gap")
+        self.assertIn("端到端", result[0].line_text)
+
+    def test_english_gap_section_extracted(self) -> None:
+        import retro_gap_scan
+        self._write_retro(
+            "retro-2026-06-15",
+            "# retro\n\n## Open gaps\n\n- e2e not run yet (auth-refactor)\n",
+        )
+        result = retro_gap_scan.scan_retro_gaps(str(self.project), "auth-refactor")
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].section_title, "Open gaps")
+
+    def test_gap_without_spec_name_is_not_a_candidate(self) -> None:
+        """A gap that does not reference a spec name is NOT a candidate.
+
+        This is the core Rule 17 enforcement: the Skill refuses to
+        claim closure without a structured signal.
+        """
+        import retro_gap_scan
+        self._write_retro(
+            "retro-2026-06-15",
+            "# retro\n\n## 开放 gap\n\n- 整体文档还没整理\n",
+        )
+        result = retro_gap_scan.scan_retro_gaps(str(self.project), "auth-refactor")
+        self.assertEqual(result, [])
+
+    def test_different_spec_name_does_not_match(self) -> None:
+        import retro_gap_scan
+        self._write_retro(
+            "retro-2026-06-15",
+            "# retro\n\n## 开放 gap\n\n- 端到端还没做 (other-spec)\n",
+        )
+        result = retro_gap_scan.scan_retro_gaps(str(self.project), "auth-refactor")
+        self.assertEqual(result, [])
+
+    def test_evidence_with_verify_suffix_still_matches_base_spec(self) -> None:
+        import retro_gap_scan
+        self._write_retro(
+            "retro-2026-06-15",
+            "# retro\n\n## 开放 gap\n\n- 端到端 (auth-refactor)\n",
+        )
+        result = retro_gap_scan.scan_retro_gaps(str(self.project), "auth-refactor-verify")
+        self.assertEqual(len(result), 1)
+
+    def test_multiple_gaps_across_retros(self) -> None:
+        import retro_gap_scan
+        self._write_retro(
+            "retro-2026-06-15",
+            "# a\n\n## 开放 gap\n\n- gap1 (auth-refactor)\n",
+        )
+        self._write_retro(
+            "retro-2026-06-20",
+            "# b\n\n## 未完成项\n\n- gap2 (auth-refactor)\n- gap3 (other)\n",
+        )
+        result = retro_gap_scan.scan_retro_gaps(str(self.project), "auth-refactor")
+        self.assertEqual(len(result), 2)
+        retro_names = {c.retro_name for c in result}
+        self.assertEqual(retro_names, {"retro-2026-06-15", "retro-2026-06-20"})
+
+    def test_format_candidates_produces_readable_output(self) -> None:
+        import retro_gap_scan
+        self._write_retro(
+            "retro-2026-06-15",
+            "# a\n\n## 开放 gap\n\n- 端到端 (auth-refactor)\n",
+        )
+        result = retro_gap_scan.scan_retro_gaps(str(self.project), "auth-refactor")
+        text = retro_gap_scan.format_candidates(result)
+        self.assertIn("auth-refactor", text)
+        self.assertIn("retro-2026-06-15", text)
+        self.assertIn("Y/n/skip-all", text)
+
+    def test_suggested_mini_paragraph_marks_auto_suggested(self) -> None:
+        """The suggested paragraph MUST mark itself as auto-suggested so the
+        user can tell it has not been written to the retro file.
+        """
+        import retro_gap_scan
+        self._write_retro(
+            "retro-2026-06-15",
+            "# a\n\n## 开放 gap\n\n- 端到端 (auth-refactor)\n",
+        )
+        result = retro_gap_scan.scan_retro_gaps(str(self.project), "auth-refactor")
+        text = retro_gap_scan.suggested_mini_paragraph(result[0], "auth-refactor")
+        self.assertIn("auto-suggested", text)
+        self.assertIn("auth-refactor", text)
+
+    def test_section_with_parenthetical_subtitle_still_recognised(self) -> None:
+        import retro_gap_scan
+        self._write_retro(
+            "retro-2026-06-15",
+            "# a\n\n## 开放 gap (follow-ups)\n\n- 端到端 (auth-refactor)\n",
+        )
+        result = retro_gap_scan.scan_retro_gaps(str(self.project), "auth-refactor")
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].section_title, "开放 gap")
+
+
 if __name__ == "__main__":
     unittest.main()

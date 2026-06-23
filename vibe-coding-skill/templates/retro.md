@@ -83,3 +83,13 @@
 - [ ] 更新 spec 模板: {{ACTION_SPEC_TEMPLATE}}
 - [ ] 更新 review checklist: {{ACTION_REVIEW_CL}}
 - [ ] 其他: {{ACTION_OTHER}}
+
+## 开放 gap（可选）
+
+> 提示：如果你想 Skill 在新 verify evidence 写入时提示"此 gap 可能已闭合"，
+> 可以在这里列出。每条至少包含一个 spec 名（kebab-case），例如：
+>
+> - 端到端还没跑通 (auth-refactor)
+> - cache 失效路径未验证 (api-cache)
+>
+> Skill 不会自动写 retro，闭合判断永远由你确认。

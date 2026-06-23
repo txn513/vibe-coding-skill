@@ -19,6 +19,7 @@ from common import (
 )
 from set_status import _acceptance_criteria_ids, _missing_acceptance_criteria_references
 from workflow_state import configured_commands, ensure_workflow, spec_metadata
+import retro_gap_scan
 
 PHASES = {"verify", "release", "observe"}
 RESULTS = {"passed", "failed", "not-applicable"}
@@ -150,6 +151,7 @@ def record_evidence(
             if expected:
                 print(f"   建议在证据中标注覆盖: {expected}")
     print(f"✅ 已记录 {phase} 证据: {evidence_file}")
+    _maybe_prompt_retro_gap_closure(project_root, spec_name, evidence, phase)
     return evidence_file
 
 
@@ -174,6 +176,51 @@ def misplaced_vibe_options(command: list[str] | None) -> list[str]:
         return []
     return [token for token in command if token in VIBE_OPTIONS_AFTER_COMMAND]
 
+
+
+
+def _maybe_prompt_retro_gap_closure(
+    project_root, spec_name, evidence_text, phase
+):
+    if phase != "verify":
+        return
+    try:
+        candidates = retro_gap_scan.scan_retro_gaps(
+            project_root, spec_name, evidence_text
+        )
+    except Exception:
+        return
+    if not candidates:
+        return
+    print()
+    print(retro_gap_scan.format_candidates(candidates))
+    try:
+        answer = input("   选择 (Y/n/skip-all): ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return
+    if answer in {"y", "yes", ""}:
+        for c in candidates:
+            print()
+            print("---" + " 建议追加到 " + c.retro_name + " 的 mini 段（手动粘贴）---")
+            print(retro_gap_scan.suggested_mini_paragraph(c, spec_name))
+        print("⚠️  Skill 不会自动写入 retro；请你 review 后手动粘贴。")
+    elif answer == "skip-all":
+        _record_retro_skip_all(project_root)
+        print("   本项目 retro gap 提示已永久关闭（写入 workflow.json）。")
+    else:
+        print("   跳过本次提示。")
+
+
+def _record_retro_skip_all(project_root):
+    import workflow_state
+    workflow, _ = workflow_state.ensure_workflow(project_root)
+    workflow.setdefault("retro_gap_scan", {})["enabled"] = False
+    from common import atomic_write_json
+    atomic_write_json(
+        os.path.join(project_root, ".agents", "workflow.json"),
+        workflow,
+    )
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Record verification or release evidence")

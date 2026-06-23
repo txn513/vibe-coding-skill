@@ -31,6 +31,7 @@ from workflow_state import (
     dependency_cycles,
     ensure_workflow,
     spec_metadata,
+    # NOTE: retro_gap_scan is imported lazily inside _audit_retro_gap_candidates
 )
 
 import archive_status
@@ -68,6 +69,7 @@ def doctor(project_root: str) -> dict:
         issues.append(f"dependency cycle: {' -> '.join(cycle)}")
     _audit_policy_sources(Path(project_root), issues, warnings)
     _audit_context_freshness(Path(project_root), warnings)
+    _audit_retro_gap_candidates(project_root, warnings)
 
     specs_dir = os.path.join(project_root, ".agents", "specs")
     if os.path.exists(specs_dir):
@@ -333,6 +335,42 @@ def _smoke_commands(project_root: str) -> list[dict] | None:
     passed_count = sum(1 for r in results if r.get("passed"))
     print(f"  Smoke: {passed_count}/{len(results)} 通过")
     return results
+
+
+
+def _audit_retro_gap_candidates(project_root, warnings):
+    """P2 advisory: surface retro gap candidates as a doctor warning.
+
+    Lists all open gaps from any retro in the project so the user
+    can see them during a routine doctor sweep. Never blocks.
+    Honours the per-project opt-out flag.
+    """
+    try:
+        workflow, _ = ensure_workflow(project_root)
+        if workflow.get("retro_gap_scan", {}).get("enabled") is False:
+            return
+    except Exception:
+        return
+    retros_dir = os.path.join(project_root, ".agents", "retros")
+    if not os.path.isdir(retros_dir):
+        return
+    import retro_gap_scan as _rgs
+    total = 0
+    for entry in sorted(os.listdir(retros_dir)):
+        if not entry.endswith(".md"):
+            continue
+        try:
+            content = open(os.path.join(retros_dir, entry), encoding="utf-8").read()
+        except OSError:
+            continue
+        for _title, body, _ in _rgs._iter_gap_sections(content):
+            for line in body.splitlines():
+                if line.lstrip().startswith(("-", "*")):
+                    total += 1
+    if total > 0:
+        warnings.append(
+            f"retro gap 候选 {total} 个未确认（新 verify evidence 写入时会逐条提示）"
+        )
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Audit project workflow integrity")
