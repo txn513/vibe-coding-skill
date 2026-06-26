@@ -4140,5 +4140,101 @@ class RetroGapScanTests(unittest.TestCase):
         self.assertEqual(result[0].section_title, "开放 gap")
 
 
+class FixStateAnchorTests(unittest.TestCase):
+    """Cover the bug evidence fix-state anchor advisory.
+
+    The advisory surfaces Rule 25 'evidence exists, but does not prove the
+    claimed behavior' at spec-ready time. It is intentionally advisory
+    (never blocks the gate) so the reviewer can decide whether the
+    evidence is real or self-fulfilling.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name)
+        init_project.init_project(str(self.project), "web")
+        subprocess.run(["git", "init", "-q", str(self.project)], check=False, capture_output=True)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _write_spec(self, name: str) -> Path:
+        path = self.project / ".agents" / "specs" / f"{name}.md"
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        path.write_text(
+            f"# {name}\n\n> 状态: draft | 类型: bug | 创建: {now} | 更新: {now}\n"
+            "> 风险: medium\n> 风险确认: confirmed\n\n"
+            "## 意图 (Intent)\n\ntext\n\n"
+            "## 涉及范围\n\n- **新增文件**: none\n- **修改文件**: none\n- **不动文件**: none\n"
+            "- **受影响的读路径**: 无读路径影响 (no read path affected)\n\n"
+            "### 正常路径\n\n1. concrete acceptance item\n\n"
+            "## 验收标准\n\n- [ ] AC1 body\n\n"
+            "## 验证方式\n\n- [ ] 相关回归测试已新增或更新\n",
+            encoding="utf-8",
+        )
+        return path
+
+    def _write_evidence(self, spec: str, name: str, body: str) -> Path:
+        ev_dir = self.project / ".agents" / "evidence" / spec
+        ev_dir.mkdir(parents=True, exist_ok=True)
+        path = ev_dir / name
+        path.write_text(body, encoding="utf-8")
+        return path
+
+    def test_chinese_fix_before_anchor_recognised(self) -> None:
+        import set_status
+        text = "reproduction 步骤在未应用 fix 的 commit 上跑过，看到 assertion error"
+        self.assertTrue(set_status._has_fix_state_anchor(text, "before"))
+
+    def test_english_fix_before_anchor_recognised(self) -> None:
+        import set_status
+        text = "reproduction on commit abc123 (before fix), pytest exit code 1"
+        self.assertTrue(set_status._has_fix_state_anchor(text, "before"))
+
+    def test_chinese_fix_after_anchor_recognised(self) -> None:
+        import set_status
+        text = "应用 fix 后再次跑 pytest，全部 PASS"
+        self.assertTrue(set_status._has_fix_state_anchor(text, "after"))
+
+    def test_english_fix_after_anchor_recognised(self) -> None:
+        import set_status
+        text = "with the fix applied, all 5 tests pass"
+        self.assertTrue(set_status._has_fix_state_anchor(text, "after"))
+
+    def test_missing_fix_before_anchor_returns_false(self) -> None:
+        import set_status
+        text = "ran pytest, saw the bug. Then I fixed it and pytest passed."
+        self.assertFalse(set_status._has_fix_state_anchor(text, "before"))
+
+    def test_missing_fix_after_anchor_returns_false(self) -> None:
+        import set_status
+        text = "before fix, the test failed. I fixed the code."
+        self.assertFalse(set_status._has_fix_state_anchor(text, "after"))
+
+    def test_load_evidence_text_returns_empty_when_missing(self) -> None:
+        import set_status
+        result = set_status._load_evidence_text(str(self.project), "nope", "nope.md")
+        self.assertEqual(result, "")
+
+    def test_load_evidence_text_returns_content(self) -> None:
+        import set_status
+        self._write_evidence("bug-x", "verify-reproduction.md", "before fix: bug reproduced")
+        result = set_status._load_evidence_text(str(self.project), "bug-x", "verify-reproduction.md")
+        self.assertIn("before fix", result)
+
+
+    def _cli(self, *args: str) -> subprocess.CompletedProcess:
+        argv = [sys.executable, str(SKILL_DIR / "scripts" / "vibe.py"), *args]
+        if args and args[0] in {"advance", "plan", "evidence", "retrospective", "status"}:
+            argv.insert(3, str(self.project))
+        return subprocess.run(
+            argv,
+            cwd=str(self.project),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

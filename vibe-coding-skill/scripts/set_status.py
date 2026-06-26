@@ -180,6 +180,7 @@ def set_status(
                 ):
                     print("❌ Bug 进入审查前需要 reproduction 与 fix-regression 双向证据")
                     return None
+                _emit_fix_state_advisory(project_root, spec_name)
             elif not _has_current_evidence(
                 project_root, spec_name, content, "verify", profile, workflow
             ):
@@ -630,6 +631,62 @@ def _out_of_scope_section(spec_content: str) -> str:
     return match.group(1) if match else ""
 
 
+# Bilingual fix-state phrases that make it explicit which code state the
+# evidence was captured against. Project authors can include any of these
+# in their evidence text to satisfy the advisory; absence triggers a
+# warning at spec-ready so the reviewer can decide whether the evidence
+# is real or self-fulfilling (Rule 25 'evidence exists, but does not prove
+# the claimed behavior'). The advisory is non-blocking: Rule 39 keeps
+# review gates advisory by default.
+_FIX_BEFORE_PHRASES = (
+    # Chinese
+    "未应用 fix", "未应用修复",
+    "还原到 fix 前", "还原到修复前",
+    "fix 前", "修复前",
+    # English
+    "before fix", "before the fix", "pre-fix",
+    "revert", "reverted to", "without the fix",
+)
+_FIX_AFTER_PHRASES = (
+    # Chinese
+    "应用 fix", "应用修复",
+    "fix 后", "修复后", "带上 fix",
+    # English
+    "after fix", "after the fix", "with the fix",
+    "on fixed commit",
+)
+
+
+def _has_fix_state_anchor(evidence_text: str, kind: str) -> bool:
+    """Return True if the evidence text explicitly references the code state
+
+    (fix-before for reproduction, fix-after for fix-regression) it was
+    captured against. The check is advisory: it is intentionally permissive
+    (any of the bilingual phrases matches) and never blocks the gate. The
+    reviewer's job is to decide whether the captured state is real; the
+    Skill only ensures the evidence author stated which state they used.
+    """
+    phrases = _FIX_BEFORE_PHRASES if kind == "before" else _FIX_AFTER_PHRASES
+    lowered = evidence_text.lower()
+    for phrase in phrases:
+        if phrase.lower() in lowered:
+            return True
+    return False
+
+
+def _load_evidence_text(project_root: str, spec_name: str, evidence_name: str) -> str:
+    """Read an evidence file and return its text. Empty string when missing."""
+    path = os.path.join(
+        project_root, ".agents", "evidence", spec_name, evidence_name
+    )
+    if not os.path.exists(path):
+        return ""
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return handle.read()
+    except OSError:
+        return ""
+
 def _has_bug_evidence(
     project_root: str,
     spec_name: str,
@@ -746,6 +803,45 @@ def _last_actor(project_root: str, spec_name: str, status: str) -> str:
     )
     return matches[-1].strip() if matches else ""
 
+
+
+
+def _emit_fix_state_advisory(project_root: str, spec_name: str) -> None:
+    """Advisory: warn the reviewer when bug evidence lacks fix-state anchor.
+
+    'evidence exists, but does not prove the claimed behavior' (Rule 25)
+    is a known failure mode where a reproduction or fix-regression test
+    passes against the wrong code state (e.g. mocks its own function,
+    runs against the wrong commit). The Skill cannot run the tests for the
+    user (project-specific tooling, snapshot strategy, network mocks), but
+    it CAN require the evidence author to state which code state they used.
+
+    This advisory surfaces missing anchors at spec-ready time. It is
+    intentionally advisory (Rule 39: default behaviour, opt-out) so the
+    reviewer can decide whether the evidence is real or self-fulfilling.
+    Never blocks the gate.
+    """
+    reproduction_text = _load_evidence_text(
+        project_root, spec_name, "verify-reproduction.md"
+    )
+    fixed_text = _load_evidence_text(
+        project_root, spec_name, "verify-fix-regression.md"
+    )
+    repro_ok = _has_fix_state_anchor(reproduction_text, "before")
+    fix_ok = _has_fix_state_anchor(fixed_text, "after")
+    if repro_ok and fix_ok:
+        return
+    missing: list[str] = []
+    if not repro_ok:
+        missing.append('reproduction evidence missing fix-before state anchor')
+    if not fix_ok:
+        missing.append('fix-regression evidence missing fix-after state anchor')
+    print("WARN  Bug evidence fix-state anchor missing (Rule 25 shared failure mode:")
+    print("   evidence exists, but does not prove the claimed behavior):")
+    for m in missing:
+        print("   - " + m)
+    print("   Suggestion: include explicit anchors such as commit hash / revert to X / applied fix / with the fix")
+    print("   This is advisory and does NOT block the gate. The reviewer must judge whether the evidence truly depends on the fix code.")
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser(description="Update spec status")
