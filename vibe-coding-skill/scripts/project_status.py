@@ -140,6 +140,10 @@ def project_status(project_root: str) -> None:
     _print_recommendation(recommendation)
     _print_stale_archive_hint(project_root)
     _print_stage_stall_warnings(project_root, specs)
+    # Rule 50: machine-readable status summary.
+    spec_count = len(specs)
+    summary = f"specs={spec_count} recommendation={recommendation.get('action', '')}"
+    print(f"<!-- vibe:status_summary: {summary} -->")
 
 
 def project_next(project_root: str) -> dict:
@@ -727,6 +731,10 @@ def _print_recommendation(recommendation: dict) -> None:
             print(f"   模型理由: {model['reason']}")
         if model.get("upgrade_if"):
             print(f"   升级条件: {model['upgrade_if']}")
+    # Rule 50: machine-readable next_action marker for downstream parsers.
+    print(f"<!-- vibe:next_action: {recommendation.get('action', '')} -->")
+    if recommendation.get("spec"):
+        print(f"<!-- vibe:next_target: {recommendation['spec']} -->")
 
 
 def _apply_model_mapping(project_root: str, recommendation: dict) -> None:

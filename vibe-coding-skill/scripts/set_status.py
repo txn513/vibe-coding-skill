@@ -274,6 +274,11 @@ def set_status(
 
     transition = f"{current_status} → {new_status}"
     print(f"✅ {spec_name}: {transition}")
+    # Rule 50: machine-readable gate verdict.
+    verdict = "pass"
+    if force:
+        verdict = "forced"
+    print(f"<!-- vibe:gate_verdict: {verdict} spec={spec_name} transition={current_status}->{new_status} -->")
     if new_status == "review" and not force:
         _print_plan_progress_reminder(project_root, spec_name)
 

@@ -7,6 +7,7 @@
 > 负责人: {{OWNER}}
 > 依赖: {{DEPENDENCIES}}
 > 发布组: {{RELEASE_GROUP}}
+> Prompt version: {{PROMPT_VERSION}}
 {{REGRESSION_FROM_LINE}}
 ## 意图 (Intent)
 

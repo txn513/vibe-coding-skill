@@ -134,6 +134,7 @@ def _get_type_defaults(
         "RELEASE_GROUP": release_group or "待确认",
         "REGRESSION_FROM": regression_from,
         "REGRESSION_FROM_LINE": f"> 回归来源: {regression_from}" if regression_from else "",
+        "PROMPT_VERSION": "1",
         "CREATED_AT": now, "UPDATED_AT": now,
         "SUCCESS_CRITERION_1": "", "SUCCESS_CRITERION_2": "", "SUCCESS_CRITERION_3": "",
         "TECH_CONSTRAINT_1": "", "TECH_CONSTRAINT_2": "",

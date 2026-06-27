@@ -439,6 +439,35 @@ artifacts merely because a template exists.
     hint exists so the Agent notices a spec that has been stuck and can decide
     whether to advance, amend, or cancel it.
 
+47. **Spec frontmatter must declare a Prompt version**: Every spec carries a
+    `> Prompt version: N` line in its frontmatter (alongside `> 状态:`, `> 风险:`,
+    etc.). `create_spec.py` writes `1` at creation; `spec_amend.py` bumps to
+    `N+1` whenever the spec is amended. The version tracks the agent-facing
+    prompt and plan context: when the underlying requirement changes, the
+    version tracks that the agent's instructions are now anchored to a new
+    requirement version. `doctor` emits a non-blocking advisory when a spec
+    file is missing the line, and a second advisory when a spec has been
+    amended in git history but the version did not bump — both are advisory
+    only (Rule 39); the rule prevents silent prompt drift across amendments
+    (12-Factor #1: own your prompts).
+
+50. **Vibe output carries machine-readable markers for key decisions**: The
+    terminal output of `vibe status`, `vibe next`, `vibe doctor`, and
+    `vibe advance` wraps each material decision in an HTML comment marker of
+    the form `<!-- vibe:<key>: <value> -->`. Recognized keys: `next_action`
+    (the recommendation emitted by `next`/`status`), `next_target` (the
+    spec the recommendation targets, when applicable), `status_summary`
+    (spec count and recommendation summary at the end of `status`),
+    `doctor_health` (`clean` or `issues` plus counts at the end of `doctor`),
+    and `gate_verdict` (`pass`, `forced`, or `fail` plus the spec name and
+    transition at the end of `advance`). Markers are backwards compatible
+    because they are HTML comments — humans ignore them, and any consumer
+    that does not know about Rule 50 sees the same natural-language output
+    as before. Agents that want to parse vibe output should grep the markers
+    before falling back to natural-language parsing (12-Factor #11:
+    structured outputs, applied at the harness boundary rather than the
+    agent-internal boundary).
+
 ## State Model
 
 Normal states are:

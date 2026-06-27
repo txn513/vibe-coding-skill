@@ -12,6 +12,7 @@ import sys
 import tempfile
 import time
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 
 SKILL_DIR = Path(__file__).resolve().parents[1]
@@ -4373,6 +4374,177 @@ class HarnessFailureModeHintTests(unittest.TestCase):
         self.assertIn("adopted", stems)
         self.assertNotIn("proposed", stems)
         self.assertNotIn("no-status", stems)
+
+
+
+class TwelveFactorPromptVersionTests(unittest.TestCase):
+    """Cover Rule 47 — spec frontmatter Prompt version.
+
+    Specs created via create_spec.py get `> Prompt version: 1` in their
+    frontmatter. spec_amend.py bumps it to N+1. doctor surfaces an
+    advisory for specs missing the line.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name)
+        init_project.init_project(str(self.project), "web")
+        self.specs_dir = self.project / ".agents" / "specs"
+        self.specs_dir.mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _write_spec(self, name: str, *, with_prompt_version: bool = True,
+                    version: str = "1") -> Path:
+        path = self.specs_dir / f"{name}.md"
+        pv_line = f"> Prompt version: {version}\n" if with_prompt_version else ""
+        path.write_text(
+            f"# {name}\n\n"
+            f"> 状态: draft | 创建: 2026-01-01 | 更新: 2026-01-01\n"
+            f"> 类型: feature\n"
+            f"> 风险: low\n"
+            f"> 风险确认: confirmed\n"
+            f"{pv_line}\n"
+            f"## 意图 (Intent)\n\nbody\n",
+            encoding="utf-8",
+        )
+        return path
+
+    def test_create_spec_writes_prompt_version_1(self) -> None:
+        """create_spec.py must include `> Prompt version: 1` in new specs."""
+        import create_spec
+        path = self.specs_dir / "fresh-spec.md"
+        create_spec.create_spec(str(self.project), "fresh-spec", "feature", "low")
+        # No file argument overloads; the function writes to .agents/specs/<name>.md
+        created = self.specs_dir / "fresh-spec.md"
+        self.assertTrue(created.exists())
+        content = created.read_text(encoding="utf-8")
+        self.assertRegex(content, r">\s*Prompt version:\s*1\b")
+
+    def test_spec_amend_bumps_prompt_version(self) -> None:
+        """spec_amend.py must bump the Prompt version by 1 on amendment."""
+        import spec_amend
+        path = self._write_spec("amendable", version="3")
+        # spec_amend writes a per-spec amend log; we just call the function.
+        spec_amend.amend_spec(str(self.project), "amendable", "test amendment")
+        after = path.read_text(encoding="utf-8")
+        self.assertRegex(after, r">\s*Prompt version:\s*4\b")
+
+    def test_spec_amend_appends_prompt_version_when_missing(self) -> None:
+        """Pre-Rule-47 specs (no Prompt version) get one appended on amend."""
+        import spec_amend
+        path = self._write_spec("legacy", with_prompt_version=False)
+        spec_amend.amend_spec(str(self.project), "legacy", "test amendment")
+        after = path.read_text(encoding="utf-8")
+        self.assertRegex(after, r">\s*Prompt version:\s*2\b")
+
+    def test_doctor_warns_when_prompt_version_missing(self) -> None:
+        """doctor must emit an advisory for specs without Prompt version."""
+        import doctor_project
+        self._write_spec("no-pv", with_prompt_version=False)
+        result = doctor_project.doctor(str(self.project))
+        warnings = result["warnings"]
+        self.assertTrue(
+            any("no-pv" in w and "Prompt version" in w for w in warnings),
+            f"expected Rule 47 advisory for no-pv; got {warnings}",
+        )
+
+    def test_doctor_silent_when_prompt_version_present(self) -> None:
+        """doctor must NOT emit a Rule 47 advisory when the line is present."""
+        import doctor_project
+        self._write_spec("with-pv", with_prompt_version=True, version="2")
+        result = doctor_project.doctor(str(self.project))
+        warnings = result["warnings"]
+        self.assertFalse(
+            any("with-pv" in w and "Prompt version" in w for w in warnings),
+            f"unexpected Rule 47 advisory; got {warnings}",
+        )
+
+
+class TwelveFactorMarkerTests(unittest.TestCase):
+    """Cover Rule 50 — vibe output carries machine-readable markers.
+
+    The terminal output of status / next / doctor / advance wraps key
+    decisions in `<!-- vibe:<key>: <value> -->` HTML comments so that
+    downstream agents can parse them without re-implementing the
+    natural-language grammar.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name)
+        init_project.init_project(str(self.project), "web")
+        self.specs_dir = self.project / ".agents" / "specs"
+        self.specs_dir.mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_status_emits_status_summary_marker(self) -> None:
+        """`vibe status` terminal output ends with status_summary marker."""
+        import io
+        import project_status
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            project_status.project_status(str(self.project))
+        out = buf.getvalue()
+        self.assertRegex(out, r"<!--\s*vibe:status_summary:[^>]+-->")
+
+    def test_next_emits_next_action_marker(self) -> None:
+        """`vibe next` terminal output carries a next_action marker."""
+        import io
+        import project_status
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            project_status.project_next(str(self.project))
+        out = buf.getvalue()
+        self.assertRegex(out, r"<!--\s*vibe:next_action:[^>]+-->")
+
+    def test_doctor_emits_doctor_health_marker(self) -> None:
+        """`vibe doctor` terminal output ends with doctor_health marker."""
+        import io
+        import doctor_project
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            doctor_project.doctor(str(self.project))
+        out = buf.getvalue()
+        self.assertRegex(out, r"<!--\s*vibe:doctor_health:[^>]+-->")
+
+    def test_set_status_emits_gate_verdict_marker_on_success(self) -> None:
+        """Successful `vibe advance` emits a gate_verdict marker."""
+        import io
+        import set_status
+        # Create a real spec so the gate can run end-to-end.
+        spec_path = self.specs_dir / "advanceable.md"
+        spec_path.write_text(
+            "# advanceable\n\n"
+            "> 状态: draft | 创建: 2026-01-01 | 更新: 2026-01-01\n"
+            "> 类型: feature\n"
+            "> 风险: low\n"
+            "> 风险确认: confirmed\n"
+            "> Prompt version: 1\n\n"
+            "## 意图 (Intent)\n\nbody\n"
+            "## 验收标准 (Acceptance Criteria)\n\n1. AC1: ok\n"
+            "## 涉及范围 (Scope)\n\nscope\n",
+            encoding="utf-8",
+        )
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            result = set_status.set_status(
+                str(self.project), "advanceable", "spec-ready",
+                actor="test-actor", role="builder",
+            )
+        # The advance may fail on gate; what we care about is the marker
+        # shape when it succeeds. If the gate refused, the marker must
+        # still NOT appear (no false-positive on failure).
+        out = buf.getvalue()
+        if result is None:
+            # Gate refused → no success marker; that's correct.
+            self.assertNotIn("vibe:gate_verdict", out)
+        else:
+            self.assertRegex(out, r"<!--\s*vibe:gate_verdict:[^>]+-->")
+
 
 
 if __name__ == "__main__":

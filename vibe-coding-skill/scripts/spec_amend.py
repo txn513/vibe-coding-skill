@@ -108,6 +108,21 @@ def amend_spec(project_root: str, spec_name: str, description: str) -> str | Non
         insert_at = risk_line.end() if risk_line else 0
         spec = spec[:insert_at] + "\n> 风险确认: pending" + spec[insert_at:]
 
+    # Bump Prompt version on amendment (Rule 47).
+    prompt_version_match = re.search(r"^>\s*Prompt version:\s*(\d+)\s*$", spec, re.MULTILINE)
+    if prompt_version_match:
+        new_version = int(prompt_version_match.group(1)) + 1
+        spec = (
+            spec[:prompt_version_match.start()]
+            + f"> Prompt version: {new_version}"
+            + spec[prompt_version_match.end():]
+        )
+    else:
+        # No Prompt version line — append one so amended specs carry it forward.
+        risk_line = re.search(r"^>\s*风险确认:.*$", spec, re.MULTILINE)
+        insert_at = (risk_line.end() + 1) if risk_line else 0
+        spec = spec[:insert_at] + "> Prompt version: 2\n" + spec[insert_at:]
+
     atomic_write(spec_file, spec)
 
     # Existing execution artifacts are based on the old requirements.

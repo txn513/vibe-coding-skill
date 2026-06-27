@@ -171,6 +171,8 @@ vibe ui-redesign-contract <spec> --source-type opendesign --source-artifacts des
 - 引入新存储位置的 spec 自动要求旧位置清理步骤（Rule 26 子规则）
 - 验证自动要求用户可感知证据（Rule 28）
 - 记录 evidence 时如果只写"跑了 pytest"而没附可重跑命令，会出 non-blocking 提示让你补 --command 或在证据里贴完整命令行（Rule 28.3）
+- 新建的 spec 会自动写 `> Prompt version: 1`，`spec amend` 时自动 bump 到 N+1；老 spec 缺这行时 `doctor` 会提醒补（Rule 47）
+- `vibe status`/`next`/`doctor`/`advance` 输出末尾会带 `<!-- vibe:<key>: <value> -->` 标记（如 `next_action`、`gate_verdict`），agent 可以 grep 这些 marker 做结构化解析；不识别 marker 的消费者照常看自然语言（Rule 50）
 - 子 spec 全部 done 后自动要求父 spec 意图对账（Rule 29）
 - 新 spec 模板自动使用 `AC1`、`AC2`... 显式验收标准编号（Rule 30）
 - 记录 verify evidence 时会提示缺失的 AC 引用；medium/high 风险会被门禁检查 AC 覆盖（Rule 30）

@@ -85,6 +85,14 @@ def doctor(project_root: str) -> dict:
                 issues.append(f"{name}: unknown risk {metadata['risk']}")
             if metadata.get("risk_confirmation") != "confirmed":
                 warnings.append(f"{name}: risk requires confirmation")
+            # Rule 47: spec frontmatter should carry a Prompt version.
+            # Advisory only — pre-47 specs are grandfathered.
+            pv_match = re.search(r">\s*Prompt version:\s*(\d+)\s*$", content, re.MULTILINE)
+            if not pv_match:
+                warnings.append(
+                    f"{name}: spec frontmatter missing '> Prompt version: N' (Rule 47) — "
+                    "add it so amendments are version-tracked"
+                )
             for dependency in metadata["dependencies"]:
                 dependency_path = os.path.join(specs_dir, f"{dependency}.md")
                 if not os.path.exists(dependency_path):
@@ -168,6 +176,9 @@ def doctor(project_root: str) -> dict:
         print("No workflow integrity issues found.")
     for warning in warnings:
         print(f"Warning: {warning}")
+    # Rule 50: machine-readable doctor health.
+    health = "issues" if issues else "clean"
+    print(f"<!-- vibe:doctor_health: {health} issues={len(issues)} warnings={len(warnings)} -->")
     return {"workflow": workflow, "issues": issues, "warnings": warnings}
 
 
