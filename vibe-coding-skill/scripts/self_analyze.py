@@ -90,6 +90,7 @@ def analyze(project_root: str) -> dict:
 
     # Generate suggestions
     _generate_suggestions(findings)
+    _emit_recovery_hints(project_root, findings)
 
     # Rank done specs by relevance for potential deeper retrospective
     ranked = spec_scorer.rank_specs(project_root, status_filter={"done"}, limit=5)
@@ -192,6 +193,91 @@ def _generate_suggestions(findings: dict) -> None:
                 "issue": f"Review Agent 在 {count}/{findings['retros_analyzed']} 次审查中漏掉: {missed}",
                 "action": f"在 Review Checklist 中增加一项: '{missed}'",
                 "priority": "high" if count >= 3 else "medium",
+            })
+
+
+# Mapping of shared-failure-mode labels (from Rule 25 taxonomy) to
+# optional project-local rule stems that, when adopted, hint at recovery.
+# This is NOT the Skill inventing recovery playbooks from labels: the
+# hint only appears when the project has explicitly adopted one of the
+# rule stems below (Rule 18). New mappings are added only when a real
+# cross-project pattern is established, never from a single project
+# incident (Rule 20). The mapping is intentionally short and generic.
+_FAILURE_MODE_HINT_RULES = {
+    "single-point verified, composed path missing": ("testing-composed-paths",),
+    "steady-state verified, time-state missing": ("testing-time-sensitive",),
+    "happy-path verified, degradation-path missing": ("testing-degradation",),
+    "component capability exists, routing or selection wrong": ("routing",),
+    "rule exists, but is not bound to a gate or command": ("rule-binding",),
+    "evidence exists, but does not prove the claimed behavior": ("evidence-discipline",),
+}
+
+
+def _list_adopted_rule_stems(project_root: str) -> set[str]:
+    """Return the set of rule stems the project has explicitly adopted.
+
+    Honors Rule 18: only rules with `状态: adopted` (or the English
+    equivalent) count. `proposed` rules are not yet binding (Rule 9).
+    """
+    rules_dir = os.path.join(project_root, ".agents", "rules")
+    if not os.path.isdir(rules_dir):
+        return set()
+    stems: set[str] = set()
+    for entry in os.listdir(rules_dir):
+        if not entry.endswith(".md"):
+            continue
+        try:
+            with open(os.path.join(rules_dir, entry), encoding="utf-8") as fp:
+                content = fp.read()
+        except OSError:
+            continue
+        status_match = re.search(r">\s*状态:\s*(\S+)", content)
+        if status_match and status_match.group(1) == "adopted":
+            stems.add(entry[:-3])
+    return stems
+
+
+def _emit_recovery_hints(project_root: str, findings: dict) -> None:
+    """Surface recovery hints for recurring failure modes (Rule 25.1).
+
+    For each failure-mode label that appears in 2+ retros, check whether
+    the project has adopted a rule stem that maps to it. If yes, the
+    hint is added to suggestions. If no, surface an advisory that points
+    the user to the project rules directory so they can decide whether
+    to adopt one. The Skill never invents the rule itself.
+    """
+    adopted = _list_adopted_rule_stems(project_root)
+    recurring = [
+        (mode, count) for mode, count in findings["failure_modes"].items()
+        if count >= 2 and len(mode) > 3
+    ]
+    for mode, count in recurring:
+        hint_stems = _FAILURE_MODE_HINT_RULES.get(mode)
+        if not hint_stems:
+            findings["suggestions"].append({
+                "type": "advisory",
+                "target": "rule taxonomy",
+                "issue": f"{count}/{findings['retros_analyzed']} 个回顾使用未映射的失败模式标签: {mode}",
+                "action": "该标签未映射到项目级 hint rule（Rule 25.1）。如确需，可自行在 .agents/rules/ 创建并 adopted；Skill 不会自动生成。",
+                "priority": "low",
+            })
+            continue
+        adopted_stem = next((s for s in hint_stems if s in adopted), None)
+        if adopted_stem:
+            findings["suggestions"].append({
+                "type": "recovery-hint",
+                "target": f".agents/rules/{adopted_stem}.md",
+                "issue": f"{count}/{findings['retros_analyzed']} 个回顾出现: {mode}",
+                "action": f"项目已 adopted {adopted_stem} rule。建议在下次类似 spec 推进前 review 这条 rule。",
+                "priority": "medium",
+            })
+        else:
+            findings["suggestions"].append({
+                "type": "recovery-hint-missing",
+                "target": ".agents/rules/",
+                "issue": f"{count}/{findings['retros_analyzed']} 个回顾出现: {mode}",
+                "action": f"未在 .agents/rules/ 找到 adopted 的 {hint_stems[0]} rule（Rule 25.1 hint）。Skill 不会自动创建，由项目决定。",
+                "priority": "low",
             })
 
 

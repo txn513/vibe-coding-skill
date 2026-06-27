@@ -151,6 +151,8 @@ def record_evidence(
             if expected:
                 print(f"   建议在证据中标注覆盖: {expected}")
     print(f"✅ 已记录 {phase} 证据: {evidence_file}")
+    if _evidence_missing_rerun_command(content, command):
+        _emit_rerun_advisory(content)
     _maybe_prompt_retro_gap_closure(project_root, spec_name, evidence, phase)
     return evidence_file
 
@@ -177,6 +179,45 @@ def misplaced_vibe_options(command: list[str] | None) -> list[str]:
     return [token for token in command if token in VIBE_OPTIONS_AFTER_COMMAND]
 
 
+
+
+_RUN_KEYWORDS = (
+    "ran pytest", "ran the test", "ran tests", "running pytest",
+    "ran the suite", "ran unit tests",
+    "\u8dd1\u4e86 pytest", "\u8dd1\u6d4b\u8bd5", "\u8dd1\u4e86\u6d4b\u8bd5", "\u8dd1\u901a\u4e86\u6d4b\u8bd5",
+    "\u6d4b\u8bd5\u901a\u8fc7", "tests pass", "tests passed",
+    "executed the test", "\u6267\u884c\u4e86\u6d4b\u8bd5",
+)
+_CAPTURED_COMMAND_HINT = (
+    "## \u6267\u884c", "command:", "cmd:", "$ ", "```bash", "```sh",
+    "py.test ", "pytest -", "pytest.", "pnpm test", "pnpm exec", "npm test", "npm run",
+    "cargo test", "go test",
+    "make ", "just ",)
+
+
+def _evidence_missing_rerun_command(evidence_text, captured_command):
+    """Rule 28.3 advisory.
+
+    Returns True when free-text evidence contains a 'ran X' claim AND
+    the agent did NOT pass --command AND the evidence text does not
+    contain a recognisable command fragment for the reviewer to re-run.
+    """
+    if captured_command:
+        return False
+    lowered = evidence_text.lower()
+    for kw in _RUN_KEYWORDS:
+        if kw.lower() in lowered:
+            for hint in _CAPTURED_COMMAND_HINT:
+                if hint.lower() in lowered:
+                    return False
+            return True
+    return False
+
+
+def _emit_rerun_advisory(evidence_text):
+    print("\u26a0\ufe0f  Evidence 包含 'ran X' 描述但未捕获可重跑命令 (Rule 28.3)")
+    print("   建议: 用 --command 参数跑实际命令, 或在 evidence 文本里包含完整命令行")
+    print("   (advisory, 不阻塞; reviewer 需要可重跑来验证结果)")
 
 
 def _maybe_prompt_retro_gap_closure(

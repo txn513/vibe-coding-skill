@@ -4236,5 +4236,144 @@ class FixStateAnchorTests(unittest.TestCase):
         )
 
 
+class HarnessEvidenceRerunnableTests(unittest.TestCase):
+    """Cover the Rule 28.3 evidence re-runnability advisory.
+
+    The advisory fires when free-text evidence contains a "ran X" claim
+    but no actual command is captured (either via --command or written
+    in-line in the evidence text). It is non-blocking.
+    """
+
+    def test_ran_pytest_in_text_no_command_triggers_advisory(self) -> None:
+        import record_evidence
+        text = "I ran pytest and all 12 tests passed. The fix works."
+        self.assertTrue(record_evidence._evidence_missing_rerun_command(text, None))
+
+    def test_captured_command_silences_advisory(self) -> None:
+        import record_evidence
+        text = "I ran pytest and all 12 tests passed."
+        self.assertFalse(
+            record_evidence._evidence_missing_rerun_command(
+                text, ["pytest", "-x"]
+            )
+        )
+
+    def test_inline_command_in_text_silences_advisory(self) -> None:
+        import record_evidence
+        text = (
+            "I ran the test suite.\n\n"
+            "## 执行\n\n```bash\npytest -x tests/\n```"
+        )
+        self.assertFalse(record_evidence._evidence_missing_rerun_command(text, None))
+
+    def test_chinese_run_keyword_triggers_advisory(self) -> None:
+        import record_evidence
+        text = "跑了 pytest, 12 个测试全部通过"
+        self.assertTrue(record_evidence._evidence_missing_rerun_command(text, None))
+
+    def test_plain_evidence_without_run_keyword_no_advisory(self) -> None:
+        import record_evidence
+        text = "Verified the change by reading the diff. Behaviour matches AC1."
+        self.assertFalse(record_evidence._evidence_missing_rerun_command(text, None))
+
+    def test_inline_pytest_substring_silences_advisory(self) -> None:
+        import record_evidence
+        # 'pytest' substring is enough to silence — the reviewer sees it.
+        text = "I ran the suite. pytest -x passed."
+        self.assertFalse(record_evidence._evidence_missing_rerun_command(text, None))
+
+
+class HarnessFailureModeHintTests(unittest.TestCase):
+    """Cover the Rule 25.1 failure-mode → recovery-hint loop.
+
+    self_analyze should only surface a hint when (a) a label appears 2+
+    times across retros AND (b) the project has adopted a project-local
+    rule that maps to the label. Otherwise it must stay silent (or emit
+    an advisory-only message that does not invent the rule).
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name)
+        init_project.init_project(str(self.project), "web")
+        self.retros_dir = self.project / ".agents" / "retros"
+        self.retros_dir.mkdir(parents=True, exist_ok=True)
+        self.rules_dir = self.project / ".agents" / "rules"
+        self.rules_dir.mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _write_retro(self, name: str, failure_mode: str) -> None:
+        path = self.retros_dir / f"{name}.md"
+        # Production retro template uses markdown bold (**Field**: value) and
+        # _is_unfilled_retro requires >=2 meaningful fields, so we provide two.
+        # `擅长` is in the unfilled-check field list and is a plausible builder
+        # self-assessment that we are not asserting on.
+        path.write_text(
+            f"# {name}\n\n"
+            f"**主失败模式**: {failure_mode}\n"
+            f"**反复出错**: ignored for this test\n"
+            f"**擅长**: nothing notable\n\n"
+            f"text\n",
+            encoding="utf-8",
+        )
+
+    def _adopt_rule(self, stem: str) -> None:
+        path = self.rules_dir / f"{stem}.md"
+        path.write_text(f"# {stem}\n\n> 状态: adopted\n\nbody\n", encoding="utf-8")
+
+    def test_hint_emitted_when_label_recurs_and_rule_adopted(self) -> None:
+        import self_analyze
+        self._adopt_rule("testing-composed-paths")
+        for i in range(2):
+            self._write_retro(f"retro-{i}", "single-point verified, composed path missing")
+        findings = self_analyze.analyze(str(self.project))
+        hints = [s for s in findings["suggestions"] if s.get("type") == "recovery-hint"]
+        self.assertEqual(len(hints), 1)
+        self.assertIn("testing-composed-paths", hints[0]["target"])
+
+    def test_no_hint_when_label_recurs_but_rule_not_adopted(self) -> None:
+        import self_analyze
+        for i in range(2):
+            self._write_retro(f"retro-{i}", "single-point verified, composed path missing")
+        findings = self_analyze.analyze(str(self.project))
+        hints = [s for s in findings["suggestions"] if s.get("type") == "recovery-hint"]
+        missing_hints = [s for s in findings["suggestions"] if s.get("type") == "recovery-hint-missing"]
+        self.assertEqual(hints, [])
+        self.assertEqual(len(missing_hints), 1)
+        self.assertIn("testing-composed-paths", missing_hints[0]["action"])
+
+    def test_no_hint_when_label_appears_only_once(self) -> None:
+        import self_analyze
+        self._adopt_rule("testing-composed-paths")
+        # analyze() needs >=2 retros; add a filler that does NOT match the label.
+        self._write_retro("retro-once", "single-point verified, composed path missing")
+        self._write_retro("retro-filler", "completely different failure mode")
+        findings = self_analyze.analyze(str(self.project))
+        hints = [s for s in findings["suggestions"] if s.get("type") in {"recovery-hint", "recovery-hint-missing"}]
+        self.assertEqual(hints, [])
+
+    def test_unmapped_label_emits_advisory_only(self) -> None:
+        import self_analyze
+        for i in range(2):
+            self._write_retro(f"retro-{i}", "an-unmapped-failure-mode that is novel")
+        findings = self_analyze.analyze(str(self.project))
+        advisories = [s for s in findings["suggestions"] if s.get("type") == "advisory"]
+        self.assertEqual(len(advisories), 1)
+        self.assertIn("未映射", advisories[0]["action"])
+
+    def test_list_adopted_rule_stems_filters_proposed(self) -> None:
+        import self_analyze
+        # One adopted, one proposed, one without status
+        (self.rules_dir / "adopted.md").write_text("> 状态: adopted\n", encoding="utf-8")
+        (self.rules_dir / "proposed.md").write_text("> 状态: proposed\n", encoding="utf-8")
+        (self.rules_dir / "no-status.md").write_text("body\n", encoding="utf-8")
+        stems = self_analyze._list_adopted_rule_stems(str(self.project))
+        self.assertIn("adopted", stems)
+        self.assertNotIn("proposed", stems)
+        self.assertNotIn("no-status", stems)
+
+
 if __name__ == "__main__":
     unittest.main()

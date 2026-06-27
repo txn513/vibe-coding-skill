@@ -218,6 +218,21 @@ artifacts merely because a template exists.
     reusable way before listing fixes. Prefer the shared failure taxonomy when
     it fits so that later `self_analyze` runs can aggregate patterns across
     multiple retros.
+    25.1 **Failure mode labels are advisory triggers, not recovery playbooks**:
+        When a retro names a shared-failure-mode label from the taxonomy
+        (single-point verified / composed-path missing, steady-state
+        verified / time-state missing, happy-path verified / degradation-
+        path missing, component capability exists / routing wrong, rule
+        exists but not bound to a gate, evidence exists but does not
+        prove the claimed behavior), `vibe doctor` and `vibe next` may
+        surface a corresponding recovery hint — but only when the project
+        has explicitly adopted a project-local rule that addresses the
+        label (Rule 18). The Skill never invents recovery playbooks from
+        labels alone: that would cross the project/governance boundary
+        (Rule 20) and would also leak project-specific knowledge across
+        projects (Rule 9). Unlabeled failure modes are fine: state the
+        mismatch explicitly instead of forcing a category, per the
+        existing Rule 25 guidance.
 26. **Out of Scope must be tracked**: Every entry in a spec's Out of Scope
     section must be tagged before the spec reaches `done` with one of:
     (a) included in this spec, (b) handed off to a follow-up spec with that
@@ -256,6 +271,18 @@ artifacts merely because a template exists.
     verification time so each side carries its own evidence. This rule governs
     evidence *format* (what counts as proof) and applies independently of
     evidence *structure* requirements below.
+    28.3 **Evidence must be re-runnable**: Beyond the per-AC reference and the
+    fix-state anchor (Rule 25 advisory), the evidence artifact should include
+    a command the reviewer can re-execute to reproduce the result. "Ran
+    pytest" without the actual command, working directory, fixture, and expected
+    output format is not re-runnable; the harness, not the agent, owns the
+    verification loop (Voyager, SWE-bench Verified: external deterministic
+    verification, not agent self-claim). When `record_evidence` accepts a
+    `--command` argument the command is already captured automatically; for
+    hand-written evidence that names a test or run without capturing the
+    command, surface a non-blocking advisory reminding the author to attach
+    the actual command line so a reviewer can reproduce the result. The
+    advisory follows Rule 39 (default behaviour, opt-out).
 29. **Sub-spec Intent reconciliation gate**: When a spec is decomposed into
     multiple sub-specs, the final sub-spec advancing to `done` must complete
     a reconciliation of the parent spec's Intent and Acceptance Criteria.
