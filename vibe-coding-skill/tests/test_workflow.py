@@ -4652,5 +4652,90 @@ class FixBlastRadiusTests(unittest.TestCase):
 
 
 
+
+class SkillVersionDriftTests(unittest.TestCase):
+    """Cover Rule 52 — Skill version drift is observable.
+
+    The Skill ships a VERSION file; init_project.py writes the value
+    to .agents/.skill-version. doctor compares the two and emits a
+    non-blocking advisory on mismatch. Pre-Rule-52 projects (no
+    .skill-version) and dev installs (no VERSION) are treated as
+    'unknown' and stay silent.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name)
+        init_project.init_project(str(self.project), "web")
+        self.agents_dir = self.project / ".agents"
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_init_writes_skill_version_file(self) -> None:
+        """init_project.py must write .agents/.skill-version."""
+        path = self.agents_dir / ".skill-version"
+        self.assertTrue(path.exists(), f"missing {path}")
+        content = path.read_text(encoding="utf-8").strip()
+        self.assertNotEqual(content, "")
+        self.assertNotEqual(content, "unknown")
+
+    def test_doctor_silent_when_versions_match(self) -> None:
+        """doctor must NOT emit Rule 52 advisory when versions match."""
+        import doctor_project
+        result = doctor_project.doctor(str(self.project))
+        warnings = result["warnings"]
+        self.assertFalse(
+            any("Rule 52" in w or "version drift" in w.lower() for w in warnings),
+            f"unexpected Rule 52 advisory; got {warnings}",
+        )
+
+    def test_doctor_warns_on_version_drift(self) -> None:
+        """doctor must emit Rule 52 advisory when project version is stale."""
+        import doctor_project
+        # Simulate stale project record by rewriting to an old value.
+        (self.agents_dir / ".skill-version").write_text("stale000\n", encoding="utf-8")
+        result = doctor_project.doctor(str(self.project))
+        warnings = result["warnings"]
+        self.assertTrue(
+            any("version drift" in w and "Rule 52" in w for w in warnings),
+            f"expected Rule 52 advisory; got {warnings}",
+        )
+
+    def test_doctor_silent_when_project_version_missing(self) -> None:
+        """Pre-Rule-52 project (no .skill-version) must NOT back-warn."""
+        import doctor_project
+        (self.agents_dir / ".skill-version").unlink()
+        result = doctor_project.doctor(str(self.project))
+        warnings = result["warnings"]
+        self.assertFalse(
+            any("version drift" in w for w in warnings),
+            f"pre-Rule-52 project should not back-warn; got {warnings}",
+        )
+
+    def test_doctor_silent_when_skill_version_file_missing(self) -> None:
+        """Dev install with no Skill VERSION file must NOT false-positive."""
+        import doctor_project
+        import os
+        skill_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        version_path = os.path.join(skill_dir, "VERSION")
+        backup_path = version_path + ".bak"
+        if os.path.exists(version_path):
+            os.rename(version_path, backup_path)
+        try:
+            # Project has a recorded version; Skill has no VERSION.
+            (self.agents_dir / ".skill-version").write_text("anyvalue\n", encoding="utf-8")
+            result = doctor_project.doctor(str(self.project))
+            warnings = result["warnings"]
+            self.assertFalse(
+                any("version drift" in w for w in warnings),
+                f"missing Skill VERSION should not false-positive; got {warnings}",
+            )
+        finally:
+            if os.path.exists(backup_path):
+                os.rename(backup_path, version_path)
+
+
+
 if __name__ == "__main__":
     unittest.main()

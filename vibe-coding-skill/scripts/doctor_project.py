@@ -42,6 +42,44 @@ import archive_status
 KNOWN_AUXILIARIES = ("vibe-coding-reviewer", "vibe-coding-debugger")
 
 
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+SKILL_DIR = os.path.dirname(SCRIPT_DIR)
+
+
+def _read_project_skill_version(project_root: str) -> str:
+    """Return the Skill version recorded in the project's .agents/.
+
+    Returns 'unknown' when the file is missing (pre-Rule-52 project).
+    """
+    path = os.path.join(project_root, ".agents", ".skill-version")
+    if not os.path.exists(path):
+        return "unknown"
+    try:
+        with open(path, encoding="utf-8") as fp:
+            value = fp.read().strip()
+        return value or "unknown"
+    except OSError:
+        return "unknown"
+
+
+def _read_current_skill_version() -> str:
+    """Return the Skill's currently installed VERSION, or 'unknown' if missing.
+
+    Missing VERSION usually means a dev install, a symlink to a checkout
+    without a VERSION file, or a partial install — none of which should
+    cause doctor to false-positive.
+    """
+    version_path = os.path.join(SKILL_DIR, "VERSION")
+    if not os.path.exists(version_path):
+        return "unknown"
+    try:
+        with open(version_path, encoding="utf-8") as fp:
+            value = fp.read().strip()
+        return value or "unknown"
+    except OSError:
+        return "unknown"
+
+
 def _missing_auxiliaries() -> list[str]:
     codex_home = os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex")
     skills_dir = os.path.join(codex_home, "skills")
@@ -57,6 +95,23 @@ def doctor(project_root: str) -> dict:
     workflow, migrated = ensure_workflow(project_root)
     issues = []
     warnings = []
+    # Rule 52: surface Skill version drift so the user knows when a project
+    # agent is running against a stale Skill. Advisory only — the project
+    # itself is fine; only the agent's loaded rules may be out of date.
+    project_version = _read_project_skill_version(project_root)
+    skill_version = _read_current_skill_version()
+    if project_version == "unknown":
+        # Pre-Rule-52 project: do not back-warn; init_project / onboard
+        # will populate .skill-version on next touch.
+        pass
+    elif project_version != skill_version and skill_version != "unknown":
+        warnings.append(
+            f"Skill version drift: project records '{project_version}', "
+            f"installed Skill is '{skill_version}' (Rule 52). "
+            f"Reload the Skill in the active session or open a new one "
+            f"to pick up the new rules."
+        )
+
     if workflow.get("schema_version") != SCHEMA_VERSION:
         issues.append("workflow schema is outdated")
     for phase in ("verify", "release", "observe"):

@@ -505,6 +505,35 @@ artifacts merely because a template exists.
     is logged as `single-fix verified, blast-radius missing` so
     `self_analyze` and Rule 25.1 surface it next cycle.
 
+52. **Skill version drift is observable, not silently tolerated**: The
+    Skill ships a `VERSION` file containing the git short hash of the
+    installed commit. `init_project.py` (and `onboard_project.py`)
+    write that value to `.agents/.skill-version` when a project is
+    initialised or onboarded. `vibe doctor` reads both files on every
+    run; when the project-recorded value differs from the installed
+    value, doctor emits a single non-blocking warning of the form
+    `Skill version drift: project records '<old>', installed Skill is
+    '<new>' (Rule 52). Reload the Skill in the active session or open a
+    new one to pick up the new rules.`
+
+    The rule is purely advisory. The project itself is unaffected by
+    Skill version drift; only the agent's loaded rule set may be
+    behind, which means the agent may follow older governance and
+    miss new advisories (e.g. a project whose agent has not picked up
+    Rule 51 will not declare Fix Scope sections on new bug specs).
+    The advisory exists so this gap is visible without the user
+    having to remember which project agents were active when the
+    last Skill update shipped. Pre-Rule-52 projects (no
+    `.skill-version` file) are silently treated as 'unknown' and do
+    not back-warn; they get a version recorded on the next init or
+    onboard. Missing `VERSION` in the installed Skill (dev checkout,
+    broken symlink) is also treated as 'unknown' and does not
+    false-positive. The Skill deliberately does not attempt to force
+    a client-side Skill reload: that capability is owned by the agent
+    runtime (Codex / Trae / Claude Code) and is not exposed today;
+    Rule 52 narrows the gap from "blind" to "visible" within the
+    Skill's authority.
+
 ## State Model
 
 Normal states are:

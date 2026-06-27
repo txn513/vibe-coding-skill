@@ -16,6 +16,36 @@ SKILL_DIR = os.path.dirname(SCRIPT_DIR)
 TEMPLATE_DIR = os.path.join(SKILL_DIR, "templates")
 
 
+def _read_skill_version() -> str:
+    """Read the VERSION file shipped with the Skill, or 'unknown' if missing.
+
+    Rule 52: doctor compares this value against the project's recorded
+    version to detect Skill updates the active session has not picked up.
+    """
+    version_path = os.path.join(SKILL_DIR, "VERSION")
+    if not os.path.exists(version_path):
+        return "unknown"
+    try:
+        with open(version_path, encoding="utf-8") as fp:
+            value = fp.read().strip()
+        return value or "unknown"
+    except OSError:
+        return "unknown"
+
+
+def _record_skill_version(agents_dir: str) -> None:
+    """Persist the current Skill version into the project's .agents/.
+
+    On first init the file is created; on subsequent re-inits (--force)
+    it is overwritten with the current install. Projects that pre-date
+    Rule 52 (no .skill-version file) are skipped silently here and
+    picked up lazily by doctor.
+    """
+    from common import atomic_write as _aw
+    target = os.path.join(agents_dir, ".skill-version")
+    _aw(target, _read_skill_version() + "\n")
+
+
 def init_project(path: str, project_type: str = "generic", force: bool = False) -> None:
     project_name = os.path.basename(os.path.abspath(path))
     os.makedirs(path, exist_ok=True)
@@ -78,6 +108,9 @@ def init_project(path: str, project_type: str = "generic", force: bool = False) 
 
     for d in [specs_dir, plans_dir, reviews_dir]:
         atomic_write(os.path.join(d, ".gitkeep"), "")
+
+    # Record the Skill version that initialised this project (Rule 52).
+    _record_skill_version(agents_dir)
     ensure_workflow(path)
     policy_manifest = scan_policy_sources(Path(path), apply=True)
 
