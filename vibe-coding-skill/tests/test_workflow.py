@@ -4547,5 +4547,110 @@ class TwelveFactorMarkerTests(unittest.TestCase):
 
 
 
+
+class FixBlastRadiusTests(unittest.TestCase):
+    """Cover Rule 51 — bug fix scope declaration.
+
+    type=bug specs must carry a `## 修复范围 (Fix Scope)` section with
+    three sub-parts: 已修复位置, 故意不改的相邻位置, 判断依据. The
+    section exists to defeat the "fix only covered one of N instances"
+    failure mode. create_spec.py renders the section as a placeholder
+    for type=bug specs only. doctor emits an advisory when a type=bug
+    spec is missing the section.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name)
+        init_project.init_project(str(self.project), "web")
+        self.specs_dir = self.project / ".agents" / "specs"
+        self.specs_dir.mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _write_spec(self, name: str, *, spec_type: str, with_fix_scope: bool = True) -> Path:
+        path = self.specs_dir / f"{name}.md"
+        fix_scope_section = (
+            "## 修复范围 (Fix Scope)\n\n"
+            "### 已修复位置\n\n"
+            "- `src/api/qrcode.py:42` — 移除 require_login\n\n"
+            "### 故意不改的相邻位置\n\n"
+            "- `src/api/user.py:100` — 已有独立 OAuth 流程\n\n"
+            "### 判断依据\n\n"
+            "共享 root cause: 鉴权上下文一致性\n"
+            if with_fix_scope
+            else ""
+        )
+        path.write_text(
+            f"# {name}\n\n"
+            f"> 状态: draft | 创建: 2026-01-01 | 更新: 2026-01-01\n"
+            f"> 类型: {spec_type}\n"
+            f"> 风险: low\n"
+            f"> 风险确认: confirmed\n"
+            f"> Prompt version: 1\n\n"
+            f"## 意图 (Intent)\n\nbody\n\n"
+            f"{fix_scope_section}"
+            f"## 验收标准 (Acceptance Criteria)\n\n1. AC1: ok\n"
+            f"## 涉及范围 (Scope)\n\nscope\n",
+            encoding="utf-8",
+        )
+        return path
+
+    def test_create_spec_bug_renders_fix_scope_section(self) -> None:
+        """create_spec.py must include ## 修复范围 in type=bug specs."""
+        import create_spec
+        create_spec.create_spec(str(self.project), "bug-1", "bug", "low")
+        created = self.specs_dir / "bug-1.md"
+        self.assertTrue(created.exists())
+        content = created.read_text(encoding="utf-8")
+        self.assertIn("## 修复范围 (Fix Scope)", content)
+        self.assertIn("已修复位置", content)
+        self.assertIn("故意不改的相邻位置", content)
+        self.assertIn("判断依据", content)
+
+    def test_create_spec_feature_does_not_render_fix_scope_section(self) -> None:
+        """create_spec.py must NOT add the section to non-bug specs."""
+        import create_spec
+        create_spec.create_spec(str(self.project), "feat-1", "feature", "low")
+        created = self.specs_dir / "feat-1.md"
+        content = created.read_text(encoding="utf-8")
+        self.assertNotIn("## 修复范围 (Fix Scope)", content)
+
+    def test_doctor_warns_when_bug_spec_missing_fix_scope(self) -> None:
+        """doctor must emit a Rule 51 advisory for type=bug specs without the section."""
+        import doctor_project
+        self._write_spec("bug-no-scope", spec_type="bug", with_fix_scope=False)
+        result = doctor_project.doctor(str(self.project))
+        warnings = result["warnings"]
+        self.assertTrue(
+            any("bug-no-scope" in w and "Rule 51" in w for w in warnings),
+            f"expected Rule 51 advisory; got {warnings}",
+        )
+
+    def test_doctor_silent_when_bug_spec_has_fix_scope(self) -> None:
+        """doctor must NOT emit a Rule 51 advisory when the section is present."""
+        import doctor_project
+        self._write_spec("bug-with-scope", spec_type="bug", with_fix_scope=True)
+        result = doctor_project.doctor(str(self.project))
+        warnings = result["warnings"]
+        self.assertFalse(
+            any("bug-with-scope" in w and "Rule 51" in w for w in warnings),
+            f"unexpected Rule 51 advisory; got {warnings}",
+        )
+
+    def test_doctor_silent_when_feature_spec_missing_fix_scope(self) -> None:
+        """doctor must NOT emit a Rule 51 advisory for non-bug specs (rule is type-scoped)."""
+        import doctor_project
+        self._write_spec("feat-no-scope", spec_type="feature", with_fix_scope=False)
+        result = doctor_project.doctor(str(self.project))
+        warnings = result["warnings"]
+        self.assertFalse(
+            any("feat-no-scope" in w and "Rule 51" in w for w in warnings),
+            f"Rule 51 should not apply to feature specs; got {warnings}",
+        )
+
+
+
 if __name__ == "__main__":
     unittest.main()

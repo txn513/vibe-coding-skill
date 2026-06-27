@@ -468,6 +468,43 @@ artifacts merely because a template exists.
     structured outputs, applied at the harness boundary rather than the
     agent-internal boundary).
 
+51. **Bug fix scope declaration**: Any spec with `> 类型: bug` must carry
+    a `## 修复范围 (Fix Scope)` section. The section is structured into
+    three sub-parts and exists to defeat the recurring "fix only covered
+    one of N instances" failure mode (12-Factor #4: small steps with
+    external memory; the section is the memory, the spec is the step).
+
+    1. **已修复位置** — every location the fix actually touches, with
+       `path:line` and a one-line description of what changed. The list
+       is positive: things the agent did, with evidence.
+    2. **故意不改的相邻位置** — every adjacent location that looks like
+       the same bug but was deliberately left alone, with a one-line
+       reason. The list is negative-space: the agent must walk the
+       candidate set, not just the chosen set, and must justify each
+       non-fix. This is the half that catches "found but misjudged"
+       failures like adding `require_login` to an OAuth entry point
+       (the agent saw the endpoint but classified it as "needs auth"
+       instead of "is the auth mechanism").
+    3. **判断依据** — the standard the agent used to decide which
+       locations belong to this bug (shared root cause / shared API /
+       shared branch / shared auth context / etc.). Recording the
+       standard lets the next agent or reviewer see whether the
+       standard was applied consistently.
+
+    `create_spec.py` renders the section as a placeholder for type=bug
+    specs only (other spec types do not get the section, so the rule
+    is non-intrusive). `doctor` emits a non-blocking advisory when a
+    type=bug spec is missing the section. Verify must reference the
+    section: for each location listed under 已修复位置, the evidence
+    must show the bug behavior is gone; missing-evidence locations
+    block `advance` to `done` only at the rule-binding point
+    configured in `workflow.json.fix_blast_radius.required_for`
+    (default advisory, opt up to `["high"]` or `["medium", "high"]`).
+    When the rule fires retroactively — a fix shipped, then a
+    regression appears in an unlisted adjacent location — the failure
+    is logged as `single-fix verified, blast-radius missing` so
+    `self_analyze` and Rule 25.1 surface it next cycle.
+
 ## State Model
 
 Normal states are:

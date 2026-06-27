@@ -93,6 +93,15 @@ def doctor(project_root: str) -> dict:
                     f"{name}: spec frontmatter missing '> Prompt version: N' (Rule 47) — "
                     "add it so amendments are version-tracked"
                 )
+            # Rule 51: type=bug specs must declare a Fix Scope section.
+            # Advisory only — pre-51 specs are grandfathered.
+            spec_type_match = re.search(r">\s*类型:\s*(\S+)", content)
+            if spec_type_match and spec_type_match.group(1) == "bug":
+                if "## 修复范围" not in content and "## Fix Scope" not in content:
+                    warnings.append(
+                        f"{name}: type=bug spec missing '## 修复范围 (Fix Scope)' section (Rule 51) — "
+                        "declare 已修复位置 + 故意不改的相邻位置 + 判断依据"
+                    )
             for dependency in metadata["dependencies"]:
                 dependency_path = os.path.join(specs_dir, f"{dependency}.md")
                 if not os.path.exists(dependency_path):

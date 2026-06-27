@@ -145,6 +145,7 @@ def _get_type_defaults(
         "EDGE_CASE_1": "", "EDGE_CASE_2": "",
         "ERROR_HANDLING_1": "", "ERROR_HANDLING_2": "",
         "NEW_FILES": "", "MODIFIED_FILES": "", "DO_NOT_TOUCH": "",
+        "FIX_SCOPE_SECTION": "",
         "PERFORMANCE_REQUIREMENT_1": "(请定义适用于本项目的性能要求与验证方式)",
         "PERFORMANCE_REQUIREMENT_2": "",
         "SECURITY_NFR_1": "(请定义适用于本项目的安全要求与验证方式)",
@@ -160,6 +161,20 @@ def _get_type_defaults(
             "SUCCESS_CRITERION_1": "(请定义问题不再发生的可验证条件)",
             "SUCCESS_CRITERION_2": "(请定义需要保持不变的行为及验证方式)",
             "ERROR_HANDLING_1": "(请定义相关失败场景的预期行为)",
+            "FIX_SCOPE_SECTION": (
+                "## 修复范围 (Fix Scope)\n\n"
+                "> Rule 51: 任何 type=bug spec 必须显式声明修复范围。"
+                "这强制 agent 列举**已修复位置**和**故意不改的相邻位置**，"
+                "并写明判断依据。漏列相邻位置导致的回归会进 retro → self_analyze → 升级项目级 rule。\n\n"
+                "### 已修复位置\n\n"
+                "- `path/to/file.py:LINE` — (修了什么)\n"
+                "- `path/to/file.py:LINE` — (修了什么)\n\n"
+                "### 故意不改的相邻位置\n\n"
+                "- `path/to/adjacent.py:LINE` — (为什么这个位置看起来像同一个 bug 但实际不是,或不属于本 spec)\n"
+                "- ...\n\n"
+                "### 判断依据\n\n"
+                "(用什么标准判断哪些位置属于\"同一个 bug\"？例如:共享 root cause / 同一 API 调用 / 同一分支逻辑 / 同一鉴权上下文。)\n"
+            ),
         }
 
     if spec_type == "refactor":
