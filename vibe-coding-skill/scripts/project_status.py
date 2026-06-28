@@ -141,6 +141,9 @@ def project_status(project_root: str) -> None:
     _print_stale_archive_hint(project_root)
     _print_stage_stall_warnings(project_root, specs)
     _print_version_drift_hint(project_root)
+    _print_proposed_rules_hint(project_root)
+    _print_missing_retro_hint(project_root)
+    _print_missing_changelog_hint(project_root)
     _print_uncommitted_work_hint(project_root)
     # Rule 50: machine-readable status summary.
     spec_count = len(specs)
@@ -172,6 +175,9 @@ def project_next(project_root: str) -> dict:
     _print_recommendation(recommendation)
     _print_stale_archive_hint(project_root)
     _print_version_drift_hint(project_root)
+    _print_proposed_rules_hint(project_root)
+    _print_missing_retro_hint(project_root)
+    _print_missing_changelog_hint(project_root)
     _print_uncommitted_work_hint(project_root)
     return recommendation
 
@@ -233,6 +239,135 @@ def _print_version_drift_hint(project_root: str) -> None:
     )
     # Rule 50: machine-readable marker
     print(f"<!-- vibe:skill_version: {skill_version} (project: {project_version}) -->")
+
+
+def _print_proposed_rules_hint(project_root: str) -> None:
+    """Low-priority advisory: project has rule files in 'proposed' state.
+
+    Rule 18 says generated rules are 'proposed' until explicitly adopted.
+    retro -> self_analyze can generate new proposed rules; if they sit
+    there un-reviewed, the Skill self-improvement loop stalls. This
+    hint surfaces the backlog so the agent can review / adopt / discard
+    them rather than letting them accumulate.
+    """
+    rules_dir = os.path.join(project_root, ".agents", "rules")
+    if not os.path.isdir(rules_dir):
+        return
+    proposed = []
+    for entry in sorted(os.listdir(rules_dir)):
+        if not entry.endswith(".md"):
+            continue
+        path = os.path.join(rules_dir, entry)
+        try:
+            with open(path, encoding="utf-8") as fp:
+                content = fp.read()
+        except OSError:
+            continue
+        m = re.search(r">\s*状态:\s*(\S+)", content)
+        if m and m.group(1) == "proposed":
+            proposed.append(entry[:-3])
+    if not proposed:
+        return
+    print()
+    print(
+        f"📋 你有 {len(proposed)} 条 proposed 规则待评审 (Rule 18: retro 沉淀的规则未被采纳):"
+    )
+    for stem in proposed[:10]:
+        print(f"   - {stem}")
+    if len(proposed) > 10:
+        print(f"   ... 还有 {len(proposed) - 10} 条")
+    print("   决策: `vibe rule-status <project> <stem> adopted` 或 `abandoned`")
+    print(f"<!-- vibe:proposed_rules: {len(proposed)} -->")
+
+
+def _print_missing_retro_hint(project_root: str) -> None:
+    """Low-priority advisory: spec is done but has no retro file.
+
+    self_analyze scans .agents/retros/ to find recurring failure modes
+    and propose Skill upgrades. If a spec ships without a retro, its
+    failure mode is invisible to the Skill and the same mistake will
+    happen again. This hint surfaces specs that completed without
+    retros so the agent can write them.
+    """
+    specs_dir = os.path.join(project_root, ".agents", "specs")
+    retros_dir = os.path.join(project_root, ".agents", "retros")
+    if not os.path.isdir(specs_dir) or not os.path.isdir(retros_dir):
+        return
+    existing_retros = {
+        entry[:-3] for entry in os.listdir(retros_dir)
+        if entry.endswith(".md") and entry != ".gitkeep"
+    }
+    missing = []
+    for entry in sorted(os.listdir(specs_dir)):
+        if not entry.endswith(".md") or entry.endswith("-amendments.md"):
+            continue
+        path = os.path.join(specs_dir, entry)
+        try:
+            with open(path, encoding="utf-8") as fp:
+                content = fp.read()
+        except OSError:
+            continue
+        m = re.search(r">\s*状态:\s*(\S+)", content)
+        if m and m.group(1) in {"done", "released"}:
+            name = entry[:-3]
+            if name not in existing_retros:
+                missing.append((name, m.group(1)))
+    if not missing:
+        return
+    print()
+    print(
+        f"📝 {len(missing)} 个已 done/released 的 spec 缺 retro (self_analyze 看不到失败模式):"
+    )
+    for name, status in missing[:10]:
+        print(f"   - {name} ({status})")
+    if len(missing) > 10:
+        print(f"   ... 还有 {len(missing) - 10} 个")
+    print("   命令: `vibe retrospective <project> <spec-name>` 写 retro")
+    print(f"<!-- vibe:missing_retros: {len(missing)} -->")
+
+
+def _print_missing_changelog_hint(project_root: str) -> None:
+    """Low-priority advisory: spec is released/done but no CHANGELOG entry.
+
+    Release hygiene: a spec that ships without a CHANGELOG row leaves
+    no trace for users / release notes. The hint surfaces such specs
+    so the agent can generate the changelog entry.
+    """
+    specs_dir = os.path.join(project_root, ".agents", "specs")
+    changelogs_dir = os.path.join(project_root, ".agents", "changelogs")
+    if not os.path.isdir(specs_dir) or not os.path.isdir(changelogs_dir):
+        return
+    existing = {
+        entry[:-3] for entry in os.listdir(changelogs_dir)
+        if entry.endswith(".md") and entry != ".gitkeep"
+    }
+    missing = []
+    for entry in sorted(os.listdir(specs_dir)):
+        if not entry.endswith(".md") or entry.endswith("-amendments.md"):
+            continue
+        path = os.path.join(specs_dir, entry)
+        try:
+            with open(path, encoding="utf-8") as fp:
+                content = fp.read()
+        except OSError:
+            continue
+        m = re.search(r">\s*状态:\s*(\S+)", content)
+        if m and m.group(1) in {"done", "released"}:
+            name = entry[:-3]
+            if name not in existing:
+                missing.append((name, m.group(1)))
+    if not missing:
+        return
+    print()
+    print(
+        f"📦 {len(missing)} 个已 done/released 的 spec 缺 CHANGELOG:"
+    )
+    for name, status in missing[:10]:
+        print(f"   - {name} ({status})")
+    if len(missing) > 10:
+        print(f"   ... 还有 {len(missing) - 10} 个")
+    print("   命令: `vibe changelog <project> <spec-name>` 生成 CHANGELOG")
+    print(f"<!-- vibe:missing_changelogs: {len(missing)} -->")
 
 
 def _print_uncommitted_work_hint(project_root: str) -> None:

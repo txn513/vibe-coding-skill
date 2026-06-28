@@ -5099,5 +5099,119 @@ class UncommittedWorkHintTests(unittest.TestCase):
 
 
 
+
+class ProjectStateHintsTests(unittest.TestCase):
+    """Cover the three new project-state hints in vibe next / status.
+
+    Each hint follows the same trailing-hint pattern: silent when
+    irrelevant, advisory + Rule 50 marker when relevant.
+
+    1. proposed rules backlog (Rule 18) — Skill self-improvement
+       loop signal.
+    2. missing retros for done/released specs — failure-mode data
+       is invisible to self_analyze without retros.
+    3. missing CHANGELOG for done/released specs — release
+       hygiene signal.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name)
+        init_project.init_project(str(self.project), "web")
+        self.specs_dir = self.project / ".agents" / "specs"
+        self.retros_dir = self.project / ".agents" / "retros"
+        self.changelogs_dir = self.project / ".agents" / "changelogs"
+        self.rules_dir = self.project / ".agents" / "rules"
+        for d in (self.retros_dir, self.changelogs_dir):
+            d.mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _write_spec(self, name: str, status: str) -> None:
+        (self.specs_dir / f"{name}.md").write_text(
+            f"# {name}\n\n> 状态: {status}\n\nbody\n",
+            encoding="utf-8",
+        )
+
+    # --- proposed rules hint ---
+
+    def test_proposed_rules_silent_when_none(self) -> None:
+        """hint silent when no rule is in 'proposed' state."""
+        import io, project_status
+        from contextlib import redirect_stdout
+        (self.rules_dir / "active.md").write_text("> 状态: adopted\n", encoding="utf-8")
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            project_status.project_status(str(self.project))
+        out = buf.getvalue()
+        self.assertNotIn("vibe:proposed_rules", out)
+
+    def test_proposed_rules_hint_fires(self) -> None:
+        """hint fires when at least one rule is in 'proposed' state."""
+        import io, project_status
+        from contextlib import redirect_stdout
+        (self.rules_dir / "old-rule.md").write_text("> 状态: proposed\n", encoding="utf-8")
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            project_status.project_status(str(self.project))
+        out = buf.getvalue()
+        self.assertIn("vibe:proposed_rules", out)
+        self.assertIn("old-rule", out)
+
+    # --- missing retro hint ---
+
+    def test_missing_retro_silent_when_all_have_retros(self) -> None:
+        """hint silent when all done specs have retros."""
+        import io, project_status
+        from contextlib import redirect_stdout
+        self._write_spec("shipped", "done")
+        (self.retros_dir / "shipped.md").write_text("# retro\n", encoding="utf-8")
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            project_status.project_status(str(self.project))
+        out = buf.getvalue()
+        self.assertNotIn("vibe:missing_retros", out)
+
+    def test_missing_retro_hint_fires(self) -> None:
+        """hint fires when a done spec has no retro."""
+        import io, project_status
+        from contextlib import redirect_stdout
+        self._write_spec("shipped", "done")
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            project_status.project_status(str(self.project))
+        out = buf.getvalue()
+        self.assertIn("vibe:missing_retros", out)
+        self.assertIn("shipped", out)
+
+    # --- missing changelog hint ---
+
+    def test_missing_changelog_silent_when_all_have(self) -> None:
+        """hint silent when all done specs have changelogs."""
+        import io, project_status
+        from contextlib import redirect_stdout
+        self._write_spec("shipped", "released")
+        (self.changelogs_dir / "shipped.md").write_text("# cl\n", encoding="utf-8")
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            project_status.project_status(str(self.project))
+        out = buf.getvalue()
+        self.assertNotIn("vibe:missing_changelogs", out)
+
+    def test_missing_changelog_hint_fires(self) -> None:
+        """hint fires when a done spec has no changelog."""
+        import io, project_status
+        from contextlib import redirect_stdout
+        self._write_spec("shipped", "released")
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            project_status.project_status(str(self.project))
+        out = buf.getvalue()
+        self.assertIn("vibe:missing_changelogs", out)
+        self.assertIn("shipped", out)
+
+
+
 if __name__ == "__main__":
     unittest.main()

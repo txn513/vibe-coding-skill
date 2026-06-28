@@ -177,6 +177,9 @@ vibe ui-redesign-contract <spec> --source-type opendesign --source-artifacts des
 - `vibe doctor` 会自动检查 Skill 版本：项目记录的版本（旧 `.agents/.skill-version`）vs Skill 当前安装版本（`VERSION`），不一致时出 advisory 提醒你开新 session 或重载 skill（Rule 52）
 - `vibe next` / `vibe status` 末尾也会显示 Skill 版本漂移 hint（`<!-- vibe:skill_version: ... -->` marker），agent 跑 next 就能看到 Skill 是不是落后了，不用单独跑 doctor（Rule 52）
 - `vibe next` / `vibe status` 末尾会检测工作区未提交改动（`git status --porcelain`），有改动时提示 agent 用 `vibe commit` 而不是裸 `git commit`（`<!-- vibe:uncommitted_work: N files -->` marker，让 agent 知道该提交了）
+- `vibe next` / `vibe status` 末尾会列出 `.agents/rules/` 里状态为 `proposed` 的规则（`<!-- vibe:proposed_rules: N -->`）——retro 沉淀后没人评审的规则会卡在这里；决定 `vibe rule-status <project> <stem> adopted` 还是 `abandoned`
+- 同上会列出 `> 状态: done|released` 但没写 retro 的 spec（`<!-- vibe:missing_retros: N -->`）——没 retro self_analyze 就看不到失败模式
+- 同上会列出 `> 状态: done|released` 但没生成 CHANGELOG 的 spec（`<!-- vibe:missing_changelogs: N -->`）
 - commit 必须用 `vibe commit -m "..."` 而不是裸 `git commit`：Skill 自动 review diff + 跑 `workflow.json.commands.verify` 配置的命令，全过才转交 git；项目没配 verify 命令时 vibe commit 直接拒绝并提示怎么配；`vibe commit --no-verify` 是显式 escape hatch，建议只在 docs-only 或紧急 hotfix 时用（Rule 53）
 - 老项目升级到新版 Skill：跑 `vibe upgrade <project>`，会自动写 `.agents/.skill-version` 让 Rule 52 开始工作，并诊断 `commands.verify` 是否已配（Rule 53 前置条件）；命令幂等，可重复跑
 - 子 spec 全部 done 后自动要求父 spec 意图对账（Rule 29）
