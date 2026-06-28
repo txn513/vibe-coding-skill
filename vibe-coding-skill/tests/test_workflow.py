@@ -4945,5 +4945,75 @@ class SkillUpgradeCommandTests(unittest.TestCase):
 
 
 
+
+class VersionDriftHintInNextStatusTests(unittest.TestCase):
+    """Cover Rule 52 advisory appearing in `vibe next` and `vibe status`.
+
+    The Skill has a pattern: low-priority hints (Rules 45, 46) appear
+    in both `vibe next` and `vibe status`. Rule 52 (version drift)
+    should follow the same pattern. Doctor still emits the same hint;
+    this test only verifies the next/status surfaces.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name)
+        init_project.init_project(str(self.project), "web")
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _set_project_skill_version(self, value: str) -> None:
+        (self.project / ".agents" / ".skill-version").write_text(value + "\n", encoding="utf-8")
+
+    def test_status_silent_when_versions_match(self) -> None:
+        """status must NOT emit Rule 52 hint when versions match."""
+        import io, project_status
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            project_status.project_status(str(self.project))
+        out = buf.getvalue()
+        self.assertNotIn("Skill version drift", out)
+        self.assertNotIn("vibe:skill_version", out)
+
+    def test_status_emits_hint_on_drift(self) -> None:
+        """status must emit Rule 52 hint + marker when project is stale."""
+        import io, project_status
+        from contextlib import redirect_stdout
+        self._set_project_skill_version("stale000")
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            project_status.project_status(str(self.project))
+        out = buf.getvalue()
+        self.assertIn("Skill version drift", out)
+        self.assertIn("stale000", out)
+        self.assertRegex(out, r"<!--\s*vibe:skill_version:[^>]+-->")
+
+    def test_next_emits_hint_on_drift(self) -> None:
+        """next must emit Rule 52 hint + marker when project is stale."""
+        import io, project_status
+        from contextlib import redirect_stdout
+        self._set_project_skill_version("stale000")
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            project_status.project_next(str(self.project))
+        out = buf.getvalue()
+        self.assertIn("Skill version drift", out)
+        self.assertIn("stale000", out)
+        self.assertRegex(out, r"<!--\s*vibe:skill_version:[^>]+-->")
+
+    def test_next_silent_when_versions_match(self) -> None:
+        """next must NOT emit Rule 52 hint when versions match."""
+        import io, project_status
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            project_status.project_next(str(self.project))
+        out = buf.getvalue()
+        self.assertNotIn("Skill version drift", out)
+
+
+
 if __name__ == "__main__":
     unittest.main()

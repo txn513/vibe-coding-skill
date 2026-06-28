@@ -140,6 +140,7 @@ def project_status(project_root: str) -> None:
     _print_recommendation(recommendation)
     _print_stale_archive_hint(project_root)
     _print_stage_stall_warnings(project_root, specs)
+    _print_version_drift_hint(project_root)
     # Rule 50: machine-readable status summary.
     spec_count = len(specs)
     summary = f"specs={spec_count} recommendation={recommendation.get('action', '')}"
@@ -169,6 +170,7 @@ def project_next(project_root: str) -> dict:
     _apply_model_mapping(project_root, recommendation)
     _print_recommendation(recommendation)
     _print_stale_archive_hint(project_root)
+    _print_version_drift_hint(project_root)
     return recommendation
 
 
@@ -187,6 +189,48 @@ def _print_stale_archive_hint(project_root: str) -> None:
     print(f"🧹 提醒: 发现 {len(stale)} 个陈旧 .agents/ 文件,可考虑归档")
     print("   命令: vibe archive-stale <project_root> --apply")
     print("   (Rule 45: 归档是显式动作,Skill 不会自动搬文件)")
+
+
+def _print_version_drift_hint(project_root: str) -> None:
+    """Low-priority advisory: project's recorded Skill version is behind the
+    installed version (Rule 52). Same pattern as _print_stale_archive_hint:
+    silent when there is no drift, advisory + machine-readable marker
+    (Rule 50) when there is.
+    """
+    if not os.path.exists(os.path.join(project_root, ".agents")):
+        return
+    project_version = "unknown"
+    project_path = os.path.join(project_root, ".agents", ".skill-version")
+    if os.path.exists(project_path):
+        try:
+            with open(project_path, encoding="utf-8") as fp:
+                project_version = fp.read().strip() or "unknown"
+        except OSError:
+            return
+    if project_version == "unknown":
+        return  # Pre-Rule-52 project; do not back-warn.
+    skill_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    skill_version_path = os.path.join(skill_dir, "VERSION")
+    skill_version = "unknown"
+    if os.path.exists(skill_version_path):
+        try:
+            with open(skill_version_path, encoding="utf-8") as fp:
+                skill_version = fp.read().strip() or "unknown"
+        except OSError:
+            return
+    if skill_version == "unknown" or project_version == skill_version:
+        return  # Match or dev install
+    print()
+    print(
+        f"⚠️  Skill version drift: project records '{project_version}', "
+        f"installed Skill is '{skill_version}' (Rule 52)."
+    )
+    print(
+        "   Reload the Skill in the active session or open a new one to "
+        "pick up the new rules."
+    )
+    # Rule 50: machine-readable marker
+    print(f"<!-- vibe:skill_version: {skill_version} (project: {project_version}) -->")
 
 
 def _print_stage_stall_warnings(project_root: str, specs: list[dict] | None = None) -> None:
