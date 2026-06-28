@@ -5343,5 +5343,70 @@ class AllCleanSignalTests(unittest.TestCase):
 
 
 
+
+
+
+class SpecArtifactIndicatorTests(unittest.TestCase):
+    """Cover the per-spec artifact indicator in vibe status / next.
+
+    The indicator lists plan / evidence / review / retro existence per
+    active spec so the agent can see at a glance what is missing.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name)
+        init_project.init_project(str(self.project), "web")
+        # init_project doesn't create plans/retros/evidence/reviews; create
+        # them so the per-spec artifact indicator's "exists" check is meaningful.
+        for sub in ("plans", "retros", "evidence", "reviews"):
+            (self.project / ".agents" / sub).mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _write_spec(self, name: str, status: str = "in-progress") -> None:
+        (self.project / ".agents" / "specs" / f"{name}.md").write_text(
+            f"# {name}\n\n> 状态: {status}\n> Prompt version: 1\n\nbody\n",
+            encoding="utf-8",
+        )
+
+    def _capture_status(self) -> str:
+        import io, project_status
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            project_status.project_status(str(self.project))
+        return buf.getvalue()
+
+    def test_indicator_lists_active_specs_with_marks(self) -> None:
+        """Indicator must appear for active specs and use check/cross marks."""
+        self._write_spec("wip")
+        out = self._capture_status()
+        self.assertIn("产物完整度", out)
+        self.assertIn("wip", out)
+        for key in ("plan", "evidence", "review", "retro"):
+            self.assertIn(key, out)
+
+    def test_indicator_marks_existing_artifacts(self) -> None:
+        """Indicator must mark plan/retro present when files exist."""
+        self._write_spec("wip")
+        (self.project / ".agents" / "plans" / "wip.md").write_text(
+            "# plan\n", encoding="utf-8",
+        )
+        (self.project / ".agents" / "retros" / "wip.md").write_text(
+            "# retro\n", encoding="utf-8",
+        )
+        out = self._capture_status()
+        self.assertIn("产物完整度", out)
+
+    def test_indicator_omits_done_specs(self) -> None:
+        """Done specs should not appear in the active-spec indicator."""
+        self._write_spec("shipped", status="done")
+        out = self._capture_status()
+        self.assertNotIn("产物完整度", out)
+
+
+
 if __name__ == "__main__":
     unittest.main()

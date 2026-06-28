@@ -70,12 +70,22 @@ def project_status(project_root: str) -> None:
         for s in specs:
             by_status.setdefault(s["status"], []).append(s)
 
+        agents_dir = os.path.dirname(specs_dir)
         print(f"📋 功能规格 ({len(specs)}):")
         for status in STATUS_ORDER:
             if status in by_status:
                 icon = STATUS_ICONS.get(status, "❓")
                 names = ", ".join(s["name"] for s in by_status[status])
                 print(f"   {icon} {status}: {names}")
+        # Per-spec artifact indicator for non-done specs so the agent can
+        # see at a glance which specs are missing plan / evidence / review
+        # / retro without having to ls each .agents/ subdirectory.
+        active_specs = [s for s in specs if s["status"] not in {"done", "cancelled", "superseded"}]
+        if active_specs:
+            print("   产物完整度:")
+            for s in active_specs:
+                artifacts = _spec_artifacts(agents_dir, s["name"])
+                print(f"     {s['name']:24s} {_spec_artifact_indicator(artifacts)}")
         print()
 
         # Active / blocked
@@ -1061,6 +1071,41 @@ def _list_plans(dir: str) -> list[dict]:
                 "total": total,
             })
     return result
+
+
+def _spec_artifacts(agents_dir: str, spec_name: str) -> dict[str, bool]:
+    """Per-spec existence flags for the four required artifacts.
+
+    Returns a dict with keys plan, evidence, review, retro — True when at
+    least one matching file exists for this spec. Used by the per-spec
+    readiness indicator next to active specs.
+    """
+    def _has(subdir: str) -> bool:
+        d = os.path.join(agents_dir, subdir)
+        if not os.path.isdir(d):
+            return False
+        return os.path.exists(os.path.join(d, f"{spec_name}.md"))
+    return {
+        "plan": _has("plans"),
+        "evidence": _has("evidence"),
+        "review": _has("reviews"),
+        "retro": _has("retros"),
+    }
+
+
+def _spec_artifact_indicator(artifacts: dict[str, bool]) -> str:
+    """Compact per-spec readiness strip: 'plan ✓ evidence ✗ review ✓ retro ✗'.
+
+    The checkmark/cross tells the agent at a glance which artifacts are
+    already on disk for this spec. Missing artifacts are the obvious next
+    step (run vibe plan / vibe record-evidence / etc.).
+    """
+    order = ("plan", "evidence", "review", "retro")
+    parts = []
+    for key in order:
+        mark = "✓" if artifacts.get(key) else "✗"
+        parts.append(f"{key} {mark}")
+    return "  ".join(parts)
 
 
 def _plan_progress_warnings(plans: list[dict], specs: list[dict]) -> list[str]:
