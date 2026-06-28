@@ -27,6 +27,7 @@ import manage_specs
 import migrate_project
 import archive_status
 import commit
+import upgrade
 import policy_sources
 import project_status
 import shlex
@@ -200,6 +201,9 @@ def main() -> None:
     rule.add_argument("rule_name")
     rule.add_argument("status", nargs="?", choices=sorted(rule_status.RULE_STATUSES))
     rule.add_argument("--reason", default="")
+
+    upgrade_cmd = sub.add_parser("upgrade")
+    upgrade_cmd.add_argument("project_root", help="Project root to upgrade")
 
     commit_cmd = sub.add_parser("commit")
     commit_cmd.add_argument("project_root")
@@ -425,6 +429,8 @@ def main() -> None:
         spec_amend.amend_spec(root, args.spec_name, args.description)
     elif args.operation == "risk":
         confirm_risk.confirm_risk(root, args.spec_name, args.risk, args.reason)
+    elif args.operation == "upgrade":
+        raise SystemExit(upgrade.upgrade(args.project_root))
     elif args.operation == "commit":
         # Build argv for commit.run() from already-parsed args. The
         # `--no-verify` flag is not in args (argparse.REMAINDER would

@@ -4861,5 +4861,89 @@ class PreCommitGateTests(unittest.TestCase):
 
 
 
+
+class SkillUpgradeCommandTests(unittest.TestCase):
+    """Cover `vibe upgrade` — bring an existing project up to the current Skill.
+
+    The command must:
+    1. Write .agents/.skill-version with the current Skill VERSION
+    2. Report Rule 53 readiness (verify command configured or not)
+    3. Be idempotent (safe to re-run)
+    4. Refuse projects that have not been initialised
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name)
+        init_project.init_project(str(self.project), "web")
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_refuses_uninitialised_project(self) -> None:
+        """vibe upgrade on a project with no .agents/ must fail clearly."""
+        import upgrade
+        empty = Path(self.tmp.name) / "empty-subdir"
+        empty.mkdir()
+        rc = upgrade.upgrade(str(empty))
+        self.assertEqual(rc, 1)
+
+    def test_overwrites_stale_skill_version(self) -> None:
+        """upgrade must overwrite a stale .skill-version with the current VERSION."""
+        import upgrade
+        version_file = self.project / ".agents" / ".skill-version"
+        # Simulate a stale project record (e.g. pre-Rule-52-style drift).
+        version_file.write_text("stale000\n", encoding="utf-8")
+        rc = upgrade.upgrade(str(self.project))
+        self.assertEqual(rc, 0)
+        content = version_file.read_text(encoding="utf-8").strip()
+        self.assertNotEqual(content, "stale000")
+        self.assertNotEqual(content, "unknown")
+
+    def test_idempotent(self) -> None:
+        """Running upgrade twice must not error and must keep the version stable."""
+        import upgrade
+        upgrade.upgrade(str(self.project))
+        version_file = self.project / ".agents" / ".skill-version"
+        first = version_file.read_text(encoding="utf-8").strip()
+        rc = upgrade.upgrade(str(self.project))
+        self.assertEqual(rc, 0)
+        second = version_file.read_text(encoding="utf-8").strip()
+        self.assertEqual(first, second)
+
+    def test_diagnoses_missing_verify_command(self) -> None:
+        """When commands.verify is empty, upgrade must report and print snippet."""
+        import io
+        import upgrade
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            upgrade.upgrade(str(self.project))
+        out = buf.getvalue()
+        self.assertIn("Rule 53", out)
+        self.assertIn("未配置 verify 命令", out)
+        self.assertIn("pytest", out)  # example snippet mentions pytest
+
+    def test_reports_configured_verify_command(self) -> None:
+        """When commands.verify is set, upgrade must confirm and show it."""
+        import io
+        import upgrade
+        import workflow_state
+        from common import atomic_write_json
+        workflow, _ = workflow_state.ensure_workflow(str(self.project))
+        workflow.setdefault("commands", {})["verify"] = [["pytest", "-x"]]
+        atomic_write_json(
+            str(self.project / ".agents" / "workflow.json"),
+            workflow,
+        )
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            upgrade.upgrade(str(self.project))
+        out = buf.getvalue()
+        self.assertIn("Rule 53", out)
+        self.assertIn("已配置", out)
+        self.assertIn("pytest -x", out)
+
+
+
 if __name__ == "__main__":
     unittest.main()
