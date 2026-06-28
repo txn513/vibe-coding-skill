@@ -5213,5 +5213,135 @@ class ProjectStateHintsTests(unittest.TestCase):
 
 
 
+
+class AllCleanSignalTests(unittest.TestCase):
+    """Cover the all-clean signal at the end of vibe next / status.
+
+    The signal is a positive closing indicator: when no spec is
+    active, no version drift, no uncommitted work, no proposed
+    rules, and all done specs have retros + changelogs, the
+    output ends with "项目干净" so the agent knows to stop
+    looping on `vibe next` and wait for user input.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name)
+        init_project.init_project(str(self.project), "web")
+        # init_project doesn't create retros/changelogs; create them so the
+        # all-clean signal's "missing retro/changelog" check is meaningful.
+        for sub in ("retros", "changelogs"):
+            (self.project / ".agents" / sub).mkdir(parents=True, exist_ok=True)
+        # Init a git repo so the signal's git status check is meaningful.
+        import subprocess
+        subprocess.run(["git", "init", "-q"], cwd=str(self.project), check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "t@t.com"],
+            cwd=str(self.project), check=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "t"],
+            cwd=str(self.project), check=True,
+        )
+        subprocess.run(["git", "add", "-A"], cwd=str(self.project), check=True)
+        subprocess.run(
+            ["git", "commit", "-q", "-m", "init"],
+            cwd=str(self.project), check=True,
+        )
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _write_done_spec_with_retro_and_cl(self, name: str) -> None:
+        import subprocess
+        (self.project / ".agents" / "specs" / f"{name}.md").write_text(
+            f"# {name}\n\n> 状态: done\n> Prompt version: 1\n\nbody\n",
+            encoding="utf-8",
+        )
+        (self.project / ".agents" / "retros" / f"{name}.md").write_text(
+            "# retro\n", encoding="utf-8",
+        )
+        (self.project / ".agents" / "changelogs" / f"{name}.md").write_text(
+            "# cl\n", encoding="utf-8",
+        )
+        # Commit so the worktree stays clean (the all-clean signal
+        # refuses to fire when git status reports uncommitted work).
+        subprocess.run(
+            ["git", "add", "-A"], cwd=str(self.project), check=True,
+        )
+        subprocess.run(
+            ["git", "commit", "-q", "-m", name],
+            cwd=str(self.project), check=True,
+        )
+
+    def test_signal_fires_when_all_clean(self) -> None:
+        """Signal must fire when project is fully clean."""
+        import io, project_status
+        from contextlib import redirect_stdout
+        self._write_done_spec_with_retro_and_cl("shipped")
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            project_status.project_status(str(self.project))
+        out = buf.getvalue()
+        self.assertIn("项目干净", out)
+        self.assertRegex(out, r"<!--\s*vibe:project_state:\s*clean\s*-->")
+
+    def test_signal_silent_when_active_spec_exists(self) -> None:
+        """Signal must NOT fire when a spec is in-progress."""
+        import io, project_status
+        from contextlib import redirect_stdout
+        (self.project / ".agents" / "specs" / "wip.md").write_text(
+            "# wip\n\n> 状态: in-progress\n> Prompt version: 1\n\nbody\n",
+            encoding="utf-8",
+        )
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            project_status.project_status(str(self.project))
+        out = buf.getvalue()
+        self.assertNotIn("项目干净", out)
+
+    def test_signal_silent_when_uncommitted(self) -> None:
+        """Signal must NOT fire when worktree is dirty."""
+        import io, project_status
+        from contextlib import redirect_stdout
+        self._write_done_spec_with_retro_and_cl("shipped")
+        (self.project / "new.txt").write_text("x\n", encoding="utf-8")
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            project_status.project_status(str(self.project))
+        out = buf.getvalue()
+        self.assertNotIn("项目干净", out)
+
+    def test_signal_silent_when_proposed_rule_exists(self) -> None:
+        """Signal must NOT fire when a proposed rule is unreviewed."""
+        import io, project_status
+        from contextlib import redirect_stdout
+        self._write_done_spec_with_retro_and_cl("shipped")
+        (self.project / ".agents" / "rules" / "pending.md").write_text(
+            "> 状态: proposed\n", encoding="utf-8",
+        )
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            project_status.project_status(str(self.project))
+        out = buf.getvalue()
+        self.assertNotIn("项目干净", out)
+
+    def test_signal_silent_when_missing_retro(self) -> None:
+        """Signal must NOT fire when a done spec lacks retro."""
+        import io, project_status
+        from contextlib import redirect_stdout
+        (self.project / ".agents" / "specs" / "shipped.md").write_text(
+            "# shipped\n\n> 状态: done\n> Prompt version: 1\n\nbody\n",
+            encoding="utf-8",
+        )
+        # No retro, no changelog
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            project_status.project_status(str(self.project))
+        out = buf.getvalue()
+        self.assertNotIn("项目干净", out)
+
+
+
 if __name__ == "__main__":
     unittest.main()

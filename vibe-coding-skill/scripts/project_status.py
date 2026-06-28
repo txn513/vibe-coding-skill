@@ -145,6 +145,7 @@ def project_status(project_root: str) -> None:
     _print_missing_retro_hint(project_root)
     _print_missing_changelog_hint(project_root)
     _print_uncommitted_work_hint(project_root)
+    _print_all_clean_signal(project_root, specs)
     # Rule 50: machine-readable status summary.
     spec_count = len(specs)
     summary = f"specs={spec_count} recommendation={recommendation.get('action', '')}"
@@ -167,10 +168,8 @@ def project_next(project_root: str) -> dict:
             },
         )
     else:
-        recommendation = recommend_next(
-            project_root,
-            _list_specs(os.path.join(project_root, ".agents", "specs")),
-        )
+        specs = _list_specs(os.path.join(project_root, ".agents", "specs"))
+        recommendation = recommend_next(project_root, specs)
     _apply_model_mapping(project_root, recommendation)
     _print_recommendation(recommendation)
     _print_stale_archive_hint(project_root)
@@ -179,6 +178,7 @@ def project_next(project_root: str) -> dict:
     _print_missing_retro_hint(project_root)
     _print_missing_changelog_hint(project_root)
     _print_uncommitted_work_hint(project_root)
+    _print_all_clean_signal(project_root, specs)
     return recommendation
 
 
@@ -1410,6 +1410,109 @@ def print_ac_coverage(coverage: dict) -> None:
     if coverage["evidence_path"]:
         rel = os.path.relpath(coverage["evidence_path"])
         print(f"   证据: {rel}")
+
+
+def _print_all_clean_signal(project_root: str, specs: list) -> None:
+    """Positive closing signal: nothing is pending, agent can stop.
+
+    Fires only when:
+    - Project has at least one spec (not an empty project)
+    - No spec is in active progression (spec-ready / in-progress / review)
+    - Version drift is clean (or unknown — both treated as not-a-problem)
+    - Worktree is clean (or not a git repo — both treated as not-a-problem)
+    - No proposed rules in .agents/rules/
+    - All done/released specs have retros and changelogs
+
+    The per-category hints above already surface each kind of pending
+    item; this function exists to give the agent a single, unambiguous
+    "you are caught up" signal so it knows when to stop looping on
+    `vibe next` and wait for the user's next instruction.
+    """
+    if not specs:
+        return  # Empty project — recommendation will say "create a spec".
+    # The "all clean" state means every spec is in a terminal state and the
+    # agent has nothing to advance. Any non-terminal status (draft, spec-ready,
+    # in-progress, review, released) means the project still has pending work.
+    PENDING_STATUSES = {"draft", "spec-ready", "in-progress", "review", "released"}
+    if any(s.get("status") in PENDING_STATUSES for s in specs):
+        return
+
+    skill_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    skill_version_path = os.path.join(skill_dir, "VERSION")
+    project_version_path = os.path.join(project_root, ".agents", ".skill-version")
+    pv = "unknown"
+    sv = "unknown"
+    if os.path.exists(project_version_path):
+        try:
+            with open(project_version_path, encoding="utf-8") as fp:
+                pv = fp.read().strip() or "unknown"
+        except OSError:
+            pass
+    if os.path.exists(skill_version_path):
+        try:
+            with open(skill_version_path, encoding="utf-8") as fp:
+                sv = fp.read().strip() or "unknown"
+        except OSError:
+            pass
+    if pv != "unknown" and sv != "unknown" and pv != sv:
+        return  # Version drift pending.
+
+    import subprocess
+    try:
+        completed = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=project_root, capture_output=True, text=True, timeout=5,
+        )
+        if completed.returncode == 0 and completed.stdout.strip():
+            return  # Uncommitted work pending.
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+    rules_dir = os.path.join(project_root, ".agents", "rules")
+    if os.path.isdir(rules_dir):
+        for entry in os.listdir(rules_dir):
+            if not entry.endswith(".md"):
+                continue
+            try:
+                with open(
+                    os.path.join(rules_dir, entry), encoding="utf-8"
+                ) as fp:
+                    content = fp.read()
+            except OSError:
+                continue
+            if re.search(r">\s*状态:\s*proposed\b", content):
+                return  # Proposed rule pending.
+
+    specs_dir = os.path.join(project_root, ".agents", "specs")
+    for sub_dir_name in ("retros", "changelogs"):
+        sub_dir = os.path.join(project_root, ".agents", sub_dir_name)
+        if not (os.path.isdir(specs_dir) and os.path.isdir(sub_dir)):
+            continue
+        existing = {
+            entry[:-3] for entry in os.listdir(sub_dir)
+            if entry.endswith(".md") and entry != ".gitkeep"
+        }
+        for entry in os.listdir(specs_dir):
+            if not entry.endswith(".md") or entry.endswith("-amendments.md"):
+                continue
+            try:
+                with open(
+                    os.path.join(specs_dir, entry), encoding="utf-8"
+                ) as fp:
+                    content = fp.read()
+            except OSError:
+                continue
+            m = re.search(r">\s*状态:\s*(\S+)", content)
+            if m and m.group(1) in {"done", "released"}:
+                if entry[:-3] not in existing:
+                    return  # Missing retro or changelog pending.
+
+    print()
+    print(
+        "✅ 项目干净 — 没有 pending spec / retro / CHANGELOG / 提交 / 规则待评审 / 版本漂移"
+    )
+    print("   agent 可以停，等用户下一个指令")
+    print("<!-- vibe:project_state: clean -->")
 
 
 if __name__ == "__main__":
