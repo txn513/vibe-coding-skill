@@ -141,6 +141,7 @@ def project_status(project_root: str) -> None:
     _print_stale_archive_hint(project_root)
     _print_stage_stall_warnings(project_root, specs)
     _print_version_drift_hint(project_root)
+    _print_uncommitted_work_hint(project_root)
     # Rule 50: machine-readable status summary.
     spec_count = len(specs)
     summary = f"specs={spec_count} recommendation={recommendation.get('action', '')}"
@@ -171,6 +172,7 @@ def project_next(project_root: str) -> dict:
     _print_recommendation(recommendation)
     _print_stale_archive_hint(project_root)
     _print_version_drift_hint(project_root)
+    _print_uncommitted_work_hint(project_root)
     return recommendation
 
 
@@ -231,6 +233,47 @@ def _print_version_drift_hint(project_root: str) -> None:
     )
     # Rule 50: machine-readable marker
     print(f"<!-- vibe:skill_version: {skill_version} (project: {project_version}) -->")
+
+
+def _print_uncommitted_work_hint(project_root: str) -> None:
+    """Low-priority advisory: worktree has uncommitted changes.
+
+    Follows the same pattern as _print_stale_archive_hint and
+    _print_version_drift_hint: silent when irrelevant, advisory +
+    Rule 50 marker when relevant. Tells the agent there is work
+    ready to commit and steers it toward `vibe commit` (Rule 53
+    pre-commit gate) rather than raw `git commit`.
+    """
+    if not os.path.isdir(os.path.join(project_root, ".agents")):
+        return
+    import subprocess
+    try:
+        completed = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=project_root, capture_output=True, text=True, timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return
+    if completed.returncode != 0:
+        return  # Not a git repo, or git unavailable
+    lines = [line for line in completed.stdout.splitlines() if line.strip()]
+    if not lines:
+        return  # Clean worktree
+    count = len(lines)
+    print()
+    print(
+        f"💾 检测到 {count} 个未提交改动 (建议用 `vibe commit` 提交，不是裸 `git commit`):"
+    )
+    for line in lines[:10]:
+        # git status --porcelain: first 2 chars are status, then space, then path
+        path = line[3:].strip() if len(line) > 3 else line
+        status = line[:2].strip() or "?"
+        print(f"   - {status} {path}")
+    if count > 10:
+        print(f"   ... 还有 {count - 10} 个")
+    print("   命令: `vibe commit -m '...'`  (Rule 53: 自动 review diff + 跑 verify)")
+    # Rule 50: machine-readable marker
+    print(f"<!-- vibe:uncommitted_work: {count} files -->")
 
 
 def _print_stage_stall_warnings(project_root: str, specs: list[dict] | None = None) -> None:

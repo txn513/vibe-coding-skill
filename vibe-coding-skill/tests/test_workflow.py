@@ -5015,5 +5015,89 @@ class VersionDriftHintInNextStatusTests(unittest.TestCase):
 
 
 
+
+class UncommittedWorkHintTests(unittest.TestCase):
+    """Cover uncommitted-work hint in `vibe next` and `vibe status`.
+
+    When the project has uncommitted git changes, the hint
+    surfaces at the bottom (same pattern as Rules 45/46/52) and
+    steers the agent toward `vibe commit` (Rule 53) instead of
+    raw `git commit`. Includes a Rule 50 marker for downstream
+    parsers.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name)
+        init_project.init_project(str(self.project), "web")
+        # Initialise a git repo so the hint's git checks can run.
+        import subprocess
+        subprocess.run(["git", "init", "-q"], cwd=str(self.project), check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "t@t.com"],
+            cwd=str(self.project), check=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "t"],
+            cwd=str(self.project), check=True,
+        )
+        subprocess.run(["git", "add", "-A"], cwd=str(self.project), check=True)
+        subprocess.run(
+            ["git", "commit", "-q", "-m", "init"],
+            cwd=str(self.project), check=True,
+        )
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_status_silent_on_clean_worktree(self) -> None:
+        """status must NOT emit the hint when worktree is clean."""
+        import io, project_status
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            project_status.project_status(str(self.project))
+        out = buf.getvalue()
+        self.assertNotIn("vibe:uncommitted_work", out)
+        self.assertNotIn("vibe commit", out)
+
+    def test_status_emits_hint_when_dirty(self) -> None:
+        """status must emit hint + marker when worktree is dirty."""
+        import io, project_status
+        from contextlib import redirect_stdout
+        (self.project / "new_file.txt").write_text("hello\n", encoding="utf-8")
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            project_status.project_status(str(self.project))
+        out = buf.getvalue()
+        self.assertIn("vibe:uncommitted_work", out)
+        self.assertIn("vibe commit", out)
+        self.assertIn("new_file.txt", out)
+        self.assertRegex(out, r"<!--\s*vibe:uncommitted_work:\s*\d+\s+files\s*-->")
+
+    def test_next_emits_hint_when_dirty(self) -> None:
+        """next must emit hint + marker when worktree is dirty."""
+        import io, project_status
+        from contextlib import redirect_stdout
+        (self.project / "another.txt").write_text("x\n", encoding="utf-8")
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            project_status.project_next(str(self.project))
+        out = buf.getvalue()
+        self.assertIn("vibe:uncommitted_work", out)
+        self.assertIn("vibe commit", out)
+
+    def test_next_silent_on_clean_worktree(self) -> None:
+        """next must NOT emit the hint when worktree is clean."""
+        import io, project_status
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            project_status.project_next(str(self.project))
+        out = buf.getvalue()
+        self.assertNotIn("vibe:uncommitted_work", out)
+
+
+
 if __name__ == "__main__":
     unittest.main()
