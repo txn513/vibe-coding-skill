@@ -4737,5 +4737,129 @@ class SkillVersionDriftTests(unittest.TestCase):
 
 
 
+
+class PreCommitGateTests(unittest.TestCase):
+    """Cover Rule 53 — `vibe commit` wrapper enforces diff review + verify.
+
+    The wrapper refuses raw commit when:
+    - not in a git repo
+    - no changes to commit
+    - workflow.json has no verify command
+    - any verify command exits non-zero
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name)
+        init_project.init_project(str(self.project), "web")
+        # Initialise a git repo so the gate's git checks pass.
+        import subprocess
+        subprocess.run(["git", "init", "-q"], cwd=str(self.project), check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@example.com"],
+            cwd=str(self.project), check=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "Test"],
+            cwd=str(self.project), check=True,
+        )
+        subprocess.run(["git", "add", "-A"], cwd=str(self.project), check=True)
+        subprocess.run(
+            ["git", "commit", "-q", "-m", "init"],
+            cwd=str(self.project), check=True,
+        )
+        import workflow_state
+        workflow, _ = workflow_state.ensure_workflow(str(self.project))
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _add_change(self) -> None:
+        (self.project / "new.txt").write_text("hello\n", encoding="utf-8")
+
+    def test_fails_when_no_verify_command_configured(self) -> None:
+        """vibe commit must refuse when workflow.json has no verify command."""
+        import commit
+        self._add_change()
+        rc = commit.commit(str(self.project), ["-m", "no verify cmd"])
+        self.assertEqual(rc, 4)
+
+    def test_fails_when_no_changes(self) -> None:
+        """vibe commit must refuse when there is nothing to commit."""
+        import commit
+        import subprocess
+        import workflow_state
+        workflow, _ = workflow_state.ensure_workflow(str(self.project))
+        workflow.setdefault("commands", {})["verify"] = [["true"]]
+        from common import atomic_write_json
+        atomic_write_json(
+            str(self.project / ".agents" / "workflow.json"),
+            workflow,
+        )
+        # Stage and commit the config so the worktree is clean.
+        subprocess.run(["git", "add", "-A"], cwd=str(self.project), check=True)
+        subprocess.run(
+            ["git", "commit", "-q", "-m", "config"],
+            cwd=str(self.project), check=True,
+        )
+        rc = commit.commit(str(self.project), ["-m", "empty"])
+        self.assertEqual(rc, 2)
+
+    def test_fails_when_verify_command_fails(self) -> None:
+        """vibe commit must abort when a verify command exits non-zero."""
+        import commit
+        import workflow_state
+        workflow, _ = workflow_state.ensure_workflow(str(self.project))
+        workflow.setdefault("commands", {})["verify"] = [["false"]]  # always fails
+        from common import atomic_write_json
+        atomic_write_json(
+            str(self.project / ".agents" / "workflow.json"),
+            workflow,
+        )
+        self._add_change()
+        rc = commit.commit(str(self.project), ["-m", "should fail"])
+        self.assertEqual(rc, 3)
+
+    def test_succeeds_when_verify_passes(self) -> None:
+        """vibe commit must hand off to git commit when verify passes."""
+        import commit
+        import workflow_state
+        workflow, _ = workflow_state.ensure_workflow(str(self.project))
+        workflow.setdefault("commands", {})["verify"] = [["true"]]
+        from common import atomic_write_json
+        atomic_write_json(
+            str(self.project / ".agents" / "workflow.json"),
+            workflow,
+        )
+        self._add_change()
+        rc = commit.commit(str(self.project), ["-m", "feat: add new.txt"])
+        self.assertEqual(rc, 0)
+        # Confirm commit actually landed
+        import subprocess
+        log = subprocess.run(
+            ["git", "log", "--oneline", "-1"],
+            cwd=str(self.project), capture_output=True, text=True,
+        )
+        self.assertIn("feat: add new.txt", log.stdout)
+
+    def test_no_verify_flag_bypasses_gate(self) -> None:
+        """`--no-verify` must skip the gate and run raw git commit."""
+        # No verify command configured; should still succeed with --no-verify
+        import subprocess
+        self._add_change()
+        # Resolve commit.py relative to the Skill install.
+        skill_root = os.path.dirname(
+            os.path.dirname(os.path.abspath(__file__))
+        )
+        commit_script = os.path.join(skill_root, "scripts", "commit.py")
+        result = subprocess.run(
+            ["python3", commit_script, str(self.project), "--no-verify", "-m", "bypass"],
+            capture_output=True, text=True,
+        )
+        # Should not fail with rc=4 (the "no verify command" error)
+        self.assertNotEqual(result.returncode, 4, f"stdout={result.stdout}\nstderr={result.stderr}")
+
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -534,6 +534,55 @@ artifacts merely because a template exists.
     Rule 52 narrows the gap from "blind" to "visible" within the
     Skill's authority.
 
+53. **Pre-commit verification gate**: Every `git commit` must be wrapped
+    in the `vibe commit` wrapper, not invoked as raw `git commit`.
+    The wrapper enforces three discipline steps that agents otherwise
+    skip:
+
+    1. **Review** — show `git diff --stat` (and untracked file list)
+       so the author sees the blast radius of the commit. The review
+       surfaces accidental edits and confirms the diff matches the
+       spec's `## 涉及范围` (Rule 44 spirit: scope discipline).
+    2. **Verify** — run every command listed in
+       `workflow.json.commands.verify`. If any command exits non-zero,
+       the commit is aborted before a single byte reaches the project
+       history. The verify phase is the same one `vibe verify` and
+       the spec-verify gate already use (Rule 22, Rule 28, Rule 30);
+       the wrapper re-runs it at the commit moment because between
+       spec-verify and commit, the agent may have touched other
+       files, and the verify evidence the gate relied on may no
+       longer match the worktree.
+    3. **Commit** — only if both pass, hand off to `git commit` with
+       the user's argv unchanged.
+
+    Failure modes the gate is designed to catch (all observed in
+    real projects):
+
+    - "Spec is `done`, tests pass, but I edited something else after
+      the verify run and committed it without re-running tests."
+    - "Diff is way larger than the spec's scope — the agent did
+      drive-by edits that nobody reviewed."
+    - "I added a regression test that I never actually ran."
+
+    `vibe commit --no-verify` is provided as a documented escape
+    hatch (e.g. for docs-only commits where the verify phase would
+    be wasteful, or for emergency hotfixes that need a fast path).
+    It bypasses steps 1 and 2 and runs `git commit` directly. The
+    escape hatch is intentionally an explicit flag, not a default
+    behaviour, so casual use of `vibe commit` does not silently skip
+    the gate. A user who wants strict enforcement can install a
+    git pre-commit hook that runs `vibe commit --verify-only` (the
+    Skill ships a one-liner install command); the hook then blocks
+    raw `git commit` for everyone working in the project.
+
+    A project that has not configured `workflow.json.commands.verify`
+    cannot use `vibe commit` at all — the wrapper refuses with a
+    clear message and the exact `workflow.json` snippet to add.
+    This forces every Vibe Coding project to declare its verify
+    command up front (Rule 4 spirit: configured commands over
+    written claims), and means Rule 53 cannot accidentally regress
+    to "trust the agent" mode.
+
 ## State Model
 
 Normal states are:

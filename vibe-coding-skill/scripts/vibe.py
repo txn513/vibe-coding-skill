@@ -5,6 +5,7 @@ Codex should invoke this internally after interpreting the user's natural langua
 """
 
 import argparse
+import subprocess
 import json
 import os
 import sys
@@ -25,6 +26,7 @@ import knowledge_gate
 import manage_specs
 import migrate_project
 import archive_status
+import commit
 import policy_sources
 import project_status
 import shlex
@@ -198,6 +200,17 @@ def main() -> None:
     rule.add_argument("rule_name")
     rule.add_argument("status", nargs="?", choices=sorted(rule_status.RULE_STATUSES))
     rule.add_argument("--reason", default="")
+
+    commit_cmd = sub.add_parser("commit")
+    commit_cmd.add_argument("project_root")
+    commit_cmd.add_argument(
+        "git_args", nargs=argparse.REMAINDER,
+        help="Arguments forwarded to `git commit`",
+    )
+    commit_cmd.add_argument(
+        "--no-verify", action="store_true",
+        help="Skip Rule 53 verify gate (escape hatch)",
+    )
 
     policy_scan = sub.add_parser("policy-scan")
     policy_scan.add_argument("project_root")
@@ -412,6 +425,15 @@ def main() -> None:
         spec_amend.amend_spec(root, args.spec_name, args.description)
     elif args.operation == "risk":
         confirm_risk.confirm_risk(root, args.spec_name, args.risk, args.reason)
+    elif args.operation == "commit":
+        # Build argv for commit.run() from already-parsed args. The
+        # `--no-verify` flag is not in args (argparse.REMAINDER would
+        # have eaten it into git_args), so check sys.argv directly.
+        no_verify = "--no-verify" in sys.argv
+        run_argv = [args.project_root, *args.git_args]
+        if no_verify:
+            run_argv = ["--no-verify", *run_argv]
+        raise SystemExit(commit.run(run_argv))
     elif args.operation == "rule-status":
         rule_status.set_rule_status(root, args.rule_name, args.status, args.reason)
     elif args.operation == "policy-scan":
