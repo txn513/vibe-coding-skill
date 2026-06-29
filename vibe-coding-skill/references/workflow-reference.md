@@ -83,6 +83,29 @@ python3 scripts/vibe.py doctor <project_root>
 python3 scripts/vibe.py migrate <project_root> --apply
 ```
 
+### Commit commands (Rule 53)
+
+```bash
+# Default: verify_scope (if configured) or verify, then git commit
+python3 scripts/vibe.py commit <project_root> -m "describe this batch"
+
+# Split a dirty tree into focused commits
+git add <paths>  # stage only the files for this logical unit
+python3 scripts/vibe.py commit <project_root> --staged -m "task N"
+
+# Or specify paths directly
+python3 scripts/vibe.py commit <project_root> --paths a.py,b.py -m "task N"
+
+# Batch commit pattern:
+#   Intermediate commits (skip verify for speed)
+python3 scripts/vibe.py commit <project_root> --staged --no-verify -m "task N"
+#   Final commit in batch (run full suite)
+python3 scripts/vibe.py commit <project_root> --full-verify -m "batch complete"
+
+# Escape hatch: skip Rule 53 gate entirely (docs-only, hotfix)
+python3 scripts/vibe.py commit <project_root> --no-verify -m "docs: update README"
+```
+
 These commands are an implementation interface for Codex, not required user
 knowledge. Use specialized scripts where the dispatcher does not expose an
 operation.

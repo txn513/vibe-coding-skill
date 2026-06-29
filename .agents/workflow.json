@@ -1,5 +1,5 @@
 {
-  "schema_version": 4,
+  "schema_version": 10,
   "project_id": "2026-06-12-vibe-coding-10-vibe-coding-agent-2",
   "roles": {
     "owner": "",
@@ -41,7 +41,40 @@
   "commands": {
     "verify": [],
     "release": [],
-    "observe": []
+    "observe": [],
+    "verify_scope": [],
+    "verify_full": []
   },
-  "repositories": []
+  "repositories": [],
+  "model_tiers": {},
+  "archive": {
+    "thresholds_days": {
+      "evidence": 90,
+      "rule_unreferenced": 180,
+      "spec_untouched": 365
+    },
+    "scan_paths": [
+      ".agents/specs",
+      ".agents/evidence",
+      ".agents/rules"
+    ],
+    "exclude_paths": [
+      ".agents/archive"
+    ]
+  },
+  "stage_stall_sla": {
+    "low_hours": 72,
+    "medium_hours": 24,
+    "high_hours": 8
+  },
+  "risk_required_rules": {
+    "high": [],
+    "medium": [],
+    "low": []
+  },
+  "review_separation": {
+    "required_for": [
+      "high"
+    ]
+  }
 }
