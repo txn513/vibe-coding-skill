@@ -5693,5 +5693,149 @@ class CommitAtWorkflowBoundaryTests(unittest.TestCase):
 
 
 
+
+
+
+class SplitCommitTests(unittest.TestCase):
+    """Cover `vibe commit --staged` and `vibe commit --paths`.
+
+    The pre-change behaviour was `git add -A` followed by `git commit`,
+    which forced every dirty file into one commit and made the
+    one-commit-per-logical-unit workflow impossible. These tests verify
+    the agent can split a dirty tree into multiple focused commits.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name)
+        init_project.init_project(str(self.project), "web")
+        import subprocess
+        subprocess.run(["git", "init", "-q"], cwd=str(self.project), check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "t@t.com"],
+            cwd=str(self.project), check=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "t"],
+            cwd=str(self.project), check=True,
+        )
+        # Configure verify so commit.py does not refuse; the verify
+        # command itself just echoes true so it always exits 0.
+        wf_path = self.project / ".agents" / "workflow.json"
+        wf = json.loads(wf_path.read_text())
+        wf["commands"]["verify"] = [["true"]]
+        wf_path.write_text(json.dumps(wf))
+        subprocess.run(["git", "add", "-A"], cwd=str(self.project), check=True)
+        subprocess.run(
+            ["git", "commit", "-q", "-m", "init"],
+            cwd=str(self.project), check=True,
+        )
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _git_log_files(self) -> list[tuple[str, list[str]]]:
+        """Return [(commit_msg, [files])] from newest to oldest.
+
+        Uses `--pretty=format:%H%n%s` (hash + subject on two lines) so
+        commit messages that contain arbitrary text (including "all in
+        one", "single staged", etc.) can be parsed without heuristics.
+        """
+        import subprocess
+        out = subprocess.run(
+            ["git", "log", "--pretty=format:%H|%s", "--name-only"],
+            cwd=str(self.project), capture_output=True, text=True, check=True,
+        ).stdout
+        # Format: each commit is "<hash>|<msg>\n<file1>\n<file2>\n\n".
+        # We split on the blank-line separator between commits.
+        commits: list[tuple[str, list[str]]] = []
+        for chunk in out.split("\n\n"):
+            chunk = chunk.strip()
+            if not chunk:
+                continue
+            lines = chunk.splitlines()
+            header = lines[0]
+            if "|" not in header:
+                continue
+            msg = header.split("|", 1)[1]
+            files = [f for f in lines[1:] if f]
+            commits.append((msg, files))
+        return commits
+
+    def test_paths_commits_only_specified_files(self) -> None:
+        # 6 dirty files for 3 tasks. Commit task 1 with --paths.
+        for f in ["a.py", "b.py", "c.py", "d.py", "e.py", "f.py"]:
+            (self.project / f).write_text(f"x {f}", encoding="utf-8")
+        import commit as commit_mod
+        rc = commit_mod.run(
+            [str(self.project), "--paths", "a.py,b.py", "-m", "task 1"]
+        )
+        self.assertEqual(rc, 0)
+        commits = self._git_log_files()
+        # Top commit must contain exactly a.py and b.py.
+        msg, files = commits[0]
+        self.assertEqual(msg, "task 1")
+        self.assertEqual(set(files), {"a.py", "b.py"})
+
+    def test_staged_commits_only_staged_changes(self) -> None:
+        # Pre-stage c.py + d.py, then commit with --staged.
+        for f in ["a.py", "b.py", "c.py", "d.py", "e.py", "f.py"]:
+            (self.project / f).write_text(f"x {f}", encoding="utf-8")
+        import subprocess, commit as commit_mod
+        subprocess.run(["git", "add", "c.py", "d.py"], cwd=str(self.project), check=True)
+        rc = commit_mod.run(
+            [str(self.project), "--staged", "-m", "task 2"]
+        )
+        self.assertEqual(rc, 0)
+        commits = self._git_log_files()
+        msg, files = commits[0]
+        self.assertEqual(msg, "task 2")
+        self.assertEqual(set(files), {"c.py", "d.py"})
+
+    def test_default_still_does_add_A(self) -> None:
+        """Backwards compat: --staged not set and nothing staged => add -A."""
+        for f in ["a.py", "b.py"]:
+            (self.project / f).write_text(f"x {f}", encoding="utf-8")
+        import commit as commit_mod
+        rc = commit_mod.run([str(self.project), "-m", "all in one"])
+        self.assertEqual(rc, 0)
+        commits = self._git_log_files()
+        msg, files = commits[0]
+        self.assertEqual(msg, "all in one")
+        self.assertEqual(set(files), {"a.py", "b.py"})
+
+    def test_smart_default_respects_existing_staged(self) -> None:
+        """If agent already staged some files, default mode honours them."""
+        for f in ["a.py", "b.py", "c.py", "d.py"]:
+            (self.project / f).write_text(f"x {f}", encoding="utf-8")
+        import subprocess, commit as commit_mod
+        # Pre-stage a.py only — agent is signalling "I want just this".
+        subprocess.run(["git", "add", "a.py"], cwd=str(self.project), check=True)
+        rc = commit_mod.run([str(self.project), "-m", "single staged"])
+        self.assertEqual(rc, 0)
+        commits = self._git_log_files()
+        msg, files = commits[0]
+        self.assertEqual(msg, "single staged")
+        self.assertEqual(set(files), {"a.py"})
+
+    def test_paths_resets_prior_staging(self) -> None:
+        """--paths must not silently inherit earlier staging."""
+        for f in ["a.py", "b.py", "c.py"]:
+            (self.project / f).write_text(f"x {f}", encoding="utf-8")
+        import subprocess, commit as commit_mod
+        # Stage a.py via raw git add
+        subprocess.run(["git", "add", "a.py"], cwd=str(self.project), check=True)
+        # Now --paths b.py,c.py — should ignore the previously staged a.py
+        rc = commit_mod.run(
+            [str(self.project), "--paths", "b.py,c.py", "-m", "explicit only"]
+        )
+        self.assertEqual(rc, 0)
+        commits = self._git_log_files()
+        msg, files = commits[0]
+        self.assertEqual(msg, "explicit only")
+        self.assertEqual(set(files), {"b.py", "c.py"})
+
+
+
 if __name__ == "__main__":
     unittest.main()

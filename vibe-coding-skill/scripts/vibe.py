@@ -215,6 +215,18 @@ def main() -> None:
         "--no-verify", action="store_true",
         help="Skip Rule 53 verify gate (escape hatch)",
     )
+    commit_cmd.add_argument(
+        "--staged", action="store_true",
+        help="Commit only what is already staged (no auto `git add -A`). "
+        "Use with `git add <paths>` to split a dirty tree into multiple "
+        "focused commits, one per logical unit.",
+    )
+    commit_cmd.add_argument(
+        "--paths", nargs="+", metavar="PATHS",
+        help="Stage only the given paths (comma-separated or repeated), "
+        "then commit. Most explicit way to scope a commit to a specific "
+        "logical unit when the worktree has many pending changes.",
+    )
 
     policy_scan = sub.add_parser("policy-scan")
     policy_scan.add_argument("project_root")
@@ -432,11 +444,17 @@ def main() -> None:
     elif args.operation == "upgrade":
         raise SystemExit(upgrade.upgrade(args.project_root))
     elif args.operation == "commit":
-        # Build argv for commit.run() from already-parsed args. The
-        # `--no-verify` flag is not in args (argparse.REMAINDER would
-        # have eaten it into git_args), so check sys.argv directly.
+        # Build argv for commit.run() from already-parsed args. Flags
+        # that could be eaten by argparse.REMAINDER (because they
+        # appear inside `git_args`) are pulled out of sys.argv.
         no_verify = "--no-verify" in sys.argv
+        staged_only = getattr(args, "staged", False)
+        paths = getattr(args, "paths", None) or []
         run_argv = [args.project_root, *args.git_args]
+        if staged_only:
+            run_argv = ["--staged", *run_argv]
+        if paths:
+            run_argv = ["--paths", ",".join(paths), *run_argv]
         if no_verify:
             run_argv = ["--no-verify", *run_argv]
         raise SystemExit(commit.run(run_argv))

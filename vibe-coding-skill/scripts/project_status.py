@@ -1325,19 +1325,39 @@ def _print_plan_progress_commit_hint(
     ]
     if not code_dirty:
         return
+    # Decide which commit command to suggest based on whether the dirty
+    # files look like a single logical unit or several. The split path
+    # is the more disciplined default — when in doubt, prefer staged
+    # commits over one mega-commit, because rollback precision matters
+    # more than commit count for project health.
+    total_done = sum(p.get("done", 0) for p in plans)
+    dirty_count = len(code_dirty)
+    # If only one ticked task OR one dirty file, suggest a single commit.
+    # Otherwise suggest the split path so the agent doesn't squash
+    # multiple logical units into one commit.
+    if total_done <= 1 or dirty_count <= 2:
+        suggestion = (
+            '   命令: `vibe commit -m "<describe this task batch>"`'
+        )
+    else:
+        suggestion = (
+            '   命令: `git add <本 task 涉及的文件> && vibe commit -m "<describe this task batch>"`\n'
+            '   多 task / 多文件已 dirty：用 `git add <paths>` 精细 stage，'
+            '再 `vibe commit --staged`，让每个 commit 对应一个逻辑单元。'
+        )
     print()
     print(
-        f"🪜 plan 任务已推进 {sum(p['done'] for p in plans)} 个，"
-        f"worktree 仍有 {len(code_dirty)} 个代码改动未提交。"
+        f"🪜 plan 任务已推进 {total_done} 个，"
+        f"worktree 仍有 {dirty_count} 个代码改动未提交。"
     )
     print(
-        "   自然节奏: 勾一个 task → `vibe commit` → 继续下一个 task。"
+        "   自然节奏: 勾一个 task → commit 当前 task 的文件 → 继续下一个 task。"
     )
     print(
         "   这样每个 commit 对应一个逻辑单元，回滚时定位也精确。"
     )
-    print('   命令: `vibe commit -m "<describe this task batch>"`')
-    print(f"<!-- vibe:plan_progress_commit_hint: {len(code_dirty)} files -->")
+    print(suggestion)
+    print(f"<!-- vibe:plan_progress_commit_hint: {dirty_count} files -->")
 
 
 def _list_plans(dir: str) -> list[dict]:

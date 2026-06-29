@@ -61,6 +61,21 @@ def _git_diff_stat(project_root: str) -> str:
     return out.rstrip() or "(no tracked changes)"
 
 
+def _has_staged_changes(project_root: str) -> bool:
+    """True when there is at least one staged change in the index.
+
+    Used by commit() to decide whether to skip `git add -A` so the
+    agent's explicit `git add <paths>` choices are respected (the
+    one-commit-per-logical-unit workflow). When something is staged,
+    `vibe commit` only commits what is staged; otherwise it falls back
+    to the legacy `git add -A` behaviour.
+    """
+    rc, out, _ = _run(["git", "diff", "--cached", "--name-only"], project_root)
+    if rc != 0:
+        return False
+    return bool(out.strip())
+
+
 def _has_staged_or_unstaged_changes(project_root: str) -> bool:
     """True when there is something to commit (staged, unstaged, or new)."""
     rc, out, _ = _run(["git", "status", "--porcelain"], project_root)
@@ -83,7 +98,12 @@ def _is_git_repo(project_root: str) -> bool:
     return rc == 0
 
 
-def commit(project_root: str, commit_argv: list[str]) -> int:
+def commit(
+    project_root: str,
+    commit_argv: list[str],
+    staged_only: bool = False,
+    paths: list[str] | None = None,
+) -> int:
     """Run Rule 53 gate, then hand off to `git commit` if all clear.
 
     Returns the exit code of `git commit` on success, or a non-zero
@@ -101,11 +121,32 @@ def commit(project_root: str, commit_argv: list[str]) -> int:
         print("❌ 没有可提交的改动（git status 干净）")
         return 2
 
-    # Auto-stage everything so the diff shown is what is about to be
-    # committed and so `git commit` has a non-empty index. The review
-    # step below makes the blast radius visible before anything is
-    # persisted to history.
-    _run(["git", "add", "-A"], project_root)
+    # Stage selection logic (priority order):
+    # 1. --paths <csv>: stage only those paths, then commit. Most
+    #    explicit; useful when the agent knows exactly which files
+    #    belong to this logical unit.
+    # 2. --staged: do not auto-stage anything; commit only what is
+    #    already staged. The agent pre-stages via `git add <paths>`.
+    # 3. Auto: if anything is already staged, respect it (the agent
+    #    is signalling granularity intent); otherwise `git add -A`
+    #    as the legacy default for the simple single-commit case.
+    if paths:
+        # Reset any prior staging so the explicit paths list is the
+        # sole thing in the index. Without this, prior `git add -A`
+        # from a previous vibe commit would bleed into this one.
+        _run(["git", "reset", "HEAD"], project_root)
+        _run(["git", "add", "--"] + paths, project_root)
+        print(f"ℹ️  --paths: 只 stage 了 {len(paths)} 个路径。")
+    elif staged_only:
+        # Honour whatever the agent already staged; do NOT auto-add.
+        print("ℹ️  --staged: 只 commit 已 staged 改动，不自动 add。")
+    else:
+        staged = _has_staged_changes(project_root)
+        if not staged:
+            _run(["git", "add", "-A"], project_root)
+        else:
+            print("ℹ️  worktree 已有 staged 改动；只 commit 已 staged 内容（精细拆分模式）。")
+            print("   如要 commit 全部 dirty 改动，先 `git reset HEAD` 撤回 staged，再用 `vibe commit`。")
 
     # 1. Review — show diff
     print("📋 提交前 Review (git diff --stat):")
@@ -165,30 +206,61 @@ def run(argv: list[str]) -> int:
     """Entry point used by both the CLI and the vibe.py dispatcher.
 
     Manual argv parsing: argparse.REMAINDER swallows --no-verify into
-    git_args, so we cannot rely on argparse for the flag.
+    git_args, so we cannot rely on argparse for the flag. Same applies
+    to --staged and --paths.
     """
     no_verify = False
-    if "--no-verify" in argv:
-        no_verify = True
-        argv = [a for a in argv if a != "--no-verify"]
+    staged_only = False
+    paths: list[str] = []
+    cleaned: list[str] = []
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--no-verify":
+            no_verify = True
+            i += 1
+            continue
+        if a == "--staged":
+            staged_only = True
+            i += 1
+            continue
+        if a == "--paths":
+            # Collect subsequent comma-separated tokens until the next
+            # flag (anything starting with "-" — both long "--staged"
+            # and short "-m"). Path lists can be passed as one CSV
+            # string or as repeated tokens; both work.
+            i += 1
+            while i < len(argv) and not argv[i].startswith("-"):
+                paths.extend(p for p in argv[i].split(",") if p)
+                i += 1
+            continue
+        cleaned.append(a)
+        i += 1
+    argv = cleaned
     if not argv:
-        print("Usage: vibe commit <project_root> [--no-verify] [git commit args...]")
+        print("Usage: vibe commit <project_root> [--staged | --paths p1,p2] "
+              "[--no-verify] [git commit args...]")
         return 2
     project_root = argv[0]
     git_args = argv[1:]
 
     if no_verify:
-        # Direct hand-off, no gate. Documented escape hatch.
+        # Direct hand-off, no gate. Documented escape hatch. Stage
+        # selection is also skipped: the user opted out of the full
+        # vibe commit flow.
         project_root = os.path.abspath(project_root)
         if not _is_git_repo(project_root):
             print("❌ 当前项目不是 git 仓库")
             return 1
+        if paths:
+            _run(["git", "reset", "HEAD"], project_root)
+            _run(["git", "add", "--"] + paths, project_root)
         completed = subprocess.run(
             ["git", "commit", *git_args], cwd=project_root
         )
         return completed.returncode
 
-    return commit(project_root, git_args)
+    return commit(project_root, git_args, staged_only=staged_only, paths=paths)
 
 
 def main() -> None:
