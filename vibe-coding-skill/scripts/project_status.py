@@ -172,6 +172,7 @@ def project_next(project_root: str) -> dict:
             "当前项目还没有 Vibe Coding 工作流状态。",
             checks=["尚未检测到 .agents/ 工作流目录"],
             why_not="现在不能直接给出实施建议，因为项目还没有治理上下文。",
+            action_command=_init_command(),
             alternative={
                 "action": "先澄清这是新项目还是已有项目",
                 "reason": "接入方式会决定初始化还是扫描现有规范。",
@@ -493,6 +494,7 @@ def recommend_next(project_root: str, specs: list[dict] | None = None) -> dict:
             "当前治理上下文可能已过期，继续推进会降低下一步建议的可靠性。",
             checks=checks,
             why_not="现在不优先推进具体 Spec，因为后续门禁和建议都依赖当前项目上下文是可信的。",
+            action_command=_context_refresh_command(),
             alternative={
                 "action": "先运行 context-refresh 并核对 AGENTS.md",
                 "reason": "至少先把技术栈、当前阶段和待人工确认项同步到最新。",
@@ -507,6 +509,7 @@ def recommend_next(project_root: str, specs: list[dict] | None = None) -> dict:
             blocker=f"{conflict.get('id')}: {conflict.get('topic')}",
             checks=["已检测到影响当前流程的 high 级 open conflict"],
             why_not="现在不能进入规格推进或实施，因为适用规则还不明确。",
+            action_command=_policy_resolve_command(conflict.get("id", "<conflict-id>")),
             alternative={
                 "action": "先补充冲突 resolution 记录",
                 "reason": "至少要先明确谁优先，后续门禁才有依据。",
@@ -526,6 +529,7 @@ def recommend_next(project_root: str, specs: list[dict] | None = None) -> dict:
                 "确认草稿已生成: .agents/policy-confirmations.md",
             ],
             why_not="现在不优先推进实施，因为还没有确认这些既有规范是否会改变后续门禁或命令入口。",
+            action_command="vibe policy-scan <project_root>  # 先列出所有冲突，再编辑 .agents/policy-confirmations.md",
             alternative={
                 "action": "先填写 policy-confirmations 草稿中的该来源决策",
                 "reason": "如果主路径暂时做不完，至少先把 authority、落点和冲突判断写清楚。",
@@ -540,6 +544,7 @@ def recommend_next(project_root: str, specs: list[dict] | None = None) -> dict:
             blocker=" -> ".join(cycles[0]),
             checks=["依赖图存在 cycle，当前工作流不可推进"],
             why_not="现在不能启动任何相关 Spec，因为依赖顺序本身不成立。",
+            action_command=_amend_command(cycles[0][0]),
             alternative={
                 "action": "临时降级一个依赖为独立 Spec",
                 "reason": "先拆开耦合点，再恢复正常推进顺序。",
@@ -640,6 +645,7 @@ def recommend_next(project_root: str, specs: list[dict] | None = None) -> dict:
                 blocker=", ".join(dependencies),
                 checks=["Spec 已 ready", "依赖尚未全部 done"],
                 why_not="现在不能直接实施，因为前置工作还没有闭环。",
+                action_command=_status_command(),
                 alternative={
                     "action": "检查依赖定义是否仍然准确",
                     "reason": "如果依赖其实已失效，可以先收缩依赖关系。",
@@ -703,6 +709,7 @@ def recommend_next(project_root: str, specs: list[dict] | None = None) -> dict:
             spec=name,
             checks=["Spec 已 ready", "依赖已完成", "计划有效"],
             why_not="现在不优先推进 review，因为还没有当前版本的实现和验证证据。",
+            action_command=_advance_command(name),
             alternative={
                 "action": "先生成或刷新 Agent Prompt",
                 "reason": "如果要交给实现 Agent，先把当前规格和计划冻结成单一上下文。",
@@ -773,6 +780,7 @@ def recommend_next(project_root: str, specs: list[dict] | None = None) -> dict:
                         spec=name,
                         checks=["verify 门禁已满足", "approved review 仍缺失"],
                         why_not="当前 risk 等级要求独立审查者；review 与 build 身份必须不同。",
+                        action_command=_review_decision_command(name),
                         alternative={
                             "action": "调整 workflow.json.review_separation.required_for",
                             "reason": "如确需同身份自审，把当前 risk 等级从该列表中移除。",
@@ -785,6 +793,7 @@ def recommend_next(project_root: str, specs: list[dict] | None = None) -> dict:
                     spec=name,
                     checks=["verify 门禁已满足", "approved review 仍缺失"],
                     why_not="现在不能发布或完成，因为还缺少独立审查结论。",
+                    action_command=_review_decision_command(name),
                     alternative={
                         "action": "先检查审查上下文是否过期",
                         "reason": "如果代码或证据已变，先刷新 review 上下文更稳。",
@@ -797,6 +806,7 @@ def recommend_next(project_root: str, specs: list[dict] | None = None) -> dict:
                 spec=name,
                 checks=["verify 门禁已满足", "approved review 仍缺失"],
                 why_not="现在不能发布或完成，因为还缺少独立审查结论。",
+                action_command=_review_decision_command(name),
                 alternative={
                     "action": "先检查审查上下文是否过期",
                     "reason": "如果代码或证据已变，先刷新 review 上下文更稳。",
@@ -873,6 +883,7 @@ def recommend_next(project_root: str, specs: list[dict] | None = None) -> dict:
             spec=name,
             checks=["当前工作项状态为 blocked"],
             why_not="现在不建议切到新工作，因为未关闭的阻塞会持续制造上下文债务。",
+            action_command=_status_command(),
             alternative={
                 "action": "明确是否应该取消或 supersede 该 Spec",
                 "reason": "如果阻塞长期无解，继续挂起不一定是最好选择。",
@@ -1036,6 +1047,31 @@ def _retro_command(spec_name: str) -> str:
 def _create_spec_command() -> str:
     """Build the canonical `vibe create-spec <root> <name>` command."""
     return "vibe create-spec <project_root> <name>"
+
+
+def _status_command() -> str:
+    """Build the canonical `vibe status <root>` command."""
+    return "vibe status <project_root>"
+
+
+def _init_command() -> str:
+    """Build the canonical `vibe init <root>` command."""
+    return "vibe init <project_root>"
+
+
+def _context_refresh_command() -> str:
+    """Build the canonical `vibe context-refresh <root>` command."""
+    return "vibe context-refresh <project_root>"
+
+
+def _policy_resolve_command(conflict_id: str = "<conflict-id>") -> str:
+    """Build the canonical `vibe policy-conflict-resolve <root> <id>` command."""
+    return f'vibe policy-conflict-resolve <project_root> {conflict_id} --resolution "<how to resolve>"'
+
+
+def _review_decision_command(spec_name: str) -> str:
+    """Build the canonical `vibe review-decision <root> <spec>` command."""
+    return f'vibe review-decision <project_root> {spec_name} --decision approved --actor "<independent-reviewer-identity>"'
 
 
 def _print_recommendation(recommendation: dict) -> None:
@@ -1283,6 +1319,7 @@ def _session_continuity_hint(specs):
             spec=spec["name"],
             checks=[f"{spec['name']} 在 {days} 天前 done"],
             why_not="现在不默认开新 Spec，因为你的最近交付还没有被纳入下一步考虑。",
+            action_command=_status_command(),
             alternative={
                 "action": "基于最近完成的工作决定下一步",
                 "reason": "新工作可以从延续上次工作开始，避免上下文丢失。",
@@ -1309,6 +1346,7 @@ def _session_continuity_hint(specs):
             spec=spec["name"],
             checks=[f"Spec 状态为 {spec['status']}，距离上次活动 {days} 天"],
             why_not="现在不直接切到新工作，因为上次的推进可能还没沉淀完。",
+            action_command=_status_command(),
             alternative={
                 "action": "先跑 vibe status 看看进度",
                 "reason": "确认状态和证据是否仍然对得上。",
@@ -1321,6 +1359,7 @@ def _session_continuity_hint(specs):
         spec=spec["name"],
         checks=[f"Spec 状态为 {spec['status']}，距离上次活动 {days} 天（>7）"],
         why_not="现在不建议直接创建新工作，因为旧的未关闭工作会持续制造上下文债务。",
+        action_command=_status_command(),
         alternative={
             "action": "决定继续还是关闭",
             "reason": "如果阻塞长期无解，更好的选择是标记为 cancelled 或 supersede。",

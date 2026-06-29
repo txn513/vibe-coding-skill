@@ -5465,5 +5465,77 @@ class SkillDriftRecommendationTests(unittest.TestCase):
         self.assertNotIn("同步 Skill 版本", out)
 
 
+
+
+
+class ActionCommandCoverageTests(unittest.TestCase):
+    """Sweep every _recommendation call site and assert action_command coverage.
+
+    Rule 0 / 12-factor: every next-action recommendation must surface a
+    concrete command the agent can run. This test makes that property
+    auditable: it inspects the source of project_status.py, finds every
+    call site, and fails if any non-trivial recommendation is missing an
+    `action_command=`. Function definitions and trivial pass-through calls
+    are excluded.
+    """
+
+    def test_every_recommendation_has_action_command(self) -> None:
+        import re
+        from pathlib import Path
+        path = Path(
+            "/Users/lance/Documents/Codex/2026-06-12-vibe-coding-10-vibe-coding-agent-2/"
+            "vibe-coding-skill/scripts/project_status.py"
+        )
+        text = path.read_text(encoding="utf-8")
+        i = 0
+        n = 0
+        missing = []
+        while True:
+            idx = text.find("_recommendation(", i)
+            if idx < 0:
+                break
+            n += 1
+            depth = 0
+            end = idx
+            started = False
+            for k in range(idx, len(text)):
+                c = text[k]
+                if c == "(":
+                    depth += 1
+                    started = True
+                elif c == ")":
+                    depth -= 1
+                    if started and depth == 0:
+                        end = k
+                        break
+            block = text[idx:end + 1]
+            # Skip function definitions: `def _recommendation(...)` is the
+            # call we found at the start of a line whose previous token is
+            # the keyword `def`. Easier: check that the call sits at the
+            # start of a line and is preceded by `def ` on the same line.
+            line_no = text[:idx].count("\n") + 1
+            line_start = text.rfind("\n", 0, idx) + 1
+            same_line = text[line_start:end + 1]
+            if same_line.lstrip().startswith("def "):
+                i = end + 1
+                continue
+            # Skip trivial wrappers (`_recommendation(recommendation)`).
+            inner = block[len("_recommendation("):-1].strip()
+            if inner == "recommendation" or inner == "recommendation: dict":
+                i = end + 1
+                continue
+            if "action_command=" not in block:
+                m = re.search(r'_recommendation\(\s*"([^"]+)"', block)
+                action = m.group(1) if m else "(?)"
+                missing.append((line_no, action))
+            i = end + 1
+        self.assertEqual(
+            missing, [],
+            f"{len(missing)} recommendations are missing action_command: "
+            f"{missing[:5]}"
+        )
+
+
+
 if __name__ == "__main__":
     unittest.main()
