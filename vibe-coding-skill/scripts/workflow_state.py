@@ -9,7 +9,7 @@ from pathlib import Path
 
 from common import atomic_write_json
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 
 def default_workflow(project_name: str) -> dict:
@@ -53,7 +53,7 @@ def default_workflow(project_name: str) -> dict:
                 "require_clean_worktree": True,
             },
         },
-        "commands": {"verify": [], "release": [], "observe": []},
+        "commands": {"verify": [], "verify_scope": [], "verify_full": [], "release": [], "observe": []},
         "model_tiers": {},
         "repositories": [],
         "archive": {

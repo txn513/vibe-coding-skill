@@ -76,6 +76,20 @@ def _has_staged_changes(project_root: str) -> bool:
     return bool(out.strip())
 
 
+def _staged_files(project_root: str) -> list[str]:
+    """Return list of file paths that are currently staged in the index.
+
+    Used by commit() to auto-detect which files are about to be
+    committed so the verify command can be scoped to only those
+    files (the commit-scoped verify pattern) instead of running
+    the full test suite.
+    """
+    rc, out, _ = _run(["git", "diff", "--cached", "--name-only"], project_root)
+    if rc != 0:
+        return []
+    return [line.strip() for line in out.splitlines() if line.strip()]
+
+
 def _has_staged_or_unstaged_changes(project_root: str) -> bool:
     """True when there is something to commit (staged, unstaged, or new)."""
     rc, out, _ = _run(["git", "status", "--porcelain"], project_root)
@@ -103,6 +117,7 @@ def commit(
     commit_argv: list[str],
     staged_only: bool = False,
     paths: list[str] | None = None,
+    full_verify: bool = False,
 ) -> int:
     """Run Rule 53 gate, then hand off to `git commit` if all clear.
 
@@ -161,22 +176,60 @@ def commit(
             print(f"     ... 还有 {len(untracked) - 10} 个")
     print()
 
-    # 2. Verify — run configured verify commands
+    # 2. Verify — select verify tier based on flags and config.
+    #
+    # Three tiers (fastest → slowest):
+    #   verify_scope  — fast, scoped to changed files. Ideal for
+    #     intermediate commits in a batch (8 commits × 30s = 4min
+    #     instead of 8 × 5min = 40min).
+    #   verify        — default full suite. Used when no scope
+    #     commands are configured (backward-compatible).
+    #   verify_full   — explicit full suite via --full-verify.
+    #     Used for the final commit in a batch to confirm the
+    #     complete integration. Falls back to verify if verify_full
+    #     is not configured separately.
+    #
+    # Selection logic:
+    #   --full-verify → verify_full (fallback verify)
+    #   default       → verify_scope (fallback verify)
     workflow, _ = ensure_workflow(project_root)
-    verify_commands = configured_commands(workflow, "verify")
-    if not verify_commands:
-        print(
-            "❌ 项目未配置 verify 命令（Rule 53 要求 commit 前必须跑 verify）。\n"
-            "   在 .agents/workflow.json 的 commands.verify 中至少添加一条命令。\n"
-            "   例子: {\"commands\": {\"verify\": [[\"pytest\", \"-x\"]]}}\n"
-            "   临时绕过: `vibe commit --no-verify` (Rule 53 建议只在调试时使用)。"
-        )
-        return 4
-
-    print(f"🔍 跑 {len(verify_commands)} 条 verify 命令 (Rule 53):")
+    if full_verify:
+        full_commands = configured_commands(workflow, "verify_full")
+        fallback_commands = configured_commands(workflow, "verify")
+        if full_commands:
+            print(f"🔍 跑 {len(full_commands)} 条 verify_full 命令 (Rule 53, 全量验证):")
+            commands_to_run = full_commands
+        elif fallback_commands:
+            print(f"🔍 跑 {len(fallback_commands)} 条 verify 命令 (Rule 53, 全量验证, 无独立 verify_full):")
+            commands_to_run = fallback_commands
+        else:
+            print(
+                "❌ 项目未配置 verify / verify_full 命令（Rule 53）。\n"
+                "   在 .agents/workflow.json 的 commands.verify 中添加验证命令。\n"
+                "   临时绕过: `vibe commit --no-verify`"
+            )
+            return 4
+    else:
+        scope_commands = configured_commands(workflow, "verify_scope")
+        verify_commands = configured_commands(workflow, "verify")
+        if scope_commands:
+            print(f"🔍 跑 {len(scope_commands)} 条 verify_scope 命令 (Rule 53, scoped):")
+            commands_to_run = scope_commands
+        elif verify_commands:
+            print(f"🔍 跑 {len(verify_commands)} 条 verify 命令 (Rule 53, full suite):")
+            commands_to_run = verify_commands
+        else:
+            print(
+                "❌ 项目未配置 verify 或 verify_scope 命令（Rule 53）。\n"
+                "   在 .agents/workflow.json 的 commands.verify_scope 中添加快速验证命令，\n"
+                "   或在 commands.verify 中添加完整验证命令。\n"
+                "   例子: {\"commands\": {\"verify_scope\": [[\"pytest\", \"-x\", \"-k\", \"scope\"]]}}\n"
+                "   临时绕过: `vibe commit --no-verify`"
+            )
+            return 4
     all_passed = True
-    for idx, argv in enumerate(verify_commands, 1):
-        print(f"   [{idx}/{len(verify_commands)}] {' '.join(argv)}")
+    for idx, argv in enumerate(commands_to_run, 1):
+        print(f"   [{idx}/{len(commands_to_run)}] {' '.join(argv)}")
         rc, out, err = _run(argv, project_root)
         if rc != 0:
             all_passed = False
@@ -192,7 +245,9 @@ def commit(
     print()
 
     if not all_passed:
-        print("❌ Verify 失败 — 取消 commit (Rule 53)。")
+        print("❌ Verify 失败 — 取消本次 commit (Rule 53)。")
+        print("   本次 commit 的代码没有被写入 git history，可以安全修复后重跑。")
+        print("   之前已经成功的 commit 不会被回滚——它们已经落地在 git log 里。")
         print("   修复失败后重跑 `vibe commit`；或临时绕过：`vibe commit --no-verify`")
         return 3
 
@@ -211,6 +266,7 @@ def run(argv: list[str]) -> int:
     """
     no_verify = False
     staged_only = False
+    full_verify = False
     paths: list[str] = []
     cleaned: list[str] = []
     i = 0
@@ -222,6 +278,10 @@ def run(argv: list[str]) -> int:
             continue
         if a == "--staged":
             staged_only = True
+            i += 1
+            continue
+        if a == "--full-verify":
+            full_verify = True
             i += 1
             continue
         if a == "--paths":
@@ -239,7 +299,7 @@ def run(argv: list[str]) -> int:
     argv = cleaned
     if not argv:
         print("Usage: vibe commit <project_root> [--staged | --paths p1,p2] "
-              "[--no-verify] [git commit args...]")
+              "[--no-verify] [--full-verify] [git commit args...]")
         return 2
     project_root = argv[0]
     git_args = argv[1:]
@@ -260,7 +320,7 @@ def run(argv: list[str]) -> int:
         )
         return completed.returncode
 
-    return commit(project_root, git_args, staged_only=staged_only, paths=paths)
+    return commit(project_root, git_args, staged_only=staged_only, paths=paths, full_verify=full_verify)
 
 
 def main() -> None:

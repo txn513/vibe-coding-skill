@@ -5839,3 +5839,109 @@ class SplitCommitTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class VerifyScopeTests(unittest.TestCase):
+    """Cover verify_scope / verify_full / --full-verify integration.
+
+    Three-tier verify model:
+      verify_scope  — fast, for intermediate commits in a batch
+      verify        — default full suite (backward-compatible)
+      verify_full   — explicit full suite via --full-verify flag
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name)
+        init_project.init_project(str(self.project), "web")
+        import subprocess
+        subprocess.run(["git", "init", "-q"], cwd=str(self.project), check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "t@t.com"],
+            cwd=str(self.project), check=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "t"],
+            cwd=str(self.project), check=True,
+        )
+        # Configure all three tiers
+        wf_path = self.project / ".agents" / "workflow.json"
+        wf = json.loads(wf_path.read_text())
+        wf["commands"]["verify_scope"] = [["true"]]
+        wf["commands"]["verify"] = [["true"]]
+        wf["commands"]["verify_full"] = [["true"]]
+        wf_path.write_text(json.dumps(wf))
+        subprocess.run(["git", "add", "-A"], cwd=str(self.project), check=True)
+        subprocess.run(
+            ["git", "commit", "-q", "-m", "init"],
+            cwd=str(self.project), check=True,
+        )
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_default_uses_verify_scope_when_configured(self) -> None:
+        """When verify_scope is configured, `vibe commit` uses it (fast path)."""
+        (self.project / "a.py").write_text("x", encoding="utf-8")
+        import commit as commit_mod
+        rc = commit_mod.run([str(self.project), "-m", "scoped"])
+        self.assertEqual(rc, 0)
+
+    def test_full_verify_flag_uses_verify_full(self) -> None:
+        """--full-verify selects verify_full tier, not verify_scope."""
+        (self.project / "a.py").write_text("x", encoding="utf-8")
+        import commit as commit_mod
+        rc = commit_mod.run([str(self.project), "--full-verify", "-m", "full"])
+        self.assertEqual(rc, 0)
+
+    def test_full_verify_falls_back_to_verify(self) -> None:
+        """When verify_full is not configured, --full-verify falls back to verify."""
+        (self.project / "a.py").write_text("x", encoding="utf-8")
+        wf_path = self.project / ".agents" / "workflow.json"
+        wf = json.loads(wf_path.read_text())
+        wf["commands"]["verify_full"] = []  # not configured
+        wf_path.write_text(json.dumps(wf))
+        import commit as commit_mod
+        rc = commit_mod.run([str(self.project), "--full-verify", "-m", "full fallback"])
+        self.assertEqual(rc, 0)
+
+    def test_no_verify_configured_at_all(self) -> None:
+        """When neither verify nor verify_scope is configured, exit 4."""
+        (self.project / "a.py").write_text("x", encoding="utf-8")
+        wf_path = self.project / ".agents" / "workflow.json"
+        wf = json.loads(wf_path.read_text())
+        wf["commands"]["verify"] = []
+        wf["commands"]["verify_scope"] = []
+        wf["commands"]["verify_full"] = []
+        wf_path.write_text(json.dumps(wf))
+        import commit as commit_mod
+        rc = commit_mod.run([str(self.project), "-m", "no verify"])
+        self.assertEqual(rc, 4)
+
+    def test_workflow_state_schema_includes_new_phases(self) -> None:
+        """Default workflow schema must include verify_scope and verify_full."""
+        from workflow_state import default_workflow
+        wf = default_workflow("test")
+        self.assertIn("verify_scope", wf["commands"])
+        self.assertIn("verify_full", wf["commands"])
+
+    def test_migrate_adds_new_phases(self) -> None:
+        """Existing workflow.json without verify_scope/verify_full gets them via migrate."""
+        from workflow_state import migrate
+        old = {
+            "schema_version": 9,
+            "project_id": "old",
+            "roles": {"owner": "", "builder": "", "reviewer": "", "releaser": "", "observer": "", "override_approver": ""},
+            "risk_profiles": {},
+            "commands": {"verify": [["pytest"]], "release": [], "observe": []},
+            "model_tiers": {},
+            "repositories": [],
+            "archive": {"thresholds_days": {"evidence": 90, "rule_unreferenced": 180, "spec_untouched": 365}, "scan_paths": [".agents/specs", ".agents/evidence", ".agents/rules"], "exclude_paths": [".agents/archive"]},
+            "stage_stall_sla": {"low_hours": 72, "medium_hours": 24, "high_hours": 8},
+            "risk_required_rules": {"high": [], "medium": [], "low": []},
+            "review_separation": {"required_for": ["high"]},
+        }
+        changed = migrate(old, "old")
+        self.assertTrue(changed)
+        self.assertIn("verify_scope", old["commands"])
+        self.assertIn("verify_full", old["commands"])

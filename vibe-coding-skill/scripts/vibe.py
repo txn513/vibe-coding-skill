@@ -227,6 +227,11 @@ def main() -> None:
         "then commit. Most explicit way to scope a commit to a specific "
         "logical unit when the worktree has many pending changes.",
     )
+    commit_cmd.add_argument(
+        "--full-verify", action="store_true",
+        help="Run verify_full (full test suite) instead of verify_scope. "
+        "Use for the final commit in a batch to confirm complete integration.",
+    )
 
     policy_scan = sub.add_parser("policy-scan")
     policy_scan.add_argument("project_root")
@@ -448,6 +453,7 @@ def main() -> None:
         # that could be eaten by argparse.REMAINDER (because they
         # appear inside `git_args`) are pulled out of sys.argv.
         no_verify = "--no-verify" in sys.argv
+        full_verify = "--full-verify" in sys.argv
         staged_only = getattr(args, "staged", False)
         paths = getattr(args, "paths", None) or []
         run_argv = [args.project_root, *args.git_args]
@@ -455,6 +461,8 @@ def main() -> None:
             run_argv = ["--staged", *run_argv]
         if paths:
             run_argv = ["--paths", ",".join(paths), *run_argv]
+        if full_verify:
+            run_argv = ["--full-verify", *run_argv]
         if no_verify:
             run_argv = ["--no-verify", *run_argv]
         raise SystemExit(commit.run(run_argv))
