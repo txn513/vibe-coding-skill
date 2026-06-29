@@ -91,31 +91,44 @@ def _missing_auxiliaries() -> list[str]:
     return missing
 
 
-def _audit_adjacent_protection(spec_name: str, content: str, warnings: list[str]) -> None:
-    """Rule 56: check that adjacent-location entries have protection or risk ack."""
+def _audit_adjacent_protection(spec_name: str, content: str, warnings: list[str]) -> dict:
+    """Rule 56: check that adjacent-location entries have protection or risk ack.
+
+    Returns a stats dict: {total, protected, skipped} for this spec.
+    """
     # Find "故意不改" section content
     adjacent_match = re.search(
         r"(?:故意不改的相邻位置|Deliberately unchanged)[^\n]*\n((?:\s+-.*\n?)+)",
         content,
     )
     if not adjacent_match:
-        return  # No adjacent locations declared — nothing to check
+        return {"total": 0, "protected": 0, "skipped": 0}
     section = adjacent_match.group(1)
     entries = [line.strip().lstrip("- ").strip() for line in section.splitlines() if line.strip().startswith("-")]
     if not entries:
-        return
-    # Check for risk acknowledgment in the section
-    has_ack = any(
-        "风险已知晓" in entry or "risk acknowledged" in entry.lower() or "无自动化测试保护" in entry
-        for entry in entries
-    )
-    if has_ack:
-        return  # Agent explicitly acknowledged the risk
-    # No protection tests mentioned, no risk ack — advisory
-    warnings.append(
-        f"{spec_name}: {len(entries)} 个'故意不改的相邻位置'没有保护性测试或风险确认 (Rule 56) — "
-        "添加保护性测试，或显式声明'风险已知晓'"
-    )
+        return {"total": 0, "protected": 0, "skipped": 0}
+    # Check for risk acknowledgment or protection test mention
+    protected = 0
+    skipped = 0
+    for entry in entries:
+        is_ack = (
+            "风险已知晓" in entry
+            or "risk acknowledged" in entry.lower()
+            or "无自动化测试保护" in entry
+        )
+        is_test = (
+            "测试" in entry or "test" in entry.lower()
+        )
+        if is_ack or is_test:
+            protected += 1
+        else:
+            skipped += 1
+    if skipped > 0:
+        warnings.append(
+            f"{spec_name}: {skipped} 个'故意不改的相邻位置'没有保护性测试或风险确认 (Rule 56) — "
+            "添加保护性测试，或显式声明'风险已知晓'"
+        )
+    return {"total": len(entries), "protected": protected, "skipped": skipped}
 
 
 def _audit_read_path_impact(spec_name: str, content: str, warnings: list[str]) -> None:
@@ -185,6 +198,8 @@ def doctor(project_root: str) -> dict:
     _audit_policy_sources(Path(project_root), issues, warnings)
     _audit_context_freshness(Path(project_root), warnings)
     _audit_retro_gap_candidates(project_root, warnings)
+    # Rule 56: accumulate adjacent-location protection stats across specs
+    adjacent_stats = {"total": 0, "protected": 0, "skipped": 0}
 
     specs_dir = os.path.join(project_root, ".agents", "specs")
     if os.path.exists(specs_dir):
@@ -221,7 +236,10 @@ def doctor(project_root: str) -> dict:
                 # If "故意不改" positions exist but no risk acknowledgment,
                 # remind the agent to add protection tests or explicit risk ack.
                 elif "## 修复范围" in content or "## Fix Scope" in content:
-                    _audit_adjacent_protection(name, content, warnings)
+                    stats = _audit_adjacent_protection(name, content, warnings)
+                    adjacent_stats["total"] += stats["total"]
+                    adjacent_stats["protected"] += stats["protected"]
+                    adjacent_stats["skipped"] += stats["skipped"]
             for dependency in metadata["dependencies"]:
                 dependency_path = os.path.join(specs_dir, f"{dependency}.md")
                 if not os.path.exists(dependency_path):
@@ -310,6 +328,16 @@ def doctor(project_root: str) -> dict:
         print(f"Warning: {warning}")
     # Rule 50: machine-readable doctor health.
     health = "issues" if issues else "clean"
+    # Rule 56: adjacent-location protection summary
+    if adjacent_stats["total"] > 0:
+        total = adjacent_stats["total"]
+        protected = adjacent_stats["protected"]
+        skipped = adjacent_stats["skipped"]
+        skip_rate = f"{skipped * 100 // total}%" if total > 0 else "0%"
+        print(f"📋 Rule 56 相邻位置保护: {total} 个声明, {protected} 个已保护, {skipped} 个跳过 (跳过率 {skip_rate})")
+        if skipped > total // 2 and total >= 3:
+            print("   ⚠️  跳过率超过 50%，考虑在 workflow.json 加 adjacent_protection.required_for 配置项")
+        print(f"<!-- vibe:adjacent_protection: total={total} protected={protected} skipped={skipped} -->")
     print(f"<!-- vibe:doctor_health: {health} issues={len(issues)} warnings={len(warnings)} -->")
     return {"workflow": workflow, "issues": issues, "warnings": warnings}
 
