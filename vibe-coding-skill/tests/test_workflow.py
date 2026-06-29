@@ -5945,3 +5945,108 @@ class VerifyScopeTests(unittest.TestCase):
         self.assertTrue(changed)
         self.assertIn("verify_scope", old["commands"])
         self.assertIn("verify_full", old["commands"])
+
+
+class StandaloneVerifyTests(unittest.TestCase):
+    """Cover `vibe verify` standalone verification runner.
+
+    Three-tier verify model (same as vibe commit):
+      verify_scope  — fast, scoped verification (--scope)
+      verify        — default full suite
+      verify_full   — explicit full suite (--full)
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name)
+        init_project.init_project(str(self.project), "web")
+        wf_path = self.project / ".agents" / "workflow.json"
+        wf = json.loads(wf_path.read_text())
+        wf["commands"]["verify_scope"] = [["true"]]
+        wf["commands"]["verify"] = [["true"]]
+        wf["commands"]["verify_full"] = [["true"]]
+        wf_path.write_text(json.dumps(wf))
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_default_verify_passes(self) -> None:
+        import verify_only
+        rc = verify_only.verify(str(self.project))
+        self.assertEqual(rc, 0)
+
+    def test_scope_flag(self) -> None:
+        import verify_only
+        rc = verify_only.verify(str(self.project), tier="verify_scope")
+        self.assertEqual(rc, 0)
+
+    def test_full_flag(self) -> None:
+        import verify_only
+        rc = verify_only.verify(str(self.project), tier="verify_full")
+        self.assertEqual(rc, 0)
+
+    def test_no_commands_configured(self) -> None:
+        wf_path = self.project / ".agents" / "workflow.json"
+        wf = json.loads(wf_path.read_text())
+        wf["commands"]["verify"] = []
+        wf["commands"]["verify_scope"] = []
+        wf["commands"]["verify_full"] = []
+        wf_path.write_text(json.dumps(wf))
+        import verify_only
+        rc = verify_only.verify(str(self.project))
+        self.assertEqual(rc, 2)
+
+    def test_verify_scope_falls_back_to_verify(self) -> None:
+        """verify_scope not configured → falls back to verify."""
+        wf_path = self.project / ".agents" / "workflow.json"
+        wf = json.loads(wf_path.read_text())
+        wf["commands"]["verify_scope"] = []  # not configured
+        wf_path.write_text(json.dumps(wf))
+        import verify_only
+        rc = verify_only.verify(str(self.project), tier="verify_scope")
+        self.assertEqual(rc, 0)
+
+    def test_verify_full_falls_back_to_verify(self) -> None:
+        """verify_full not configured → falls back to verify."""
+        wf_path = self.project / ".agents" / "workflow.json"
+        wf = json.loads(wf_path.read_text())
+        wf["commands"]["verify_full"] = []  # not configured
+        wf_path.write_text(json.dumps(wf))
+        import verify_only
+        rc = verify_only.verify(str(self.project), tier="verify_full")
+        self.assertEqual(rc, 0)
+
+    def test_failing_command(self) -> None:
+        """A failing verify command returns 1."""
+        wf_path = self.project / ".agents" / "workflow.json"
+        wf = json.loads(wf_path.read_text())
+        wf["commands"]["verify"] = [["false"]]  # always exits 1
+        wf_path.write_text(json.dumps(wf))
+        import verify_only
+        rc = verify_only.verify(str(self.project))
+        self.assertEqual(rc, 1)
+
+    def test_run_argv_parsing(self) -> None:
+        """run() parses --scope and --full flags."""
+        import verify_only
+        rc = verify_only.run([str(self.project), "--scope"])
+        self.assertEqual(rc, 0)
+        rc = verify_only.run([str(self.project), "--full"])
+        self.assertEqual(rc, 0)
+
+    def test_no_project_root(self) -> None:
+        """Missing project_root returns 2."""
+        import verify_only
+        rc = verify_only.run([])
+        self.assertEqual(rc, 2)
+
+    def test_not_initialized_project(self) -> None:
+        """Project without .agents/ returns 2."""
+        import verify_only
+        tmp = tempfile.mkdtemp()
+        try:
+            rc = verify_only.verify(tmp)
+            self.assertEqual(rc, 2)
+        finally:
+            import shutil
+            shutil.rmtree(tmp)

@@ -28,6 +28,7 @@ import migrate_project
 import archive_status
 import commit
 import upgrade
+import verify_only
 import policy_sources
 import project_status
 import shlex
@@ -204,6 +205,17 @@ def main() -> None:
 
     upgrade_cmd = sub.add_parser("upgrade")
     upgrade_cmd.add_argument("project_root", help="Project root to upgrade")
+
+    verify_cmd = sub.add_parser("verify")
+    verify_cmd.add_argument("project_root")
+    verify_cmd.add_argument(
+        "--scope", action="store_true",
+        help="Run verify_scope (fast, scoped to changed files) instead of full suite",
+    )
+    verify_cmd.add_argument(
+        "--full", action="store_true",
+        help="Run verify_full (includes integration/e2e) instead of default verify",
+    )
 
     commit_cmd = sub.add_parser("commit")
     commit_cmd.add_argument("project_root")
@@ -448,6 +460,9 @@ def main() -> None:
         confirm_risk.confirm_risk(root, args.spec_name, args.risk, args.reason)
     elif args.operation == "upgrade":
         raise SystemExit(upgrade.upgrade(args.project_root))
+    elif args.operation == "verify":
+        tier = "verify_full" if getattr(args, "full", False) else ("verify_scope" if getattr(args, "scope", False) else "verify")
+        raise SystemExit(verify_only.verify(root, tier))
     elif args.operation == "commit":
         # Build argv for commit.run() from already-parsed args. Flags
         # that could be eaten by argparse.REMAINDER (because they

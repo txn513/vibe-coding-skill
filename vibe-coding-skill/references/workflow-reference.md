@@ -83,6 +83,24 @@ python3 scripts/vibe.py doctor <project_root>
 python3 scripts/vibe.py migrate <project_root> --apply
 ```
 
+### Verify commands (standalone, no commit)
+
+```bash
+# Default: run full suite (commands.verify)
+python3 scripts/vibe.py verify <project_root>
+
+# Fast scoped verification (commands.verify_scope)
+python3 scripts/vibe.py verify <project_root> --scope
+
+# Explicit full suite including integration/e2e (commands.verify_full)
+python3 scripts/vibe.py verify <project_root> --full
+```
+
+Use `vibe verify` when you want to check test health without committing
+(e.g. after a series of `--no-verify` commits, or before deciding whether
+to commit). Falls back to `verify` if `verify_scope` or `verify_full` is
+not configured separately.
+
 ### Commit commands (Rule 53)
 
 ```bash

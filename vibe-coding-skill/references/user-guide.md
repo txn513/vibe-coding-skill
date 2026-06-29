@@ -42,6 +42,9 @@
 | `审查不通过，原因是 xxx` | 审查驳回，记录原因 |
 | `生成 changelog` | 为已 released 的 spec 生成变更日志 |
 | `有哪些 blocker` | 列出当前所有阻塞项 |
+| `跑一下验证` | 运行 `vibe verify`，跑全量 verify 命令，不提交代码 |
+| `跑一下快速验证` | 运行 `vibe verify --scope`，只跑 verify_scope (快速) |
+| `跑一下全量验证` | 运行 `vibe verify --full`，跑 verify_full (含集成/e2e) |
 
 ---
 
