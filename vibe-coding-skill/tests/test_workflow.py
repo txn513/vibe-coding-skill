@@ -5537,5 +5537,115 @@ class ActionCommandCoverageTests(unittest.TestCase):
 
 
 
+
+
+
+class CommitBacklogHintTests(unittest.TestCase):
+    """Cover the commit-backlog escalation and stale-commit hint.
+
+    Two new pieces of advice shipped together:
+    1. _print_uncommitted_work_hint escalates tone when count > warn_at
+       and emits a dedicated <!-- vibe:uncommitted_work: action_required -->
+       marker.
+    2. _print_stale_commit_hint fires when time-since-HEAD > stale_hours
+       AND worktree is dirty.
+    3. recommend_next promotes "commit current progress" to the top
+       recommendation when uncommitted count > block_at.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name)
+        init_project.init_project(str(self.project), "web")
+        # Init a git repo with one commit so HEAD is real and recent.
+        import subprocess
+        subprocess.run(["git", "init", "-q"], cwd=str(self.project), check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "t@t.com"],
+            cwd=str(self.project), check=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "t"],
+            cwd=str(self.project), check=True,
+        )
+        subprocess.run(["git", "add", "-A"], cwd=str(self.project), check=True)
+        subprocess.run(
+            ["git", "commit", "-q", "-m", "init"],
+            cwd=str(self.project), check=True,
+        )
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _capture(self, func, *args, **kwargs):
+        import io, project_status
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            func(*args, **kwargs)
+        return buf.getvalue()
+
+    def test_uncommitted_hint_quiet_when_clean(self) -> None:
+        out = self._capture(project_status.project_status, str(self.project))
+        self.assertNotIn("未提交改动", out)
+
+    def test_uncommitted_hint_escalates_over_warn_at(self) -> None:
+        # 12 dirty files: over default warn_at=10.
+        for i in range(12):
+            (self.project / f"d_{i}.txt").write_text("x", encoding="utf-8")
+        out = self._capture(project_status.project_status, str(self.project))
+        self.assertIn("超过阈值 10", out)
+        self.assertIn("action_required", out)
+
+    def test_recommend_next_blocks_when_backlog_exceeds_block_at(self) -> None:
+        # 25 dirty files: over default block_at=20.
+        for i in range(25):
+            (self.project / f"b_{i}.txt").write_text("x", encoding="utf-8")
+        out = self._capture(project_status.project_next, str(self.project))
+        self.assertIn("提交当前进度 (commit backlog 超阈值)", out)
+        self.assertIn("vibe commit -m", out)
+        # Recommendation marker should point at the commit action.
+        self.assertRegex(out, r"vibe:next_action: 提交当前进度")
+
+    def test_recommend_next_silent_when_backlog_below_block_at(self) -> None:
+        # 5 dirty files: below default block_at=20.
+        for i in range(5):
+            (self.project / f"s_{i}.txt").write_text("x", encoding="utf-8")
+        out = self._capture(project_status.project_next, str(self.project))
+        self.assertNotIn("提交当前进度 (commit backlog 超阈值)", out)
+
+    def test_stale_commit_hint_silent_when_worktree_clean(self) -> None:
+        # Backdate HEAD but keep worktree clean: stale hint must NOT fire
+        # because there is nothing to commit.
+        import subprocess, os
+        env = os.environ.copy()
+        old_date = "2026-06-27 00:00:00 +0800"
+        env["GIT_COMMITTER_DATE"] = old_date
+        env["GIT_AUTHOR_DATE"] = old_date
+        subprocess.run(
+            ["git", "commit", "--amend", "--no-edit", "-q"],
+            env=env, cwd=str(self.project), check=True,
+        )
+        out = self._capture(project_status.project_next, str(self.project))
+        self.assertNotIn("vibe:stale_commit", out)
+
+    def test_stale_commit_hint_fires_when_dirty_and_old(self) -> None:
+        # Backdate HEAD AND make worktree dirty: stale hint must fire.
+        import subprocess, os
+        env = os.environ.copy()
+        old_date = "2026-06-27 00:00:00 +0800"
+        env["GIT_COMMITTER_DATE"] = old_date
+        env["GIT_AUTHOR_DATE"] = old_date
+        subprocess.run(
+            ["git", "commit", "--amend", "--no-edit", "-q"],
+            env=env, cwd=str(self.project), check=True,
+        )
+        (self.project / "stale_dirty.txt").write_text("x", encoding="utf-8")
+        out = self._capture(project_status.project_next, str(self.project))
+        self.assertIn("vibe:stale_commit", out)
+        self.assertIn("最后 commit", out)
+
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -76,6 +76,19 @@ def default_workflow(project_name: str) -> dict:
             "medium_hours": 24,
             "high_hours": 8,
         },
+        "commit_backlog": {
+            # `vibe next` promotes "commit current progress" to the top
+            # recommendation when uncommitted change count exceeds
+            # `block_at` (prevents the agent from piling up an unbounded
+            # worktree). Above `warn_at` the uncommitted-work hint switches
+            # to a louder format. `stale_hours` is the time-since-last-
+            # commit threshold (no commit in this many hours also
+            # surfaces the hint). All three are advisory thresholds the
+            # project can tune to its own cadence.
+            "warn_at": 10,
+            "block_at": 20,
+            "stale_hours": 24,
+        },
         "risk_required_rules": {
             "high": [],
             "medium": [],
@@ -106,6 +119,7 @@ def migrate(value: dict, project_name: str) -> bool:
     defaults = default_workflow(project_name)
     for key in (
         "project_id", "roles", "risk_profiles", "commands", "model_tiers",
+        "commit_backlog",
         "repositories", "archive", "stage_stall_sla", "risk_required_rules",
         "review_separation",
     ):
