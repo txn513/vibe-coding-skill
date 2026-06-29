@@ -4,9 +4,11 @@
 Wraps `git commit` with three discipline steps that the agent is
 otherwise likely to skip:
 
-  1. Review — show `git diff --stat` so the author sees the blast
-     radius of the commit (Rule 12 spirit: composed path still
-     intact).
+  1. Review — show the full diff so the Agent can inspect actual
+     changes, not just file names and line counts. The Agent must
+     review the diff content for unintended modifications, scope
+     creep, or regressions before proceeding (Rule 53). If issues
+     are found, the Agent must fix them before committing.
   2. Verify — run every command listed in workflow.json's
      commands.verify phase. If any fails, the commit is aborted
      before a single byte is added to the project history.
@@ -45,16 +47,35 @@ def _run(argv: list[str], cwd: str) -> tuple[int, str, str]:
     return completed.returncode, completed.stdout, completed.stderr
 
 
-def _git_diff_stat(project_root: str) -> str:
-    """Return `git diff --stat` against HEAD plus untracked file list.
+def _git_diff_full(project_root: str) -> str:
+    """Return full `git diff` against HEAD so the Agent can review
+    actual code changes, not just file names and line counts.
 
-    Empty diff is a hard failure: there is nothing to commit.
+    Rule 53 requires the Agent to inspect diff content for
+    unintended modifications, scope creep, or regressions.
+    Showing only --stat defeats this purpose.
+    """
+    rc, out, err = _run(
+        ["git", "diff", "HEAD"], project_root
+    )
+    if rc != 0:
+        # No commits yet — diff against the empty tree
+        rc, out, err = _run(["git", "diff"], project_root)
+    if rc != 0:
+        return f"(git diff failed: {err.strip()})"
+    return out.rstrip() or "(no tracked changes)"
+
+
+def _git_diff_stat(project_root: str) -> str:
+    """Return `git diff --stat` summary for quick overview.
+
+    Shown alongside the full diff so the Agent gets both the
+    summary and the details.
     """
     rc, out, err = _run(
         ["git", "diff", "--stat", "HEAD"], project_root
     )
     if rc != 0:
-        # No commits yet — diff against the empty tree
         rc, out, err = _run(["git", "diff", "--stat"], project_root)
     if rc != 0:
         return f"(git diff failed: {err.strip()})"
@@ -163,9 +184,25 @@ def commit(
             print("ℹ️  worktree 已有 staged 改动；只 commit 已 staged 内容（精细拆分模式）。")
             print("   如要 commit 全部 dirty 改动，先 `git reset HEAD` 撤回 staged，再用 `vibe commit`。")
 
-    # 1. Review — show diff
-    print("📋 提交前 Review (git diff --stat):")
-    print(_git_diff_stat(project_root))
+    # 1. Review — show full diff + stat summary
+    # Rule 53: Agent must inspect diff content for unintended
+    # modifications, scope creep, or regressions. Showing only
+    # --stat is insufficient — the Agent needs to see actual
+    # code changes to catch problems.
+    print("📋 提交前 Review — 检查 diff 内容 (Rule 53):")
+    print("   ⚠️  审查以下改动：发现意外修改、范围蔓延、或回归问题必须修复后再 commit。")
+    print()
+    stat = _git_diff_stat(project_root)
+    if stat and stat != "(no tracked changes)":
+        print("📊 改动概览:")
+        print(stat)
+        print()
+    full_diff = _git_diff_full(project_root)
+    if full_diff and full_diff != "(no tracked changes)":
+        print("📝 完整 diff:")
+        print(full_diff)
+        print()
+    print("<!-- vibe:commit_review: diff_shown -->")
     untracked = _list_untracked(project_root)
     if untracked:
         print()

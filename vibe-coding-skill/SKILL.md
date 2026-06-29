@@ -539,10 +539,17 @@ artifacts merely because a template exists.
     The wrapper enforces three discipline steps that agents otherwise
     skip:
 
-    1. **Review** — show `git diff --stat` (and untracked file list)
-       so the author sees the blast radius of the commit. The review
-       surfaces accidental edits and confirms the diff matches the
-       spec's `## 涉及范围` (Rule 44 spirit: scope discipline).
+    1. **Review** — show the full `git diff` (not just `--stat`) so
+       the Agent can inspect actual code changes. The Agent must
+       review the diff content for unintended modifications, scope
+       creep, or regressions. If issues are found, the Agent must
+       fix them before committing — the review is not a passive
+       display, it is an active inspection gate. The diff must also
+       be checked against the spec's `## 涉及范围` (Rule 44 spirit:
+       scope discipline). A `--stat` summary is shown alongside the
+       full diff for quick orientation, but the stat alone is
+       insufficient — file names and line counts cannot reveal
+       logic errors, accidental deletions, or wrong variable names.
     2. **Verify** — run every command listed in
        `workflow.json.commands.verify`. If any command exits non-zero,
        the commit is aborted before a single byte reaches the project
