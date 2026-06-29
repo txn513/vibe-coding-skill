@@ -239,16 +239,34 @@ def _print_version_drift_hint(project_root: str) -> None:
     if skill_version == "unknown" or project_version == skill_version:
         return  # Match or dev install
     print()
+    # The drift means the installed Skill has moved past the version this
+    # project last recorded. Two consequences:
+    #   1. The project agent in this session is still operating against the
+    #      OLD rules (because the session loaded the Skill before the
+    #      new commit landed). Reloading the session / reloading the Skill
+    #      picks up the new rules.
+    #   2. The project's `.agents/.skill-version` is now stale; running
+    #      `vibe upgrade <project>` rewrites it so the next session's
+    #      drift check starts from the right baseline.
+    # The hint surfaces both so the agent doesn't just reload and forget.
     print(
         f"⚠️  Skill version drift: project records '{project_version}', "
         f"installed Skill is '{skill_version}' (Rule 52)."
     )
     print(
-        "   Reload the Skill in the active session or open a new one to "
-        "pick up the new rules."
+        "   1) Reload the Skill in the active session (or open a new one) "
+        "to pick up the new rules."
+    )
+    print(
+        f"   2) Run `vibe upgrade <project_root>` to rewrite "
+        f".agents/.skill-version so future drift checks start from "
+        f"'{skill_version}'."
     )
     # Rule 50: machine-readable marker
     print(f"<!-- vibe:skill_version: {skill_version} (project: {project_version}) -->")
+    # Also emit a dedicated marker so parsers can distinguish "drift
+    # present, project records are stale" from a generic version print.
+    print("<!-- vibe:skill_drift: action_required -->")
 
 
 def _print_proposed_rules_hint(project_root: str) -> None:
@@ -442,6 +460,27 @@ def recommend_next(project_root: str, specs: list[dict] | None = None) -> dict:
     specs = specs if specs is not None else _list_specs(
         os.path.join(project_root, ".agents", "specs")
     )
+    # Rule 52: skill version drift is highest-priority because the agent
+    # is operating against stale rules until it runs `vibe upgrade` and
+    # reloads the Skill. Surfacing it as the top recommendation guarantees
+    # the agent sees it even when there is active spec work in flight.
+    drift = _skill_drift(project_root)
+    if drift:
+        return _recommendation(
+            "同步 Skill 版本 (Rule 52)",
+            f"项目记录的是 '{drift['project_version']}'，但已安装的 Skill 是 "
+            f"'{drift['skill_version']}'；当前会话仍按旧规则执行。",
+            checks=[
+                "项目 .agents/.skill-version 与已安装 Skill VERSION 不一致",
+                "已安装 Skill 已推进至少一个 commit",
+            ],
+            why_not="现在不优先推进 Spec，因为会话加载的是旧规则，可能漏掉新引入的门禁或建议。",
+            action_command=f"vibe upgrade {project_root}",
+            alternative={
+                "action": "先在新版本里重读 SKILL.md 后再继续",
+                "reason": "如果会话里已经手动 reload 过 Skill，可以直接 ack 这次 drift。",
+            },
+        )
     freshness = assess_context_freshness(project_root)
     if (
         freshness.get("missing_timestamp")
@@ -514,6 +553,7 @@ def recommend_next(project_root: str, specs: list[dict] | None = None) -> dict:
             "项目还没有可执行的工作项。",
             checks=["当前没有可推进的 Spec"],
             why_not="现在不能给出实施步骤，因为还没有明确的工作项边界。",
+            action_command=_create_spec_command(),
             alternative={
                 "action": "先记录 discovery / intent",
                 "reason": "如果目标仍然模糊，先把问题和范围写清楚更稳。",
@@ -553,6 +593,7 @@ def recommend_next(project_root: str, specs: list[dict] | None = None) -> dict:
                 "需求已经变更，原风险判断不能自动沿用。",
                 spec=name,
                 checks=["检测到需求变更后风险确认仍为 pending"],
+                action_command=_advance_command(name),
                 why_not="现在不能回到 spec-ready，因为门禁要求先确认风险判断。",
                 alternative={
                     "action": "先补齐变更影响范围",
@@ -567,6 +608,7 @@ def recommend_next(project_root: str, specs: list[dict] | None = None) -> dict:
                 f"规格仍有 {validation['errors']} 个错误和 {validation['warnings']} 个提醒。",
                 spec=name,
                 checks=["当前 Spec 还未通过完整性校验"],
+                action_command=_amend_command(name),
                 why_not="现在不能进入实施准备，因为规格还不够完整。",
                 alternative={
                     "action": "先补范围和验收标准",
@@ -579,6 +621,7 @@ def recommend_next(project_root: str, specs: list[dict] | None = None) -> dict:
             "规格内容已满足进入实施准备的条件。",
             spec=name,
             checks=["风险确认已完成", "Spec 校验通过"],
+            action_command=_advance_command(name),
             why_not="现在不直接开始实施，因为状态还没有正式进入可执行阶段。",
             alternative={
                 "action": "先生成或刷新 Agent Prompt",
@@ -695,6 +738,7 @@ def recommend_next(project_root: str, specs: list[dict] | None = None) -> dict:
                 ),
                 spec=name,
                 checks=["实现阶段已开始", "当前 verify 证据不足"],
+                action_command=_evidence_command(name, "verify"),
                 why_not="现在不能进入 review，因为缺少与当前版本绑定的验证结果。",
                 alternative={
                     "action": "先确认是否需要补回归测试",
@@ -707,6 +751,7 @@ def recommend_next(project_root: str, specs: list[dict] | None = None) -> dict:
             "当前版本的验证门禁已经满足。",
             spec=name,
             checks=["verify 证据齐全", "当前版本可进入审查"],
+            action_command=_advance_command(name),
             why_not="现在不直接标记完成，因为还缺少独立审查或后续发布门禁。",
             alternative={
                 "action": "先生成审查上下文",
@@ -767,6 +812,7 @@ def recommend_next(project_root: str, specs: list[dict] | None = None) -> dict:
                 "审查已通过，但发布门禁尚未满足。",
                 spec=name,
                 checks=["approved review 已存在", "release 证据仍缺失"],
+                action_command=_evidence_command(name, "release"),
                 why_not="现在不能结束工作，因为还没有完成当前版本的发布闭环。",
                 alternative={
                     "action": "先确认是否属于无需发布的场景",
@@ -779,6 +825,7 @@ def recommend_next(project_root: str, specs: list[dict] | None = None) -> dict:
             "当前风险配置要求的审查与发布证据已满足。",
             spec=name,
             checks=["approved review 已存在", "release 门禁已满足" if profile["require_release"] else "当前风险无需 release"],
+            action_command=_advance_command(name),
             why_not="现在不再停留在 review，因为必需证据已经齐备。",
             alternative={
                 "action": "先补 changelog 或发布说明",
@@ -797,6 +844,7 @@ def recommend_next(project_root: str, specs: list[dict] | None = None) -> dict:
                 "高风险工作在结束前必须确认发布后的实际状态。",
                 spec=name,
                 checks=["Spec 已 released", "observe 证据仍缺失"],
+                action_command=_evidence_command(name, "observe"),
                 why_not="现在不能标记 done，因为发布后的实际运行状态还没确认。",
                 alternative={
                     "action": "先确认观察窗口和指标",
@@ -809,6 +857,7 @@ def recommend_next(project_root: str, specs: list[dict] | None = None) -> dict:
             "发布后观察门禁已经满足。",
             spec=name,
             checks=["Spec 已 released", "observe 门禁已满足"],
+            action_command=_advance_command(name),
             why_not="现在不再停留在 released，因为后续观察工作已经完成。",
             alternative={
                 "action": "先创建回顾",
@@ -844,6 +893,7 @@ def recommend_next(project_root: str, specs: list[dict] | None = None) -> dict:
             "完成项尚未沉淀项目本地经验。",
             spec=without_retro[-1]["name"],
             checks=["存在 done 但尚未回顾的工作项"],
+            action_command=_retro_command(without_retro[-1]["name"]),
             why_not="现在不优先开启新任务，因为最近一次交付还没有沉淀经验。",
             alternative={
                 "action": "先检查是否有规则需要从回顾中落地",
@@ -862,6 +912,7 @@ def recommend_next(project_root: str, specs: list[dict] | None = None) -> dict:
         "创建或选择下一个工作项",
         "当前没有待推进或待回顾的活动项。",
         checks=["当前没有 active spec，也没有待补回顾的 done 项"],
+        action_command=_create_spec_command(),
         why_not="现在没有更高优先级的收尾动作，因此可以安全进入新一轮选择。",
         alternative={
             "action": "先运行 self_analyze",
@@ -929,6 +980,62 @@ def _refresh_plan_command(spec_name: str) -> str:
 
 def _regen_plan_command(spec_name: str) -> str:
     return f"vibe plan <project_root> {spec_name} --force"
+
+
+def _skill_drift(project_root: str) -> dict | None:
+    """Return a drift dict if project's recorded version != installed, else None.
+
+    Used by recommend_next to surface `vibe upgrade` as a top action when
+    drift is detected. Returns None when no drift (or pre-Rule-52 project
+    with no .skill-version file).
+    """
+    project_version = "unknown"
+    project_path = os.path.join(project_root, ".agents", ".skill-version")
+    if os.path.exists(project_path):
+        try:
+            with open(project_path, encoding="utf-8") as fp:
+                project_version = fp.read().strip() or "unknown"
+        except OSError:
+            return None
+    if project_version == "unknown":
+        return None  # Pre-Rule-52 project; no drift to warn about.
+    skill_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    skill_version_path = os.path.join(skill_dir, "VERSION")
+    if not os.path.exists(skill_version_path):
+        return None
+    try:
+        with open(skill_version_path, encoding="utf-8") as fp:
+            skill_version = fp.read().strip() or "unknown"
+    except OSError:
+        return None
+    if skill_version == "unknown" or skill_version == project_version:
+        return None
+    return {"project_version": project_version, "skill_version": skill_version}
+
+
+def _evidence_command(spec_name: str, phase: str) -> str:
+    """Build the canonical `vibe evidence <root> <spec> <phase> passed` command."""
+    return f"vibe evidence <project_root> {spec_name} {phase} passed \"<describe what you observed>\""
+
+
+def _advance_command(spec_name: str) -> str:
+    """Build the canonical `vibe advance <root> <spec>` command."""
+    return f"vibe advance <project_root> {spec_name}"
+
+
+def _amend_command(spec_name: str) -> str:
+    """Build the canonical `vibe amend <root> <spec>` command."""
+    return f"vibe amend <project_root> {spec_name}"
+
+
+def _retro_command(spec_name: str) -> str:
+    """Build the canonical `vibe retrospective <root> <spec>` command."""
+    return f"vibe retrospective <project_root> {spec_name}"
+
+
+def _create_spec_command() -> str:
+    """Build the canonical `vibe create-spec <root> <name>` command."""
+    return "vibe create-spec <project_root> <name>"
 
 
 def _print_recommendation(recommendation: dict) -> None:

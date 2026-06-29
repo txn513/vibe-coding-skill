@@ -5408,5 +5408,62 @@ class SpecArtifactIndicatorTests(unittest.TestCase):
 
 
 
+
+
+
+class SkillDriftRecommendationTests(unittest.TestCase):
+    """Cover the upgraded skill-drift recommendation.
+
+    When the project's `.agents/.skill-version` is behind the installed
+    Skill's VERSION, recommend_next must surface "sync Skill version" as
+    the top action — including an `action_command` so the agent knows
+    exactly what to run — instead of silently letting it hide behind a
+    low-priority hint.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name)
+        init_project.init_project(str(self.project), "web")
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _capture_next(self) -> str:
+        import io, project_status
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            project_status.project_next(str(self.project))
+        return buf.getvalue()
+
+    def test_drift_surfaces_as_top_recommendation(self) -> None:
+        """Drift must override normal next-action priority."""
+        version_file = self.project / ".agents" / ".skill-version"
+        version_file.write_text("old-version\n", encoding="utf-8")
+        # The Skill has its own VERSION; writing to it requires admin
+        # permission. We mock by monkey-patching the helper instead.
+        import project_status
+        original = project_status._skill_drift
+        project_status._skill_drift = lambda root: {
+            "project_version": "old-version",
+            "skill_version": "new-version",
+        }
+        try:
+            out = self._capture_next()
+        finally:
+            project_status._skill_drift = original
+        self.assertIn("同步 Skill 版本", out)
+        self.assertIn("vibe upgrade", out)
+        self.assertIn("old-version", out)
+        self.assertIn("new-version", out)
+
+    def test_no_drift_means_normal_recommendation(self) -> None:
+        """Without drift, recommend_next returns normal recommendation."""
+        # No .skill-version → pre-Rule-52 → no drift.
+        out = self._capture_next()
+        self.assertNotIn("同步 Skill 版本", out)
+
+
 if __name__ == "__main__":
     unittest.main()
