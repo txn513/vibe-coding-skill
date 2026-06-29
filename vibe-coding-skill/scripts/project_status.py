@@ -155,7 +155,6 @@ def project_status(project_root: str) -> None:
     _print_missing_retro_hint(project_root)
     _print_missing_changelog_hint(project_root)
     _print_uncommitted_work_hint(project_root)
-    _print_stale_commit_hint(project_root)
     _print_all_clean_signal(project_root, specs)
     # Rule 50: machine-readable status summary.
     spec_count = len(specs)
@@ -190,7 +189,6 @@ def project_next(project_root: str) -> dict:
     _print_missing_retro_hint(project_root)
     _print_missing_changelog_hint(project_root)
     _print_uncommitted_work_hint(project_root)
-    _print_stale_commit_hint(project_root)
     _print_all_clean_signal(project_root, specs)
     return recommendation
 
@@ -402,18 +400,13 @@ def _print_missing_changelog_hint(project_root: str) -> None:
 
 
 def _print_uncommitted_work_hint(project_root: str) -> None:
-    """Advisory: worktree has uncommitted changes.
+    """Low-priority advisory: worktree has uncommitted changes.
 
     Follows the same pattern as _print_stale_archive_hint and
     _print_version_drift_hint: silent when irrelevant, advisory +
     Rule 50 marker when relevant. Tells the agent there is work
     ready to commit and steers it toward `vibe commit` (Rule 53
     pre-commit gate) rather than raw `git commit`.
-
-    Tone escalates with backlog size:
-    - count <= warn_at: standard hint (1-10)
-    - count >  warn_at: louder hint with explicit "exceeds threshold" wording
-      so the agent cannot keep deferring the commit
     """
     if not os.path.isdir(os.path.join(project_root, ".agents")):
         return
@@ -431,18 +424,10 @@ def _print_uncommitted_work_hint(project_root: str) -> None:
     if not lines:
         return  # Clean worktree
     count = len(lines)
-    warn_at = _commit_backlog_warn_at(project_root)
-    over_warn = count > warn_at
     print()
-    if over_warn:
-        print(
-            f"💾 检测到 {count} 个未提交改动 (超过阈值 {warn_at}，"
-            f"请先 `vibe commit` 收拢当前进度再继续):"
-        )
-    else:
-        print(
-            f"💾 检测到 {count} 个未提交改动 (建议用 `vibe commit` 提交，不是裸 `git commit`):"
-        )
+    print(
+        f"💾 检测到 {count} 个未提交改动 (建议用 `vibe commit` 提交，不是裸 `git commit`):"
+    )
     for line in lines[:10]:
         # git status --porcelain: first 2 chars are status, then space, then path
         path = line[3:].strip() if len(line) > 3 else line
@@ -451,115 +436,8 @@ def _print_uncommitted_work_hint(project_root: str) -> None:
     if count > 10:
         print(f"   ... 还有 {count - 10} 个")
     print("   命令: `vibe commit -m '...'`  (Rule 53: 自动 review diff + 跑 verify)")
-    # Rule 50: machine-readable marker. The escalated marker lets parsers
-    # distinguish the over-threshold case from the routine one.
-    if over_warn:
-        print(f"<!-- vibe:uncommitted_work: {count} files (over warn_at={warn_at}) -->")
-        print("<!-- vibe:uncommitted_work: action_required -->")
-    else:
-        print(f"<!-- vibe:uncommitted_work: {count} files -->")
-
-
-def _print_stale_commit_hint(project_root: str) -> None:
-    """Advisory: project has not committed in N hours.
-
-    Fires when:
-    - Project is a git repo
-    - At least one commit exists
-    - Time since HEAD > commit_backlog.stale_hours threshold
-    - Worktree is dirty (a clean tree means the latest work is
-      already committed, so staleness is not actionable)
-
-    The point is to catch "agent edited for hours without committing"
-    even when change-count is small (e.g. one big WIP edit). This is
-    the time-axis complement to the count-based hint above.
-    """
-    if not os.path.isdir(os.path.join(project_root, ".agents")):
-        return
-    import subprocess
-    from datetime import datetime, timezone
-    try:
-        completed = subprocess.run(
-            ["git", "log", "-1", "--format=%ct"],
-            cwd=project_root, capture_output=True, text=True, timeout=5,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return
-    if completed.returncode != 0 or not completed.stdout.strip():
-        return  # No commits yet, or not a git repo.
-    try:
-        last_ts = int(completed.stdout.strip())
-    except ValueError:
-        return
-    last_dt = datetime.fromtimestamp(last_ts, tz=timezone.utc)
-    hours = int((datetime.now(timezone.utc) - last_dt).total_seconds() // 3600)
-    if hours < _commit_backlog_stale_hours(project_root):
-        return
-    # Only fire when there is also uncommitted work. A clean tree means
-    # the most recent commit is the latest "real" work; staleness then
-    # is just project quietness, not agent drift.
-    try:
-        status = subprocess.run(
-            ["git", "status", "--porcelain"],
-            cwd=project_root, capture_output=True, text=True, timeout=5,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return
-    if status.returncode != 0 or not status.stdout.strip():
-        return
-    print()
-    print(
-        f"⏰ 上次 commit 是 {hours} 小时前，且 worktree 不干净；"
-        f"先 `vibe commit` 收拢当前进度。"
-    )
-    print(f"   最后 commit: {last_dt.strftime('%Y-%m-%d %H:%M UTC')}")
-    print("   命令: `vibe commit -m '...'`  (Rule 53: 自动 review diff + 跑 verify)")
-    print("<!-- vibe:stale_commit: hours=" + str(hours) + " -->")
-
-
-def _commit_backlog_warn_at(project_root: str) -> int:
-    """Read commit_backlog.warn_at from workflow.json, default 10."""
-    try:
-        workflow, _ = ensure_workflow(project_root)
-    except Exception:  # noqa: BLE001
-        return 10
-    backlog = workflow.get("commit_backlog") or {}
-    return int(backlog.get("warn_at", 10))
-
-
-def _commit_backlog_block_at(project_root: str) -> int:
-    """Read commit_backlog.block_at from workflow.json, default 20."""
-    try:
-        workflow, _ = ensure_workflow(project_root)
-    except Exception:  # noqa: BLE001
-        return 20
-    backlog = workflow.get("commit_backlog") or {}
-    return int(backlog.get("block_at", 20))
-
-
-def _commit_backlog_stale_hours(project_root: str) -> int:
-    """Read commit_backlog.stale_hours from workflow.json, default 24."""
-    try:
-        workflow, _ = ensure_workflow(project_root)
-    except Exception:  # noqa: BLE001
-        return 24
-    backlog = workflow.get("commit_backlog") or {}
-    return int(backlog.get("stale_hours", 24))
-
-
-def _uncommitted_count(project_root: str) -> int:
-    """Return the current `git status --porcelain` line count, or 0 if not a repo."""
-    import subprocess
-    try:
-        completed = subprocess.run(
-            ["git", "status", "--porcelain"],
-            cwd=project_root, capture_output=True, text=True, timeout=5,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return 0
-    if completed.returncode != 0:
-        return 0
-    return len([l for l in completed.stdout.splitlines() if l.strip()])
+    # Rule 50: machine-readable marker
+    print(f"<!-- vibe:uncommitted_work: {count} files -->")
 
 
 def _print_stage_stall_warnings(project_root: str, specs: list[dict] | None = None) -> None:
@@ -604,34 +482,6 @@ def recommend_next(project_root: str, specs: list[dict] | None = None) -> dict:
                 "reason": "如果会话里已经手动 reload 过 Skill，可以直接 ack 这次 drift。",
             },
         )
-    # Commit backlog gate: if uncommitted change count exceeds the project's
-    # `commit_backlog.block_at` threshold, surface "commit current progress"
-    # as the top recommendation — above drift, freshness, conflicts, spec
-    # work, everything. The point is to prevent the agent from continuing
-    # to pile changes onto an already-large uncommitted pile. The threshold
-    # is configurable per-project (default 20) so a project that legitimately
-    # needs bigger atomic commits can raise it; the default is conservative
-    # because commit backlog is a leading indicator of accidental breakage
-    # (drive-by edits, missed regressions, etc.).
-    backlog = _uncommitted_count(project_root)
-    if backlog > 0:
-        block_at = _commit_backlog_block_at(project_root)
-        if backlog > block_at:
-            return _recommendation(
-                "提交当前进度 (commit backlog 超阈值)",
-                f"worktree 有 {backlog} 个未提交改动，已超过 `commit_backlog.block_at={block_at}`。"
-                f"继续往上堆改动会放大回归风险、模糊每个 commit 的 scope。",
-                checks=[
-                    f"未提交改动数 {backlog} > block_at {block_at}",
-                    "继续推进 Spec 之前必须先收拢当前进度",
-                ],
-                why_not="现在不优先推进 Spec，因为 worktree 已经积累过多未 review / 未验证的改动。",
-                action_command='vibe commit -m "<describe this batch>"',
-                alternative={
-                    "action": "先把改动拆成多个语义清晰的 commit",
-                    "reason": "如果一批改动确实跨多个 Spec，可以分多次 `vibe commit` 让每个 commit 的 scope 保持窄。",
-                },
-            )
     freshness = assess_context_freshness(project_root)
     if (
         freshness.get("missing_timestamp")
