@@ -27,6 +27,17 @@ def record_review(
     reviewer = " ".join(reviewer.split())
     if not basis or not evidence or not reviewer:
         raise ValueError("审查者、结论依据和已核对证据都不能为空")
+    # Rule 55: review must inspect content, not just confirm existence.
+    # A review basis that is too vague ("looks good", "LGTM", "没问题")
+    # without referencing specific diff hunks, spec clauses, or AC
+    # numbers is not a valid review — it is the same failure mode as
+    # showing stat but not reviewing content (original Rule 53 bug).
+    vague_basis = {"looks good", "lgtm", "没问题", "看起来没问题", "ok", "fine", "approved"}
+    if basis.strip().lower() in vague_basis:
+        raise ValueError(
+            "Rule 55: 审查依据太笼统，必须引用具体的 diff 观察、spec 条款或验收标准编号。"
+            f"  当前依据: '{basis}'"
+        )
 
     review_file = _latest_pending_review(project_root, spec_name)
     if not review_file:
@@ -50,14 +61,14 @@ def record_review(
         count=1,
     )
     content = re.sub(
-        r"^-\s*结论依据:.*$",
+        r"^-\s*结论依据[^:]*:.*$",
         lambda _: f"- 结论依据: {basis}",
         content,
         count=1,
         flags=re.MULTILINE,
     )
     content = re.sub(
-        r"^-\s*已核对的验证证据:.*$",
+        r"^-\s*已核对的验证证据[^:]*:.*$",
         lambda _: f"- 已核对的验证证据: {evidence}",
         content,
         count=1,

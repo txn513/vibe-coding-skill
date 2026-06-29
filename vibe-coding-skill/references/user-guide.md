@@ -184,6 +184,8 @@ vibe ui-redesign-contract <spec> --source-type opendesign --source-artifacts des
 - 同上会列出 `> 状态: done|released` 但没写 retro 的 spec（`<!-- vibe:missing_retros: N -->`）——没 retro self_analyze 就看不到失败模式
 - 同上会列出 `> 状态: done|released` 但没生成 CHANGELOG 的 spec（`<!-- vibe:missing_changelogs: N -->`）
 - commit 必须用 `vibe commit -m "..."` 而不是裸 `git commit`：Skill 展示完整 diff（不只是 --stat），Agent 必须审查内容、发现问题、修复后再 commit；然后跑 verify 命令，全过才转交 git（Rule 53）
+- `vibe next`/`vibe status`/`vibe doctor` 的 warning 不是"仅供参考"，Agent 必须处理或显式推迟并记录原因（Rule 54）；忽略 warning 等于没看到
+- 审查（review）必须引用具体的 diff 观察、spec 条款或验收标准编号，"看起来没问题"不是有效审查（Rule 55）
 - 三级 verify 模型（fastest → slowest）：`verify_scope`（快速 scoped 验证，适合批量中间 commit）→ `verify`（默认全量，向后兼容）→ `verify_full`（显式全量，`--full-verify` 触发，适合批量最终 commit）
 - 批量提交模式：中间 commit 用 `vibe commit --staged --no-verify -m 'task N'`，最终 commit 用 `vibe commit --full-verify -m 'batch done'`；如果项目配了 `verify_scope`，默认 `vibe commit` 就走快速验证
 - `vibe commit --paths a.py,b.py -m '...'` 只提交指定文件；`vibe commit --staged -m '...'` 只提交已 stage 的文件（支持一个逻辑单元一个 commit）

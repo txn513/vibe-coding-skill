@@ -590,6 +590,32 @@ artifacts merely because a template exists.
     written claims), and means Rule 53 cannot accidentally regress
     to "trust the agent" mode.
 
+54. **Doctor warnings must be acted on, not just displayed**: When
+    `vibe doctor` or `vibe next`/`vibe status` surface warnings
+    (stale context, missing rules, Skill version drift, stage-stall,
+    missing retros, missing changelogs, proposed rules unreviewed),
+    the Agent must not silently continue as if nothing was wrong.
+    Each warning must be either resolved (by running the suggested
+    command) or explicitly deferred with a reason recorded in the
+    project. Ignoring a warning without acknowledgment is the same
+    failure mode as Rule 53's original "show stat but don't review
+    content" — the output exists but has no effect on behavior.
+    The `vibe next` recommendation must account for unresolved
+    warnings: if context is stale, recommend context-refresh first;
+    if Skill has drifted, recommend upgrade first; if rules are
+    unreviewed, recommend rule-status decision first.
+
+55. **Review must inspect content, not just confirm existence**: When
+    a review is performed (whether via `generate_review.py` or
+    inline during `vibe commit`), the reviewer must inspect the
+    actual code changes and reason about correctness, not just
+    confirm that files exist or tests pass. A review that says
+    "looks good" without referencing specific diff hunks, spec
+    clauses, or acceptance criteria is not a valid review — it is
+    the same failure mode as Rule 53's original "show stat but
+    don't review content". The review conclusion must reference at
+    least one specific observation from the diff or the spec.
+
 ## State Model
 
 Normal states are:

@@ -214,7 +214,7 @@ def _print_stale_archive_hint(project_root: str) -> None:
     if not stale:
         return
     print()
-    print(f"🧹 提醒: 发现 {len(stale)} 个陈旧 .agents/ 文件,可考虑归档")
+    print(f"🧹 发现 {len(stale)} 个陈旧 .agents/ 文件，应归档 (Rule 54: warning 必须处理，不能忽略)")
     print("   命令: vibe archive-stale <project_root> --apply")
     print("   (Rule 45: 归档是显式动作,Skill 不会自动搬文件)")
 
@@ -260,7 +260,7 @@ def _print_version_drift_hint(project_root: str) -> None:
     #      drift check starts from the right baseline.
     # The hint surfaces both so the agent doesn't just reload and forget.
     print(
-        f"⚠️  Skill version drift: project records '{project_version}', "
+        f"⚠️  Skill version drift (Rule 54: 必须处理): project records '{project_version}', "
         f"installed Skill is '{skill_version}' (Rule 52)."
     )
     print(
@@ -308,7 +308,7 @@ def _print_proposed_rules_hint(project_root: str) -> None:
         return
     print()
     print(
-        f"📋 你有 {len(proposed)} 条 proposed 规则待评审 (Rule 18: retro 沉淀的规则未被采纳):"
+        f"📋 你有 {len(proposed)} 条 proposed 规则待评审 (Rule 18 + Rule 54: 必须决策，不能忽略):"
     )
     for stem in proposed[:10]:
         print(f"   - {stem}")
@@ -354,7 +354,7 @@ def _print_missing_retro_hint(project_root: str) -> None:
         return
     print()
     print(
-        f"📝 {len(missing)} 个已 done/released 的 spec 缺 retro (self_analyze 看不到失败模式):"
+        f"📝 {len(missing)} 个已 done/released 的 spec 缺 retro (Rule 54: 必须补写，不能忽略):"
     )
     for name, status in missing[:10]:
         print(f"   - {name} ({status})")
@@ -398,7 +398,7 @@ def _print_missing_changelog_hint(project_root: str) -> None:
         return
     print()
     print(
-        f"📦 {len(missing)} 个已 done/released 的 spec 缺 CHANGELOG:"
+        f"📦 {len(missing)} 个已 done/released 的 spec 缺 CHANGELOG (Rule 54: 应补齐):"
     )
     for name, status in missing[:10]:
         print(f"   - {name} ({status})")
@@ -506,7 +506,7 @@ def _print_uncommitted_work_hint(project_root: str) -> None:
     count = len(lines)
     print()
     print(
-        f"💾 检测到 {count} 个未提交改动 (建议用 `vibe commit` 提交，不是裸 `git commit`):"
+        f"💾 检测到 {count} 个未提交改动 (Rule 54: 应提交，不能忽略):"
     )
     for line in lines[:10]:
         # git status --porcelain: first 2 chars are status, then space, then path
@@ -581,6 +581,36 @@ def recommend_next(project_root: str, specs: list[dict] | None = None) -> dict:
                 "reason": "至少先把技术栈、当前阶段和待人工确认项同步到最新。",
             },
         )
+    # Rule 54: doctor warnings must be acted on, not just displayed.
+    # If there are high-priority warnings (proposed rules, stage stall),
+    # surface them as the next action so the agent cannot silently skip.
+    proposed_rules = _count_proposed_rules(project_root)
+    if proposed_rules > 0:
+        return _recommendation(
+            f"评审并决策 {proposed_rules} 条 proposed 规则 (Rule 54)",
+            f"retro 沉淀的规则尚未被采纳或废弃，self_analyze 看不到这些失败模式。",
+            checks=[f"{proposed_rules} 条规则处于 proposed 状态"],
+            why_not="现在不优先推进 Spec，因为未评审的规则意味着治理闭环未完成。",
+            action_command=f"vibe rule-status <project_root> <stem> adopted|abandoned",
+            alternative={
+                "action": "先批量浏览 proposed 规则内容",
+                "reason": "如果不确定是否采纳，先读一遍再决定。",
+            },
+        )
+    stall_warnings = stage_stall_warnings(project_root, specs)
+    if stall_warnings:
+        return _recommendation(
+            "处理停滞的 Spec (Rule 54)",
+            f"有 spec 在当前阶段停留超过 risk SLA，可能需要推进、阻塞或取消。",
+            checks=stall_warnings[:3],
+            why_not="停滞的 spec 占用注意力但不产出价值，应该先决策它的去向。",
+            action_command=_status_command(),
+            alternative={
+                "action": "先确认停滞原因",
+                "reason": "如果是等外部依赖，可以标记 blocked；如果是需求变了，可以取消。",
+            },
+        )
+
     conflicts = unresolved_conflicts(Path(project_root), severity="high")
     if conflicts:
         conflict = conflicts[0]
@@ -1103,6 +1133,27 @@ def _skill_drift(project_root: str) -> dict | None:
     if skill_version == "unknown" or skill_version == project_version:
         return None
     return {"project_version": project_version, "skill_version": skill_version}
+
+
+def _count_proposed_rules(project_root: str) -> int:
+    """Count rule files in 'proposed' state (Rule 54)."""
+    rules_dir = os.path.join(project_root, ".agents", "rules")
+    if not os.path.isdir(rules_dir):
+        return 0
+    count = 0
+    for entry in sorted(os.listdir(rules_dir)):
+        if not entry.endswith(".md"):
+            continue
+        path = os.path.join(rules_dir, entry)
+        try:
+            with open(path, encoding="utf-8") as fp:
+                rule_content = fp.read()
+        except OSError:
+            continue
+        m = re.search(r">\s*状态:\s*(\S+)", rule_content)
+        if m and m.group(1) == "proposed":
+            count += 1
+    return count
 
 
 def _evidence_command(spec_name: str, phase: str) -> str:

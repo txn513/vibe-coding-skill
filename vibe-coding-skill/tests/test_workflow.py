@@ -3600,7 +3600,7 @@ class VibeCliTests(unittest.TestCase):
         self._cli("advance", "rev-me", "review")
         self._cli(
             "review-decision", "rev-me",
-            "approved", "looks good", "spec,evidence",
+            "approved", "AC1 verified in diff hunk L42-58, no scope creep", "spec,evidence",
             "--reviewer", "test",
         )
         self._cli("evidence", "rev-me", "release", "passed", "deployed")
@@ -3728,7 +3728,7 @@ class VibeCliTests(unittest.TestCase):
         self._cli("advance", "retro-auto", "review")
         self._cli(
             "review-decision", "retro-auto",
-            "approved", "looks good", "spec,evidence",
+            "approved", "AC1 verified in diff hunk L42-58, no scope creep", "spec,evidence",
             "--reviewer", "test",
         )
         self._cli("evidence", "retro-auto", "release", "passed", "deployed")
