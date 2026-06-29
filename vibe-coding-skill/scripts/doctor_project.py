@@ -91,6 +91,66 @@ def _missing_auxiliaries() -> list[str]:
     return missing
 
 
+def _audit_adjacent_protection(spec_name: str, content: str, warnings: list[str]) -> None:
+    """Rule 56: check that adjacent-location entries have protection or risk ack."""
+    # Find "故意不改" section content
+    adjacent_match = re.search(
+        r"(?:故意不改的相邻位置|Deliberately unchanged)[^\n]*\n((?:\s+-.*\n?)+)",
+        content,
+    )
+    if not adjacent_match:
+        return  # No adjacent locations declared — nothing to check
+    section = adjacent_match.group(1)
+    entries = [line.strip().lstrip("- ").strip() for line in section.splitlines() if line.strip().startswith("-")]
+    if not entries:
+        return
+    # Check for risk acknowledgment in the section
+    has_ack = any(
+        "风险已知晓" in entry or "risk acknowledged" in entry.lower() or "无自动化测试保护" in entry
+        for entry in entries
+    )
+    if has_ack:
+        return  # Agent explicitly acknowledged the risk
+    # No protection tests mentioned, no risk ack — advisory
+    warnings.append(
+        f"{spec_name}: {len(entries)} 个'故意不改的相邻位置'没有保护性测试或风险确认 (Rule 56) — "
+        "添加保护性测试，或显式声明'风险已知晓'"
+    )
+
+
+def _audit_read_path_impact(spec_name: str, content: str, warnings: list[str]) -> None:
+    """Rule 57: check that read paths have impact-type annotations."""
+    # Find the scope/涉及范围 section
+    scope_match = re.search(
+        r"(?:## 涉及范围|## Scope)[^\n]*\n((?:.*\n?)*?)(?=## |$)",
+        content,
+    )
+    if not scope_match:
+        return  # No scope section — Rule 44 advisory covers this elsewhere
+    section = scope_match.group(1)
+    # Look for read-path lines that mention paths/endpoints but lack impact type
+    # Impact types: 新增, 修改, 删除, added, modified, removed
+    impact_types = {"新增", "修改", "删除", "added", "modified", "removed"}
+    # Find lines that look like read-path entries (paths, endpoints, APIs)
+    path_lines = [
+        line.strip() for line in section.splitlines()
+        if line.strip().startswith("-") and ("/" in line or "API" in line or "端点" in line or "路径" in line or "path" in line.lower())
+    ]
+    if not path_lines:
+        return
+    unannotated = []
+    for line in path_lines:
+        # Check if any impact type keyword is present
+        if not any(it in line for it in impact_types):
+            unannotated.append(line.lstrip("- ").strip()[:60])
+    if unannotated:
+        examples = unannotated[:3]
+        warnings.append(
+            f"{spec_name}: {len(unannotated)} 条读取路径缺少影响类型标注 (Rule 57) — "
+            f"每条路径标注: 新增/修改/删除。示例: {', '.join(examples)}"
+        )
+
+
 def doctor(project_root: str) -> dict:
     workflow, migrated = ensure_workflow(project_root)
     issues = []
@@ -157,6 +217,11 @@ def doctor(project_root: str) -> dict:
                         f"{name}: type=bug spec missing '## 修复范围 (Fix Scope)' section (Rule 51) — "
                         "declare 已修复位置 + 故意不改的相邻位置 + 判断依据"
                     )
+                # Rule 56: adjacent-location protection advisory.
+                # If "故意不改" positions exist but no risk acknowledgment,
+                # remind the agent to add protection tests or explicit risk ack.
+                elif "## 修复范围" in content or "## Fix Scope" in content:
+                    _audit_adjacent_protection(name, content, warnings)
             for dependency in metadata["dependencies"]:
                 dependency_path = os.path.join(specs_dir, f"{dependency}.md")
                 if not os.path.exists(dependency_path):
@@ -171,6 +236,9 @@ def doctor(project_root: str) -> dict:
                         reg_status = re.search(r">\s*状态:\s*(\S+)", rh.read())
                     if reg_status and reg_status.group(1) != "done":
                         warnings.append(f"{name}: regression source {regression} is not marked done")
+            # Rule 57: read-path impact type annotation advisory.
+            _audit_read_path_impact(name, content, warnings)
+
             plan = os.path.join(project_root, ".agents", "plans", filename)
             if os.path.exists(plan):
                 with open(plan, encoding="utf-8") as handle:

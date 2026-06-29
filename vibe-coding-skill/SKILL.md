@@ -616,6 +616,44 @@ artifacts merely because a template exists.
     don't review content". The review conclusion must reference at
     least one specific observation from the diff or the spec.
 
+56. **Adjacent-location protection is advisory**: When a bug spec's
+    Fix Scope (Rule 51) lists "故意不改的相邻位置", the Agent should
+    verify those locations were not accidentally affected — either by
+    writing a protection test, or by explicitly declaring "no automated
+    test protection, risk acknowledged" with a one-line reason.
+    `vibe doctor` surfaces an advisory for adjacent locations that have
+    neither a protection test nor an explicit risk acknowledgment. The
+    advisory is not blocking; it exists because the "deliberately
+    unchanged" declaration is hollow without evidence that it stayed
+    unchanged, and this is the same "exists but unverified" failure
+    mode that Rule 53 originally had with `--stat`.
+
+57. **Read-path impact type must be annotated**: When a spec's scope
+    section (Rule 44) lists read paths that may be affected, each path
+    must be annotated with an impact type: `新增` (new field/endpoint/
+    return value, no existing behavior changed), `修改` (changed
+    semantics, format, or contract of an existing path), or `删除`
+    (removed field/endpoint/return value). Paths annotated as `修改`
+    or `删除` represent behavior changes — their verify evidence must
+    include a before-vs-after comparison showing the actual behavior
+    change. `vibe doctor` surfaces an advisory for read paths listed
+    without an impact-type annotation. Unannotated paths default to
+    `新增` only when the spec is `type=feature` and the path did not
+    exist before; otherwise they require explicit annotation.
+
+58. **Retro must record behavior changes and rollback plan**: When a
+    spec changes existing behavior (read paths annotated as `修改` or
+    `删除` per Rule 57), the retro must include: (1) a description of
+    the behavior change (before vs after), (2) an assessment of who or
+    what is affected, (3) the business decision for accepting the
+    change, and (4) a rollback plan describing how to restore the
+    previous behavior. `vibe doctor` surfaces an advisory for specs
+    with `修改`/`删除` impact annotations whose retro is missing any
+    of these four items. The assessment of impact (item 2) should use
+    whatever evidence is available in the project — logs, queries,
+    test data, or manual testing — but the rule does not mandate a
+    specific tool or data source, as that is project-specific.
+
 ## State Model
 
 Normal states are:
