@@ -62,6 +62,7 @@ def set_status(
     role: str = "",
     auto_changelog: bool = True,
     changelog_version: str = "",
+    allow_dirty: bool = False,
 ) -> str | None:
     spec_name = validate_artifact_name(spec_name, "规格名称")
     spec_file = os.path.join(project_root, ".agents", "specs", f"{spec_name}.md")
@@ -279,6 +280,17 @@ def set_status(
     if force:
         verdict = "forced"
     print(f"<!-- vibe:gate_verdict: {verdict} spec={spec_name} transition={current_status}->{new_status} -->")
+    # Soft commit reminder at the workflow boundary. The agent just
+    # closed a logical unit of work (status transition); reminding it
+    # to commit RIGHT NOW keeps each commit scoped to one logical unit
+    # instead of accumulating drive-by edits across multiple transitions.
+    # Default reminder is non-blocking; --allow-dirty opts out for cases
+    # where the transition genuinely does not involve code (docs-only,
+    # rule-only). This is the workflow-natural counterpart to Rule 53's
+    # pre-commit verify gate — same rhythm, opposite direction.
+    _print_commit_reminder_at_transition(
+        project_root, spec_name, current_status, new_status, allow_dirty
+    )
     if new_status == "review" and not force:
         _print_plan_progress_reminder(project_root, spec_name)
 
@@ -297,6 +309,69 @@ def set_status(
             print(f"⚠️  自动 changelog 失败（状态已推进）: {exc}", file=__import__("sys").stderr)
 
     return new_status
+
+
+def _print_commit_reminder_at_transition(
+    project_root: str,
+    spec_name: str,
+    from_status: str,
+    to_status: str,
+    allow_dirty: bool,
+) -> None:
+    """Soft reminder: 'you just advanced a spec — commit your changes'.
+
+    Fires after a successful status transition when the worktree is
+    dirty. Default is a non-blocking print; --allow-dirty silences it
+    for cases where the transition was docs/rules only.
+
+    The reminder is intentionally embedded at the workflow boundary
+    (right after the transition succeeds) rather than as a count-based
+    threshold. The point is: every transition is a "logical unit just
+    finished" signal, so commit happens at logical units, not after
+    the pile gets too big.
+    """
+    if allow_dirty:
+        return
+    # Only nudge on forward transitions; backward transitions (rolling
+    # back to draft, blocked, cancelled) typically represent rejection
+    # or abandonment, not "I just finished work".
+    FORWARD = {
+        "draft": {"spec-ready", "blocked", "cancelled"},
+        "spec-ready": {"in-progress", "blocked", "cancelled"},
+        "in-progress": {"review", "released", "done", "blocked", "cancelled"},
+        "review": {"released", "done", "in-progress", "blocked"},
+        "released": {"done", "blocked"},
+    }
+    if to_status not in FORWARD.get(from_status, set()):
+        return
+    # If the transition is purely non-code (e.g. cancelling a spec
+    # that was never implemented), dirty files would be unrelated and
+    # the reminder would be noise. The cheap heuristic: only remind
+    # when dirty files intersect with non-`.agents/` paths — those are
+    # almost always the code changes the transition is supposed to be
+    # committing.
+    import subprocess
+    try:
+        completed = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=project_root, capture_output=True, text=True, timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return
+    if completed.returncode != 0:
+        return
+    dirty = [
+        line for line in completed.stdout.splitlines()
+        if line.strip() and not line[3:].strip().startswith(".agents/")
+    ]
+    if not dirty:
+        return  # Only `.agents/` changes — governance only, not code.
+    print()
+    print(f"💾 工作区还有 {len(dirty)} 个代码改动未提交。")
+    print("   这次状态推进是新逻辑单元的终点，建议立刻:")
+    print('     `vibe commit -m "<描述这一批改动>"`  (Rule 53: 跑 verify + review diff)')
+    print("   如果本次推进不涉及代码（纯文档 / 规则），加 --allow-dirty 跳过此提醒。")
+    print(f"<!-- vibe:commit_reminder: {len(dirty)} files spec={spec_name} transition={from_status}->{to_status} -->")
 
 
 def _print_plan_progress_reminder(project_root: str, spec_name: str) -> None:
@@ -858,6 +933,14 @@ if __name__ == "__main__":
     p.add_argument("--reason", default="", help="Required reason when using --force")
     p.add_argument("--actor", default="", help="Person or agent identity")
     p.add_argument("--role", default="", help="Workflow role")
+    p.add_argument(
+        "--allow-dirty",
+        action="store_true",
+        help="Suppress the post-transition 'commit your changes' reminder "
+        "when the worktree is dirty. Use for documentation-only or "
+        "rule-only advances where there is genuinely no code change to "
+        "commit. Most code-bearing transitions should commit instead.",
+    )
     args = p.parse_args()
 
     set_status(
@@ -868,4 +951,5 @@ if __name__ == "__main__":
         args.reason,
         args.actor,
         args.role,
+        allow_dirty=args.allow_dirty,
     )

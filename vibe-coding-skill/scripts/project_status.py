@@ -121,6 +121,13 @@ def project_status(project_root: str) -> None:
                 print(f"   {bar:10s} {p['name']}: {p['done']}/{p['total']}")
         for warning in _plan_progress_warnings(plans, specs):
             print(f"   ⚠️  {warning}")
+        # Workflow-natural commit reminder: every plan-task `- [x]` is a
+        # "logical unit just finished" signal. If the worktree is dirty
+        # while the agent is mid-plan, the natural rhythm is: tick task,
+        # commit, then continue. Surface this only when there is some
+        # plan progress AND the worktree has uncommitted code, so it
+        # doesn't fire on freshly-initialised projects with empty plans.
+        _print_plan_progress_commit_hint(project_root, plans, specs)
         print()
 
     # Retros
@@ -146,6 +153,7 @@ def project_status(project_root: str) -> None:
 
     print()
     recommendation = recommend_next(project_root, specs)
+    recommendation = _apply_commit_prereq(project_root, recommendation)
     _apply_model_mapping(project_root, recommendation)
     _print_recommendation(recommendation)
     _print_stale_archive_hint(project_root)
@@ -181,6 +189,7 @@ def project_next(project_root: str) -> dict:
     else:
         specs = _list_specs(os.path.join(project_root, ".agents", "specs"))
         recommendation = recommend_next(project_root, specs)
+    recommendation = _apply_commit_prereq(project_root, recommendation)
     _apply_model_mapping(project_root, recommendation)
     _print_recommendation(recommendation)
     _print_stale_archive_hint(project_root)
@@ -397,6 +406,77 @@ def _print_missing_changelog_hint(project_root: str) -> None:
         print(f"   ... 还有 {len(missing) - 10} 个")
     print("   命令: `vibe changelog <project> <spec-name>` 生成 CHANGELOG")
     print(f"<!-- vibe:missing_changelogs: {len(missing)} -->")
+
+
+def _uncommitted_count(project_root: str) -> int:
+    """Return the current `git status --porcelain` line count, or 0 if not a repo.
+
+    Used by recommend_next to decide whether to weave a commit step into
+    the recommendation. The agent is reminded to commit when about to
+    advance a spec, not based on a hard count threshold but because the
+    next action is an irreversible workflow transition (status advance,
+    evidence recording) that should be tied to a clean commit so the
+    commit hash in the evidence matches what's on disk.
+    """
+    if not os.path.isdir(os.path.join(project_root, ".agents")):
+        return 0
+    import subprocess
+    try:
+        completed = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=project_root, capture_output=True, text=True, timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return 0
+    if completed.returncode != 0:
+        return 0
+    return len([line for line in completed.stdout.splitlines() if line.strip()])
+
+
+def _apply_commit_prereq(
+    project_root: str, recommendation: dict
+) -> dict:
+    """If worktree is dirty and the next action is an 'advance' transition,
+    prefix a commit step into the recommendation.
+
+    The agent should not push a Spec from in-progress to review, or to
+    done, while holding a pile of uncommitted edits — the evidence it
+    records will not match the commit hash on disk, and any reviewer
+    reading the diff will see a mixture of the spec's work plus
+    drive-by edits. Weaving the commit step into the recommendation
+    makes the natural rhythm: edit -> commit -> advance.
+
+    The integration is intentionally surgical:
+    - only applied when the recommendation has an action_command that
+      targets a state-changing operation (advance, evidence, amend);
+    - the commit step is appended to the action_command via '&&' so the
+      agent runs them in order;
+    - the action string itself gets a '先 commit 当前改动，再 X' prefix
+      so the human-readable line is also honest.
+
+    For low-risk edits (docs, rules) where the user explicitly did not
+    want a forced commit, the call sites can pass through `apply=False`.
+    """
+    if _uncommitted_count(project_root) == 0:
+        return recommendation
+    cmd = recommendation.get("action_command", "")
+    if not cmd:
+        return recommendation
+    # Only weave into state-changing ops, not read-only or workflow-setup
+    # commands. The action_command strings we use are predictable.
+    WEAVEABLE_PREFIXES = (
+        "vibe advance ", "vibe evidence ", "vibe amend ",
+    )
+    if not any(cmd.startswith(prefix) for prefix in WEAVEABLE_PREFIXES):
+        return recommendation
+    # Rewrite the recommendation: prefix the action text and chain the
+    # commit command so a copy-paste runs both steps in order.
+    original_action = recommendation["action"]
+    if "commit" not in original_action.lower():
+        recommendation = dict(recommendation)
+        recommendation["action"] = f"先 commit 当前改动，再 {original_action}"
+    recommendation["action_command"] = 'vibe commit -m "<describe this batch>" && ' + cmd
+    return recommendation
 
 
 def _print_uncommitted_work_hint(project_root: str) -> None:
@@ -1195,6 +1275,69 @@ def _list_specs(dir: str) -> list[dict]:
                 "path": path,
             })
     return result
+
+
+def _print_plan_progress_commit_hint(
+    project_root: str, plans: list[dict], specs: list[dict]
+) -> None:
+    """Surface commit nudge when a spec has ticked plan tasks but is dirty.
+
+    Workflow-natural commit boundary: every `- [x]` in a plan.md marks a
+    logical unit just finished. If the worktree is also dirty, the
+    natural rhythm is "tick -> commit -> continue" so each commit
+    contains one logical unit. Without this nudge, the agent keeps
+    ticking tasks without committing until the pile is huge.
+
+    Fires only when:
+    - At least one in-progress / review spec has plan progress > 0
+    - Worktree is dirty (uncommitted files exist)
+    - At least one dirty file is outside `.agents/` (otherwise the
+      dirt is governance-only and doesn't need a code commit)
+
+    Silent otherwise.
+    """
+    if _uncommitted_count(project_root) == 0:
+        return
+    specs_by_name = {spec["name"]: spec for spec in specs}
+    has_progress = False
+    for plan in plans:
+        spec = specs_by_name.get(plan["name"])
+        if not spec or spec.get("status") not in {"in-progress", "review"}:
+            continue
+        if plan.get("done", 0) > 0:
+            has_progress = True
+            break
+    if not has_progress:
+        return
+    import subprocess
+    try:
+        completed = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=project_root, capture_output=True, text=True, timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return
+    if completed.returncode != 0:
+        return
+    code_dirty = [
+        line for line in completed.stdout.splitlines()
+        if line.strip() and not line[3:].strip().startswith(".agents/")
+    ]
+    if not code_dirty:
+        return
+    print()
+    print(
+        f"🪜 plan 任务已推进 {sum(p['done'] for p in plans)} 个，"
+        f"worktree 仍有 {len(code_dirty)} 个代码改动未提交。"
+    )
+    print(
+        "   自然节奏: 勾一个 task → `vibe commit` → 继续下一个 task。"
+    )
+    print(
+        "   这样每个 commit 对应一个逻辑单元，回滚时定位也精确。"
+    )
+    print('   命令: `vibe commit -m "<describe this task batch>"`')
+    print(f"<!-- vibe:plan_progress_commit_hint: {len(code_dirty)} files -->")
 
 
 def _list_plans(dir: str) -> list[dict]:

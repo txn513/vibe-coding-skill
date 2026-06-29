@@ -5537,5 +5537,161 @@ class ActionCommandCoverageTests(unittest.TestCase):
 
 
 
+
+
+
+class CommitAtWorkflowBoundaryTests(unittest.TestCase):
+    """Cover the three workflow-natural commit prompts."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name)
+        init_project.init_project(str(self.project), "web")
+        import subprocess
+        subprocess.run(["git", "init", "-q"], cwd=str(self.project), check=True)
+        subprocess.run(["git", "config", "user.email", "t@t.com"],
+                       cwd=str(self.project), check=True)
+        subprocess.run(["git", "config", "user.name", "t"],
+                       cwd=str(self.project), check=True)
+        subprocess.run(["git", "add", "-A"], cwd=str(self.project), check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "init"],
+                       cwd=str(self.project), check=True)
+        (self.project / ".agents" / "plans").mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_transition_reminder_silent_when_clean(self) -> None:
+        import io, set_status
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            set_status._print_commit_reminder_at_transition(
+                str(self.project), "feat", "in-progress", "review", False,
+            )
+        self.assertNotIn("工作区还有", buf.getvalue())
+
+    def test_transition_reminder_fires_when_dirty(self) -> None:
+        import io, set_status
+        from contextlib import redirect_stdout
+        (self.project / "src.py").write_text("x = 1", encoding="utf-8")
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            set_status._print_commit_reminder_at_transition(
+                str(self.project), "feat", "in-progress", "review", False,
+            )
+        self.assertIn("工作区还有", buf.getvalue())
+        self.assertIn("commit_reminder", buf.getvalue())
+
+    def test_transition_reminder_silent_when_allow_dirty(self) -> None:
+        import io, set_status
+        from contextlib import redirect_stdout
+        (self.project / "src.py").write_text("x = 1", encoding="utf-8")
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            set_status._print_commit_reminder_at_transition(
+                str(self.project), "feat", "in-progress", "review", True,
+            )
+        self.assertNotIn("工作区还有", buf.getvalue())
+
+    def test_transition_reminder_silent_for_governance_only_changes(self) -> None:
+        import io, set_status
+        from contextlib import redirect_stdout
+        (self.project / ".agents" / "rules" / "new.md").write_text(
+            "> 状态: adopted\n", encoding="utf-8",
+        )
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            set_status._print_commit_reminder_at_transition(
+                str(self.project), "feat", "in-progress", "review", False,
+            )
+        self.assertNotIn("工作区还有", buf.getvalue())
+
+    def test_apply_commit_prereq_wraps_advance_command(self) -> None:
+        import project_status
+        (self.project / "src.py").write_text("x = 1", encoding="utf-8")
+        rec = {
+            "action": "将工作项推进到 review",
+            "action_command": "vibe advance <project_root> feat",
+        }
+        out = project_status._apply_commit_prereq(str(self.project), rec)
+        self.assertIn("先 commit 当前改动", out["action"])
+        self.assertIn("vibe commit", out["action_command"])
+        self.assertIn("&&", out["action_command"])
+        self.assertIn("vibe advance", out["action_command"])
+
+    def test_apply_commit_prereq_silent_on_clean_tree(self) -> None:
+        import project_status
+        rec = {
+            "action": "将工作项推进到 review",
+            "action_command": "vibe advance <project_root> feat",
+        }
+        out = project_status._apply_commit_prereq(str(self.project), rec)
+        self.assertEqual(out["action"], rec["action"])
+        self.assertEqual(out["action_command"], rec["action_command"])
+
+    def test_apply_commit_prereq_skips_readonly_commands(self) -> None:
+        import project_status
+        (self.project / "src.py").write_text("x = 1", encoding="utf-8")
+        rec = {
+            "action": "查看项目状态",
+            "action_command": "vibe status <project_root>",
+        }
+        out = project_status._apply_commit_prereq(str(self.project), rec)
+        self.assertNotIn("vibe commit", out["action_command"])
+
+    def test_plan_progress_hint_fires_when_ticked_and_dirty(self) -> None:
+        import io, project_status
+        from contextlib import redirect_stdout
+        (self.project / ".agents" / "specs" / "feat.md").write_text(
+            "# feat\n\n> 状态: in-progress\n> Prompt version: 1\n\nbody\n",
+            encoding="utf-8",
+        )
+        (self.project / ".agents" / "plans" / "feat.md").write_text(
+            "# plan\n\n- [x] task 1\n- [ ] task 2\n",
+            encoding="utf-8",
+        )
+        (self.project / "src.py").write_text("x = 1", encoding="utf-8")
+        specs = project_status._list_specs(
+            str(self.project / ".agents" / "specs")
+        )
+        plans = project_status._list_plans(
+            str(self.project / ".agents" / "plans")
+        )
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            project_status._print_plan_progress_commit_hint(
+                str(self.project), plans, specs,
+            )
+        out = buf.getvalue()
+        self.assertIn("plan 任务已推进", out)
+        self.assertIn("plan_progress_commit_hint", out)
+
+    def test_plan_progress_hint_silent_when_clean_tree(self) -> None:
+        import io, project_status
+        from contextlib import redirect_stdout
+        (self.project / ".agents" / "specs" / "feat.md").write_text(
+            "# feat\n\n> 状态: in-progress\n> Prompt version: 1\n\nbody\n",
+            encoding="utf-8",
+        )
+        (self.project / ".agents" / "plans" / "feat.md").write_text(
+            "# plan\n\n- [x] task 1\n- [ ] task 2\n",
+            encoding="utf-8",
+        )
+        specs = project_status._list_specs(
+            str(self.project / ".agents" / "specs")
+        )
+        plans = project_status._list_plans(
+            str(self.project / ".agents" / "plans")
+        )
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            project_status._print_plan_progress_commit_hint(
+                str(self.project), plans, specs,
+            )
+        self.assertNotIn("plan 任务已推进", buf.getvalue())
+
+
+
 if __name__ == "__main__":
     unittest.main()
