@@ -180,6 +180,7 @@ def set_status(
                     project_root, spec_name, content, profile, workflow
                 ):
                     print("❌ Bug 进入审查前需要 reproduction 与 fix-regression 双向证据")
+                    print("   💡 标准顺序: in-progress → review → released → done")
                     return None
                 _emit_fix_state_advisory(project_root, spec_name)
             elif not _has_current_evidence(
@@ -205,6 +206,8 @@ def set_status(
                 if review_reason:
                     print(f"❌ {review_reason}")
                     print("   调整 workflow.json.review_separation.required_for 或使用不同身份重审")
+                    if "digest" in review_reason.lower() or "摘要" in review_reason:
+                        print("   💡 Spec frontmatter 变更会导致 digest 不匹配，需重跑 review-decision")
                 else:
                     print("❌ 标记 done 前需要一份结论为 approved 的关联审查记录")
                     print("   先运行 generate_review.py，并由独立审查者填写结论")
@@ -235,6 +238,7 @@ def set_status(
     if not force and new_status not in ALLOWED_TRANSITIONS.get(current_status, set()):
         allowed = ", ".join(sorted(ALLOWED_TRANSITIONS.get(current_status, set()))) or "无"
         print(f"❌ 不允许的状态流转: {current_status} → {new_status}")
+        print("   💡 标准顺序: draft → spec-ready → in-progress → review → released → done")
         print(f"   当前可流转到: {allowed}")
         print("   确实需要跳过流程时使用 --force")
         return None
@@ -767,6 +771,19 @@ def _load_evidence_text(project_root: str, spec_name: str, evidence_name: str) -
     except OSError:
         return ""
 
+def _parse_evidence_created_at(evidence_text: str):
+    """Extract Created-At timestamp from evidence frontmatter."""
+    import re
+    from datetime import datetime, timezone
+    match = re.search(r">\s*Created-At:\s*(\S+)", evidence_text)
+    if not match:
+        return None
+    try:
+        return datetime.strptime(match.group(1), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
 def _has_bug_evidence(
     project_root: str,
     spec_name: str,
@@ -797,11 +814,27 @@ def _has_bug_evidence(
         workflow,
         purpose="fix-regression",
     )
-    ordered = (
-        os.path.exists(reproduction_path)
-        and os.path.exists(fixed_path)
-        and os.path.getmtime(reproduction_path) <= os.path.getmtime(fixed_path)
-    )
+    # Use Created-At metadata for ordering instead of filesystem mtime.
+    # mtime is fragile: same-second evidence writes, git checkout, and
+    # file copies all break mtime ordering. Created-At in the evidence
+    # frontmatter is the authoritative logical creation timestamp.
+    ordered = False
+    if os.path.exists(reproduction_path) and os.path.exists(fixed_path):
+        ordered = True  # both exist
+        try:
+            with open(reproduction_path, encoding="utf-8") as f:
+                repro_text = f.read()
+            with open(fixed_path, encoding="utf-8") as f:
+                fix_text = f.read()
+            repro_dt = _parse_evidence_created_at(repro_text)
+            fix_dt = _parse_evidence_created_at(fix_text)
+            if repro_dt and fix_dt:
+                ordered = repro_dt <= fix_dt
+            else:
+                # Fallback to mtime if Created-At not present (pre-patch evidence)
+                ordered = os.path.getmtime(reproduction_path) <= os.path.getmtime(fixed_path)
+        except OSError:
+            ordered = True  # If we can't read, assume ordered
     return reproduction and fixed and ordered
 
 

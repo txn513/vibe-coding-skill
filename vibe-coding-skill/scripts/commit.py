@@ -140,6 +140,7 @@ def commit(
     paths: list[str] | None = None,
     full_verify: bool = False,
     reviewed: bool = False,
+    no_verify: bool = False,
 ) -> int:
     """Run Rule 53 gate, then hand off to `git commit` if all clear.
 
@@ -402,7 +403,7 @@ def run(argv: list[str]) -> int:
         )
         return completed.returncode
 
-    return commit(project_root, git_args, staged_only=staged_only, paths=paths, full_verify=full_verify, reviewed=reviewed)
+    return commit(project_root, git_args, staged_only=staged_only, paths=paths, full_verify=full_verify, reviewed=reviewed, no_verify=no_verify)
 
 
 def main() -> None:

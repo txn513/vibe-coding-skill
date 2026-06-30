@@ -81,7 +81,16 @@ def record_evidence(
     if commands:
         outputs = []
         passed = True
-        for argv in commands:
+        for raw_argv in commands:
+            # Normalize: --command argparse.REMAINDER may pass the
+            # command as a single string instead of an argv list.
+            # command_digest() expects list[str]; without normalization
+            # the digest differs from the one computed during advance
+            # gate checks, causing "evidence exists but digest mismatch".
+            if isinstance(raw_argv, str):
+                argv = shlex.split(raw_argv)
+            else:
+                argv = list(raw_argv)
             command_digests.append(command_digest(argv))
             try:
                 completed = subprocess.run(
@@ -126,6 +135,7 @@ def record_evidence(
 > Commit: {git['commit']} | Snapshot: {git.get('snapshot', 'N/A')} | 工作区: {git['worktree']} | Actor: {actor or '未记录'} | Role: {role or '未记录'}
 > 记录: {now} | 规格状态: {status} | Exit: {','.join(exit_codes) or 'N/A'}
 > Command-Digests: {','.join(command_digests) or 'N/A'}
+> Created-At: {datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}
 
 ## 证据
 
