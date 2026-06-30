@@ -244,6 +244,11 @@ def main() -> None:
         help="Run verify_full (full test suite) instead of verify_scope. "
         "Use for the final commit in a batch to confirm complete integration.",
     )
+    commit_cmd.add_argument(
+        "--reviewed", action="store_true",
+        help="Declare that you have inspected the diff content (Rule 53 review gate). "
+        "Without this flag, vibe commit blocks at the review step.",
+    )
 
     policy_scan = sub.add_parser("policy-scan")
     policy_scan.add_argument("project_root")
@@ -469,6 +474,7 @@ def main() -> None:
         # appear inside `git_args`) are pulled out of sys.argv.
         no_verify = "--no-verify" in sys.argv
         full_verify = "--full-verify" in sys.argv
+        reviewed = "--reviewed" in sys.argv
         staged_only = getattr(args, "staged", False)
         paths = getattr(args, "paths", None) or []
         run_argv = [args.project_root, *args.git_args]
@@ -478,6 +484,8 @@ def main() -> None:
             run_argv = ["--paths", ",".join(paths), *run_argv]
         if full_verify:
             run_argv = ["--full-verify", *run_argv]
+        if reviewed:
+            run_argv = ["--reviewed", *run_argv]
         if no_verify:
             run_argv = ["--no-verify", *run_argv]
         raise SystemExit(commit.run(run_argv))

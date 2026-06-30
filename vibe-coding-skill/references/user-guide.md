@@ -183,7 +183,7 @@ vibe ui-redesign-contract <spec> --source-type opendesign --source-artifacts des
 - `vibe next` / `vibe status` 末尾会列出 `.agents/rules/` 里状态为 `proposed` 的规则（`<!-- vibe:proposed_rules: N -->`）——retro 沉淀后没人评审的规则会卡在这里；决定 `vibe rule-status <project> <stem> adopted` 还是 `abandoned`
 - 同上会列出 `> 状态: done|released` 但没写 retro 的 spec（`<!-- vibe:missing_retros: N -->`）——没 retro self_analyze 就看不到失败模式
 - 同上会列出 `> 状态: done|released` 但没生成 CHANGELOG 的 spec（`<!-- vibe:missing_changelogs: N -->`）
-- commit 必须用 `vibe commit -m "..."` 而不是裸 `git commit`：Skill 展示完整 diff（不只是 --stat），Agent 必须审查内容、发现问题、修复后再 commit；然后跑 verify 命令，全过才转交 git（Rule 53）
+- commit 必须用 `vibe commit --reviewed -m "..."` 而不是裸 `git commit`：Skill 展示完整 diff，Agent 必须审查内容、发现问题、修复后再 commit；不加 `--reviewed` 会被门禁阻止（Rule 53）
 - `vibe next`/`vibe status`/`vibe doctor` 的 warning 不是"仅供参考"，Agent 必须处理或显式推迟并记录原因（Rule 54）；忽略 warning 等于没看到
 - 审查（review）必须引用具体的 diff 观察、spec 条款或验收标准编号，"看起来没问题"不是有效审查（Rule 55）
 - bug spec 的"故意不改的相邻位置"应有保护性测试或显式声明"风险已知晓"，`vibe doctor` 会提醒缺失的（Rule 56）

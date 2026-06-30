@@ -550,6 +550,11 @@ artifacts merely because a template exists.
        full diff for quick orientation, but the stat alone is
        insufficient — file names and line counts cannot reveal
        logic errors, accidental deletions, or wrong variable names.
+       The Agent must pass `--reviewed` to declare that it has
+       inspected the diff content; without this flag, `vibe commit`
+       blocks at the review gate (exit 5). This prevents the
+       observed failure mode where the Agent sees the diff output
+       but skips reading it.
     2. **Verify** — run every command listed in
        `workflow.json.commands.verify`. If any command exits non-zero,
        the commit is aborted before a single byte reaches the project

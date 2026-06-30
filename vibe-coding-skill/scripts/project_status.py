@@ -475,7 +475,7 @@ def _apply_commit_prereq(
     if "commit" not in original_action.lower():
         recommendation = dict(recommendation)
         recommendation["action"] = f"先 commit 当前改动，再 {original_action}"
-    recommendation["action_command"] = 'vibe commit -m "<describe this batch>" && ' + cmd
+    recommendation["action_command"] = 'vibe commit --reviewed -m "<describe this batch>" && ' + cmd
     return recommendation
 
 
@@ -515,7 +515,7 @@ def _print_uncommitted_work_hint(project_root: str) -> None:
         print(f"   - {status} {path}")
     if count > 10:
         print(f"   ... 还有 {count - 10} 个")
-    print("   命令: `vibe commit -m '...'`  (Rule 53: 自动 review diff + 跑 verify)")
+    print("   命令: `vibe commit --reviewed -m '...'`  (Rule 53: 审查 diff + 跑 verify)")
     print("   批量提交: 中间 commit 用 `vibe commit --no-verify -m '...'`，最终 commit 用 `vibe commit --full-verify -m '...'`")
     # Rule 50: machine-readable marker
     print(f"<!-- vibe:uncommitted_work: {count} files -->")
@@ -1389,16 +1389,16 @@ def _print_plan_progress_commit_hint(
     # multiple logical units into one commit.
     if total_done <= 1 or dirty_count <= 2:
         suggestion = (
-            '   命令: `vibe commit -m "<describe this task batch>"`'
+            '   命令: `vibe commit --reviewed -m "<describe this task batch>"`'
             '   (如已配置 verify_scope，自动跑快速验证；否则跑全量 verify)'
         )
     else:
         suggestion = (
-            '   命令: `git add <本 task 涉及的文件> && vibe commit -m "<describe this task batch>"`\n'
+            '   命令: `git add <本 task 涉及的文件> && vibe commit --reviewed -m "<describe this task batch>"`\n'
             '   多 task / 多文件已 dirty：用 `git add <paths>` 精细 stage，'
-            '再 `vibe commit --staged`，让每个 commit 对应一个逻辑单元。'
-            '   批量模式下：中间 commit `vibe commit --staged --no-verify`，'
-            '最终 commit `vibe commit --full-verify` 跑全量验证。'
+            '再 `vibe commit --staged --reviewed`，让每个 commit 对应一个逻辑单元。'
+            '   批量模式下：中间 commit `vibe commit --staged --no-verify -m "task N"`，'
+            '最终 commit `vibe commit --full-verify --reviewed -m "batch done"` 跑全量验证。'
         )
     print()
     print(

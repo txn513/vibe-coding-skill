@@ -4781,7 +4781,7 @@ class PreCommitGateTests(unittest.TestCase):
         """vibe commit must refuse when workflow.json has no verify command."""
         import commit
         self._add_change()
-        rc = commit.commit(str(self.project), ["-m", "no verify cmd"])
+        rc = commit.commit(str(self.project), ["-m", "no verify cmd"], reviewed=True)
         self.assertEqual(rc, 4)
 
     def test_fails_when_no_changes(self) -> None:
@@ -4802,7 +4802,7 @@ class PreCommitGateTests(unittest.TestCase):
             ["git", "commit", "-q", "-m", "config"],
             cwd=str(self.project), check=True,
         )
-        rc = commit.commit(str(self.project), ["-m", "empty"])
+        rc = commit.commit(str(self.project), ["-m", "empty"], reviewed=True)
         self.assertEqual(rc, 2)
 
     def test_fails_when_verify_command_fails(self) -> None:
@@ -4817,7 +4817,7 @@ class PreCommitGateTests(unittest.TestCase):
             workflow,
         )
         self._add_change()
-        rc = commit.commit(str(self.project), ["-m", "should fail"])
+        rc = commit.commit(str(self.project), ["-m", "should fail"], reviewed=True)
         self.assertEqual(rc, 3)
 
     def test_succeeds_when_verify_passes(self) -> None:
@@ -4832,7 +4832,7 @@ class PreCommitGateTests(unittest.TestCase):
             workflow,
         )
         self._add_change()
-        rc = commit.commit(str(self.project), ["-m", "feat: add new.txt"])
+        rc = commit.commit(str(self.project), ["-m", "feat: add new.txt"], reviewed=True)
         self.assertEqual(rc, 0)
         # Confirm commit actually landed
         import subprocess
@@ -5768,7 +5768,7 @@ class SplitCommitTests(unittest.TestCase):
             (self.project / f).write_text(f"x {f}", encoding="utf-8")
         import commit as commit_mod
         rc = commit_mod.run(
-            [str(self.project), "--paths", "a.py,b.py", "-m", "task 1"]
+            ["--reviewed", str(self.project), "--paths", "a.py,b.py", "-m", "task 1"]
         )
         self.assertEqual(rc, 0)
         commits = self._git_log_files()
@@ -5784,7 +5784,7 @@ class SplitCommitTests(unittest.TestCase):
         import subprocess, commit as commit_mod
         subprocess.run(["git", "add", "c.py", "d.py"], cwd=str(self.project), check=True)
         rc = commit_mod.run(
-            [str(self.project), "--staged", "-m", "task 2"]
+            ["--reviewed", str(self.project), "--staged", "-m", "task 2"]
         )
         self.assertEqual(rc, 0)
         commits = self._git_log_files()
@@ -5797,7 +5797,7 @@ class SplitCommitTests(unittest.TestCase):
         for f in ["a.py", "b.py"]:
             (self.project / f).write_text(f"x {f}", encoding="utf-8")
         import commit as commit_mod
-        rc = commit_mod.run([str(self.project), "-m", "all in one"])
+        rc = commit_mod.run(["--reviewed", str(self.project), "-m", "all in one"])
         self.assertEqual(rc, 0)
         commits = self._git_log_files()
         msg, files = commits[0]
@@ -5811,7 +5811,7 @@ class SplitCommitTests(unittest.TestCase):
         import subprocess, commit as commit_mod
         # Pre-stage a.py only — agent is signalling "I want just this".
         subprocess.run(["git", "add", "a.py"], cwd=str(self.project), check=True)
-        rc = commit_mod.run([str(self.project), "-m", "single staged"])
+        rc = commit_mod.run(["--reviewed", str(self.project), "-m", "single staged"])
         self.assertEqual(rc, 0)
         commits = self._git_log_files()
         msg, files = commits[0]
@@ -5827,7 +5827,7 @@ class SplitCommitTests(unittest.TestCase):
         subprocess.run(["git", "add", "a.py"], cwd=str(self.project), check=True)
         # Now --paths b.py,c.py — should ignore the previously staged a.py
         rc = commit_mod.run(
-            [str(self.project), "--paths", "b.py,c.py", "-m", "explicit only"]
+            ["--reviewed", str(self.project), "--paths", "b.py,c.py", "-m", "explicit only"]
         )
         self.assertEqual(rc, 0)
         commits = self._git_log_files()
@@ -5884,14 +5884,14 @@ class VerifyScopeTests(unittest.TestCase):
         """When verify_scope is configured, `vibe commit` uses it (fast path)."""
         (self.project / "a.py").write_text("x", encoding="utf-8")
         import commit as commit_mod
-        rc = commit_mod.run([str(self.project), "-m", "scoped"])
+        rc = commit_mod.run(["--reviewed", str(self.project), "-m", "scoped"])
         self.assertEqual(rc, 0)
 
     def test_full_verify_flag_uses_verify_full(self) -> None:
         """--full-verify selects verify_full tier, not verify_scope."""
         (self.project / "a.py").write_text("x", encoding="utf-8")
         import commit as commit_mod
-        rc = commit_mod.run([str(self.project), "--full-verify", "-m", "full"])
+        rc = commit_mod.run(["--reviewed", str(self.project), "--full-verify", "-m", "full"])
         self.assertEqual(rc, 0)
 
     def test_full_verify_falls_back_to_verify(self) -> None:
@@ -5902,7 +5902,7 @@ class VerifyScopeTests(unittest.TestCase):
         wf["commands"]["verify_full"] = []  # not configured
         wf_path.write_text(json.dumps(wf))
         import commit as commit_mod
-        rc = commit_mod.run([str(self.project), "--full-verify", "-m", "full fallback"])
+        rc = commit_mod.run(["--reviewed", str(self.project), "--full-verify", "-m", "full fallback"])
         self.assertEqual(rc, 0)
 
     def test_no_verify_configured_at_all(self) -> None:
@@ -5915,7 +5915,7 @@ class VerifyScopeTests(unittest.TestCase):
         wf["commands"]["verify_full"] = []
         wf_path.write_text(json.dumps(wf))
         import commit as commit_mod
-        rc = commit_mod.run([str(self.project), "-m", "no verify"])
+        rc = commit_mod.run(["--reviewed", str(self.project), "-m", "no verify"])
         self.assertEqual(rc, 4)
 
     def test_workflow_state_schema_includes_new_phases(self) -> None:

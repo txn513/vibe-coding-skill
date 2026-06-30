@@ -139,6 +139,7 @@ def commit(
     staged_only: bool = False,
     paths: list[str] | None = None,
     full_verify: bool = False,
+    reviewed: bool = False,
 ) -> int:
     """Run Rule 53 gate, then hand off to `git commit` if all clear.
 
@@ -215,7 +216,31 @@ def commit(
         print("📝 完整 diff:")
         print(full_diff)
         print()
+    # Rule 53 review declaration gate: Agent must confirm it
+    # inspected the diff content. This is a structural forcing
+    # function — the Agent must output a review summary before
+    # the commit can proceed. Without this, the Agent sees the
+    # diff but skips reading it (observed failure mode: 112 files
+    # committed without review because "diff was shown but not
+    # inspected").
+    #
+    # The --reviewed flag is the Agent's explicit declaration:
+    # "I read the diff, here is what I found." Without it, the
+    # commit is blocked at the review gate.
     print("<!-- vibe:commit_review: diff_shown -->")
+    print("🔒 Review 声明门禁 (Rule 53):")
+    print("   Agent 必须确认已逐文件审查 diff 内容。")
+    print("   加 --reviewed 标志声明审查完成，否则 commit 被阻止。")
+    print("   审查要点: 意外修改 / 范围蔓延 / 回归 / 空文件 / 配置泄露")
+    print("<!-- vibe:commit_review_gate: pending -->")
+    if not reviewed and not no_verify:
+        print()
+        print("❌ Review 声明未提供 — commit 被阻止 (Rule 53)。")
+        print("   你已看到完整 diff，但未声明审查完成。")
+        print("   加 --reviewed 标志确认你已逐文件审查 diff 内容：")
+        print("     vibe commit --reviewed -m '...'")
+        print("   或跳过整个门禁（不推荐）: vibe commit --no-verify -m '...'")
+        return 5
     untracked = _list_untracked(project_root)
     if untracked:
         print()
@@ -317,6 +342,7 @@ def run(argv: list[str]) -> int:
     no_verify = False
     staged_only = False
     full_verify = False
+    reviewed = False
     paths: list[str] = []
     cleaned: list[str] = []
     i = 0
@@ -328,6 +354,10 @@ def run(argv: list[str]) -> int:
             continue
         if a == "--staged":
             staged_only = True
+            i += 1
+            continue
+        if a == "--reviewed":
+            reviewed = True
             i += 1
             continue
         if a == "--full-verify":
@@ -349,7 +379,7 @@ def run(argv: list[str]) -> int:
     argv = cleaned
     if not argv:
         print("Usage: vibe commit <project_root> [--staged | --paths p1,p2] "
-              "[--no-verify] [--full-verify] [git commit args...]")
+              "[--no-verify] [--full-verify] [--reviewed] [git commit args...]")
         return 2
     project_root = argv[0]
     git_args = argv[1:]
@@ -370,7 +400,7 @@ def run(argv: list[str]) -> int:
         )
         return completed.returncode
 
-    return commit(project_root, git_args, staged_only=staged_only, paths=paths, full_verify=full_verify)
+    return commit(project_root, git_args, staged_only=staged_only, paths=paths, full_verify=full_verify, reviewed=reviewed)
 
 
 def main() -> None:
