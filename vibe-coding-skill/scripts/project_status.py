@@ -479,15 +479,39 @@ def _apply_commit_prereq(
     return recommendation
 
 
-def _print_uncommitted_work_hint(project_root: str) -> None:
-    """Low-priority advisory: worktree has uncommitted changes.
+def _print_raw_commit_warning(project_root: str) -> None:
+    """Lightweight Rule 53 check: recent commits missing Vibe-Commit trailer."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["git", "log", "--no-merges", "-5", "--format=%h%n%B---END---"],
+            cwd=project_root, capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode != 0:
+            return
+        entries = result.stdout.split("---END---")
+        raw_shas = []
+        for entry in entries:
+            entry_lines = entry.strip().splitlines()
+            if not entry_lines:
+                continue
+            sha = entry_lines[0]
+            body = "\n".join(entry_lines[1:])
+            if "Vibe-Commit:" not in body:
+                raw_shas.append(sha)
+        if raw_shas:
+            print()
+            print(
+                f"⚠️  最近 {len(raw_shas)} 个 commit 缺 Vibe-Commit trailer "
+                f"(可能绕过 vibe commit, Rule 53): {', '.join(raw_shas)}"
+            )
+            print("   以后用 `vibe commit --reviewed` 代替 raw `git commit`")
+    except (OSError, subprocess.TimeoutExpired):
+        return
 
-    Follows the same pattern as _print_stale_archive_hint and
-    _print_version_drift_hint: silent when irrelevant, advisory +
-    Rule 50 marker when relevant. Tells the agent there is work
-    ready to commit and steers it toward `vibe commit` (Rule 53
-    pre-commit gate) rather than raw `git commit`.
-    """
+
+def _print_uncommitted_work_hint(project_root: str) -> None:
+    """Low-priority advisory: worktree has uncommitted changes + raw commit check."""
     if not os.path.isdir(os.path.join(project_root, ".agents")):
         return
     import subprocess
@@ -519,6 +543,8 @@ def _print_uncommitted_work_hint(project_root: str) -> None:
     print("   批量提交: 中间 commit 用 `vibe commit --no-verify -m '...'`，最终 commit 用 `vibe commit --full-verify -m '...'`")
     # Rule 50: machine-readable marker
     print(f"<!-- vibe:uncommitted_work: {count} files -->")
+    # Also check recent commits for raw git commit bypass (Rule 53 trailer)
+    _print_raw_commit_warning(project_root)
 
 
 def _print_stage_stall_warnings(project_root: str, specs: list[dict] | None = None) -> None:
