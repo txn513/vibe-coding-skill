@@ -163,6 +163,7 @@ def project_status(project_root: str) -> None:
     _print_missing_retro_hint(project_root)
     _print_missing_changelog_hint(project_root)
     _print_uncommitted_work_hint(project_root)
+    _print_git_context_hint(project_root)
     _print_all_clean_signal(project_root, specs)
     # Rule 50: machine-readable status summary.
     spec_count = len(specs)
@@ -198,6 +199,7 @@ def project_next(project_root: str) -> dict:
     _print_missing_retro_hint(project_root)
     _print_missing_changelog_hint(project_root)
     _print_uncommitted_work_hint(project_root)
+    _print_git_context_hint(project_root)
     _print_all_clean_signal(project_root, specs)
     return recommendation
 
@@ -1845,6 +1847,61 @@ def print_ac_coverage(coverage: dict) -> None:
     if coverage["evidence_path"]:
         rel = os.path.relpath(coverage["evidence_path"])
         print(f"   证据: {rel}")
+
+
+def _print_git_context_hint(project_root: str) -> None:
+    """Show git branch, unpushed commits, and merge conflict status.
+
+    Agent commonly needs this but doesn't know to ask:
+    - Which branch am I on? (avoid editing wrong branch)
+    - Are there unpushed commits? (other agents can't see them)
+    - Are there merge conflicts? (need resolution before continuing)
+    """
+    import subprocess
+    if not os.path.isdir(os.path.join(project_root, ".agents")):
+        return
+    parts = []
+    try:
+        # Current branch
+        branch = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=project_root, capture_output=True, text=True, timeout=5,
+        )
+        if branch.returncode == 0 and branch.stdout.strip():
+            parts.append(f"分支: {branch.stdout.strip()}")
+
+        # Unpushed commits
+        unpushed = subprocess.run(
+            ["git", "log", "--oneline", "@{u}..HEAD"],
+            cwd=project_root, capture_output=True, text=True, timeout=5,
+        )
+        if unpushed.returncode == 0 and unpushed.stdout.strip():
+            count = len(unpushed.stdout.strip().splitlines())
+            parts.append(f"{count} 个本地 commit 未推送")
+
+        # Merge conflicts
+        conflicts = subprocess.run(
+            ["git", "diff", "--name-only", "--diff-filter=U"],
+            cwd=project_root, capture_output=True, text=True, timeout=5,
+        )
+        if conflicts.returncode == 0 and conflicts.stdout.strip():
+            conflict_files = [f.strip() for f in conflicts.stdout.strip().splitlines() if f.strip()]
+            if conflict_files:
+                parts.append(f"⚠️ {len(conflict_files)} 个合并冲突文件")
+
+        # Verify command configured?
+        from workflow_state import ensure_workflow, configured_commands
+        workflow, _ = ensure_workflow(project_root)
+        verify_cmds = configured_commands(workflow, "verify")
+        if not verify_cmds:
+            parts.append("❌ 未配置 verify 命令 (Rule 53)")
+
+    except (OSError, subprocess.TimeoutExpired):
+        return
+
+    if parts:
+        print()
+        print("🔀 Git 上下文: " + " | ".join(parts))
 
 
 def _print_all_clean_signal(project_root: str, specs: list) -> None:
