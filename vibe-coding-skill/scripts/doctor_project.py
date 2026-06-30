@@ -164,6 +164,43 @@ def _audit_read_path_impact(spec_name: str, content: str, warnings: list[str]) -
         )
 
 
+def _audit_raw_git_commits(project_root: str, warnings: list[str]) -> None:
+    """Rule 53: detect recent commits that bypassed vibe commit.
+
+    vibe commit adds a 'Vibe-Commit: yes' trailer to every commit it
+    creates. Commits without this trailer were likely created with
+    raw `git commit`, bypassing the review + verify gate.
+    """
+    try:
+        import subprocess
+        # Check last 10 commits
+        result = subprocess.run(
+            ["git", "log", "--no-merges", "-10", "--format=%H%n%B---END---"],
+            cwd=project_root, capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode != 0:
+            return
+        entries = result.stdout.split("---END---")
+        raw_commits = []
+        for entry in entries:
+            lines = entry.strip().splitlines()
+            if not lines:
+                continue
+            sha = lines[0][:12]
+            body = "\n".join(lines[1:])
+            if "Vibe-Commit:" not in body:
+                # Skip the very first commit (init) which predates vibe commit
+                raw_commits.append(sha)
+        if raw_commits:
+            warnings.append(
+                f"最近 {len(raw_commits)} 个 commit 缺少 Vibe-Commit trailer (Rule 53): "
+                f"这些 commit 可能用 raw `git commit` 提交，绕过了 review + verify gate。"
+                f"  SHA: {', '.join(raw_commits[:5])}"
+            )
+    except (OSError, subprocess.TimeoutExpired):
+        return
+
+
 def doctor(project_root: str) -> dict:
     workflow, migrated = ensure_workflow(project_root)
     issues = []
@@ -195,6 +232,7 @@ def doctor(project_root: str) -> dict:
             issues.append(f"workflow commands.{phase} contains invalid commands")
     for cycle in dependency_cycles(project_root):
         issues.append(f"dependency cycle: {' -> '.join(cycle)}")
+    _audit_raw_git_commits(project_root, warnings)
     _audit_policy_sources(Path(project_root), issues, warnings)
     _audit_context_freshness(Path(project_root), warnings)
     _audit_retro_gap_candidates(project_root, warnings)

@@ -1,6 +1,6 @@
 ---
 name: vibe-coding
-description: Vibe Coding project-governance skill covering discovery through retirement. Use when the user describes an idea, change, defect, refactor, delivery problem, or project status question and Codex should translate it into the appropriate workflow; initialize or onboard projects; create and validate intents, designs, specs, plans, prompts, reviews, evidence, releases, changelogs, and retros; enforce risk-, role-, dependency-, Git-, and version-aware gates; migrate workflow schemas; diagnose integrity; summarize multiple projects; or evolve project-local guidance without adding project-specific knowledge to the skill.
+description: Vibe Coding project-governance skill covering discovery through retirement. Every git commit must use vibe commit (Rule 53 — mandatory review + verify gate). Use when the user describes an idea, change, defect, refactor, delivery problem, or project status question and Codex should translate it into the appropriate workflow; initialize or onboard projects; create and validate intents, designs, specs, plans, prompts, reviews, evidence, releases, changelogs, and retros; enforce risk-, role-, dependency-, Git-, and version-aware gates; migrate workflow schemas; diagnose integrity; summarize multiple projects; or evolve project-local guidance without adding project-specific knowledge to the skill.
 ---
 
 # Vibe Coding

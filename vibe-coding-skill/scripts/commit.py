@@ -329,9 +329,12 @@ def commit(
         print("   修复失败后重跑 `vibe commit`；或临时绕过：`vibe commit --no-verify`")
         return 3
 
-    # 3. Commit — hand off to git
+    # 3. Commit — hand off to git, with Rule 53 trailer
+    # Adding a git trailer so doctor can detect commits that bypassed
+    # vibe commit (raw `git commit` won't have this trailer).
     print("✅ Verify 全通过，转交 git commit")
-    completed = subprocess.run(["git", "commit", *commit_argv], cwd=project_root)
+    trailer_argv = ["git", "commit", *commit_argv, "--trailer", "Vibe-Commit=yes"]
+    completed = subprocess.run(trailer_argv, cwd=project_root)
     return completed.returncode
 
 
