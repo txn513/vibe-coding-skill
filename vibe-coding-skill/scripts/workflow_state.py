@@ -190,14 +190,21 @@ def spec_metadata(content: str) -> dict:
     import re
 
     def field(name: str, default: str = "") -> str:
-        match = re.search(rf"^>\s*{re.escape(name)}:\s*(.+)$", content, re.MULTILINE)
-        return match.group(1).strip() if match else default
+        # Take first token only, filtering out parenthetical annotations
+        # e.g. "> 风险: low（CSS 修复）" → "low", not "low（CSS 修复）"
+        match = re.search(rf"^>\s*{re.escape(name)}:\s*(\S+)", content, re.MULTILINE)
+        return match.group(1).strip().rstrip("*").rstrip(":") if match else default
 
-    dependencies = [
-        item.strip()
-        for item in field("依赖", "无").replace("，", ",").split(",")
-        if item.strip() and item.strip() != "无"
-    ]
+    dependencies = []
+    for item in field("依赖", "无").replace("，", ",").split(","):
+        item = item.strip()
+        if not item or item == "无":
+            continue
+        # Trim parenthetical status annotations: "foo (done)" → "foo"
+        m = re.match(r"^(\S+?)\s*[（(].*$", item)
+        if m:
+            item = m.group(1)
+        dependencies.append(item)
     return {
         "risk": field("风险", "medium"),
         "risk_confirmation": field("风险确认", "confirmed"),

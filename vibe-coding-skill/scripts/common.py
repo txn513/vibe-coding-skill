@@ -63,7 +63,12 @@ def command_digest(command: list[str]) -> str:
 def project_rule_status(content: str) -> str:
     """Return a project rule lifecycle state; legacy rules are adopted."""
     match = re.search(r"^>.*\b状态:\s*(\S+)", content, re.MULTILINE)
-    return match.group(1).strip() if match else "adopted"
+    if not match:
+        return "adopted"
+    status = match.group(1).strip()
+    # Trim parenthetical annotations: "adopted（2026-06-26 升级）" → "adopted"
+    m = re.match(r"^(\S+?)(?:[（(].*)?$", status)
+    return m.group(1) if m else status
 
 
 def adopted_project_rule_paths(project_root: str | Path) -> list[Path]:

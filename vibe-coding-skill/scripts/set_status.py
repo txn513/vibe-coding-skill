@@ -687,7 +687,7 @@ def _untagged_out_of_scope_items(spec_content: str) -> list[str]:
         return []
     invalid = []
     tag_pattern = re.compile(
-        r"^\s*[-*]\s+\[(?:included|abandoned|follow-up:\s*[A-Za-z0-9_.-]+)\]\s+\S",
+        r"^\s*[-*]\s+\[(?:included|abandoned|follow-up:\s*[A-Za-z0-9_.-]+)\](?=\s|[\u4e00-\u9fff]|$)",
         re.IGNORECASE,
     )
     for line in section.splitlines():
