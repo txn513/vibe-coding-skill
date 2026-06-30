@@ -196,6 +196,19 @@ def commit(
     if stat and stat != "(no tracked changes)":
         print("📊 改动概览:")
         print(stat)
+        # Commit granularity advisory: if too many files changed in
+        # one commit, suggest splitting into logical units. This is
+        # the most common failure mode when "vibe upgrade" or bulk
+        # edits dump everything into a single commit — 112 files in
+        # one "chore: vibe upgrade" commit makes rollback impossible.
+        file_count = len([line for line in stat.splitlines() if line.strip() and "|" in line])
+        if file_count > 20:
+            print()
+            print(f"⚠️  {file_count} 个文件变更 — 建议拆分为多个逻辑 commit (Rule 53):")
+            print("   拆分方式: `git add <本逻辑单元涉及的文件> && vibe commit --staged -m '...'`")
+            print("   或: `vibe commit --paths a.py,b.py -m '...'`")
+            print("   好处: 回滚精确、review 清晰、每个 commit 对应一个意图")
+            print("<!-- vibe:commit_granularity: large_diff -->")
         print()
     full_diff = _git_diff_full(project_root)
     if full_diff and full_diff != "(no tracked changes)":
