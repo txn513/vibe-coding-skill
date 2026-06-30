@@ -550,11 +550,16 @@ artifacts merely because a template exists.
        full diff for quick orientation, but the stat alone is
        insufficient — file names and line counts cannot reveal
        logic errors, accidental deletions, or wrong variable names.
-       The Agent must pass `--reviewed` to declare that it has
-       inspected the diff content; without this flag, `vibe commit`
-       blocks at the review gate (exit 5). This prevents the
-       observed failure mode where the Agent sees the diff output
-       but skips reading it.
+       The commit process enforces a mandatory two-step review:
+       (1) `vibe commit` shows the full diff and then stops (exit 5),
+       forcing the Agent to read the diff before proceeding.
+       (2) `vibe commit --reviewed` runs verify and commits, but
+       only after the Agent has seen the diff in step 1. The Agent
+       must not combine these into a single step — `vibe commit
+       --reviewed` without a prior review step is a policy violation.
+       This two-step design prevents the observed failure mode where
+       the Agent adds `--reviewed` upfront and never actually reads
+       the diff.
     2. **Verify** — run every command listed in
        `workflow.json.commands.verify`. If any command exits non-zero,
        the commit is aborted before a single byte reaches the project

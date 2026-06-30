@@ -235,11 +235,13 @@ def commit(
     print("<!-- vibe:commit_review_gate: pending -->")
     if not reviewed and not no_verify:
         print()
-        print("❌ Review 声明未提供 — commit 被阻止 (Rule 53)。")
-        print("   你已看到完整 diff，但未声明审查完成。")
-        print("   加 --reviewed 标志确认你已逐文件审查 diff 内容：")
-        print("     vibe commit --reviewed -m '...'")
-        print("   或跳过整个门禁（不推荐）: vibe commit --no-verify -m '...'")
+        print("🔒 Review 门禁 — diff 已展示，请审查后重新提交 (Rule 53)。")
+        print("   这是强制两步操作：")
+        print("     第 1 步: vibe commit（你现在在这步 — 看完 diff 后退出）")
+        print("     第 2 步: vibe commit --reviewed（确认审查完成，跑 verify + 提交）")
+        print("   审查要点: 意外修改 / 范围蔓延 / 回归 / 空文件 / 配置泄露")
+        print("   如果发现问题: 先修复，再从第 1 步重新开始。")
+        print("<!-- vibe:commit_review: blocked_pending_review -->")
         return 5
     untracked = _list_untracked(project_root)
     if untracked:
