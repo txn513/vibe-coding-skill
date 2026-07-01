@@ -346,22 +346,42 @@ def commit(
                 "   临时绕过: `vibe commit --no-verify`"
             )
             return 4
-    all_passed = True
-    for idx, argv in enumerate(commands_to_run, 1):
-        print(f"   [{idx}/{len(commands_to_run)}] {' '.join(argv)}")
-        rc, out, err = _run(argv, project_root)
-        if rc != 0:
-            all_passed = False
-            print(f"   ❌ 失败 (exit {rc})")
-            if out.strip():
-                print("   --- stdout ---")
-                print(out.rstrip())
-            if err.strip():
-                print("   --- stderr ---")
-                print(err.rstrip())
-            break
-        print(f"   ✅ 通过")
-    print()
+    # Wrap verify in try/except to catch unexpected exceptions
+    # (e.g. regex bugs in verify commands) and fail-open with warning.
+    verify_exception = None
+    try:
+        all_passed = True
+        for idx, argv in enumerate(commands_to_run, 1):
+            print(f"   [{idx}/{len(commands_to_run)}] {' '.join(argv)}")
+            rc, out, err = _run(argv, project_root)
+            if rc != 0:
+                all_passed = False
+                print(f"   ❌ 失败 (exit {rc})")
+                if out.strip():
+                    print("   --- stdout ---")
+                    print(out.rstrip())
+                if err.strip():
+                    print("   --- stderr ---")
+                    print(err.rstrip())
+                break
+            print(f"   ✅ 通过")
+        print()
+    except re.error as e:
+        # Regex bug in verify — fail-open with warning
+        print(f"⚠️  verify 阶段 regex 解析失败，自动 fail-open (Rule 53):")
+        print(f"   {type(e).__name__}: {e}")
+        print(f"   请检查 verify 命令中的正则表达式。")
+        print()
+        all_passed = True
+        verify_exception = e
+    except Exception as e:
+        # Unknown exception — fail-open with warning
+        print(f"⚠️  verify 阶段异常，自动 fail-open (Rule 53):")
+        print(f"   {type(e).__name__}: {e}")
+        print(f"   请检查 verify 命令配置。")
+        print()
+        all_passed = True
+        verify_exception = e
 
     if not all_passed:
         print("❌ Verify 失败 — 取消本次 commit (Rule 53)。")
@@ -376,6 +396,8 @@ def commit(
     print("✅ Verify 全通过，转交 git commit")
     trailer_key = "quick" if quick else "yes"
     trailer_argv = ["git", "commit", *commit_argv, "--trailer", f"Vibe-Commit={trailer_key}"]
+    if verify_exception:
+        trailer_argv.extend(["--trailer", f"Verify-Crash={type(verify_exception).__name__}"])
     completed = subprocess.run(trailer_argv, cwd=project_root)
     return completed.returncode
 
