@@ -4990,6 +4990,53 @@ class SkillUpgradeCommandTests(unittest.TestCase):
         self.assertIn("已配置", out)
         self.assertIn("pytest -x", out)
 
+    def test_version_drift_warning_when_version_stale(self) -> None:
+        """`_check_version_drift` must return a warning when VERSION is stale.
+
+        Simulates the bug where the Skill maintainer forgot to bump
+        VERSION after adding new rules: working-tree VERSION still
+        references an old commit, but Skill HEAD has moved on.
+        """
+        import upgrade
+        import os
+        skill_dir = os.path.dirname(os.path.dirname(os.path.abspath(upgrade.__file__)))
+        version_path = os.path.join(skill_dir, "VERSION")
+        original = open(version_path, encoding="utf-8").read()
+        try:
+            with open(version_path, "w", encoding="utf-8") as f:
+                f.write("stale00-old-bump\n")
+            warning = upgrade._check_version_drift(skill_dir)
+            self.assertIsNotNone(warning)
+            self.assertIn("VERSION drift", warning)
+            self.assertIn("stale00", warning)
+        finally:
+            with open(version_path, "w", encoding="utf-8") as f:
+                f.write(original)
+
+    def test_version_drift_silent_when_version_aligned(self) -> None:
+        """`_check_version_drift` must return None when VERSION matches HEAD."""
+        import upgrade
+        import os
+        import subprocess
+        skill_dir = os.path.dirname(os.path.dirname(os.path.abspath(upgrade.__file__)))
+        version_path = os.path.join(skill_dir, "VERSION")
+        original = open(version_path, encoding="utf-8").read()
+        try:
+            git_root = skill_dir
+            while git_root != "/" and not os.path.isdir(os.path.join(git_root, ".git")):
+                git_root = os.path.dirname(git_root)
+            head_result = subprocess.run(
+                ["git", "log", "-1", "--format=%H"],
+                cwd=git_root, capture_output=True, text=True,
+            )
+            head_short7 = head_result.stdout.strip()[:7]
+            with open(version_path, "w", encoding="utf-8") as f:
+                f.write(f"{head_short7}-aligned-test\n")
+            self.assertIsNone(upgrade._check_version_drift(skill_dir))
+        finally:
+            with open(version_path, "w", encoding="utf-8") as f:
+                f.write(original)
+
 
 
 

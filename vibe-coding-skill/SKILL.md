@@ -534,6 +534,18 @@ artifacts merely because a template exists.
     Rule 52 narrows the gap from "blind" to "visible" within the
     Skill's authority.
 
+    **Rule 52.1 — Maintainer-side VERSION drift check**: `vibe
+    doctor` and `vibe upgrade` MUST also detect the inverse
+    failure mode: the Skill maintainer forgot to bump `VERSION` in
+    the latest commit, leaving downstream projects' version-drift
+    checks blind to the new rules. The check compares the
+    working-tree `VERSION` string against the Skill's git `HEAD`
+    short hash (VERSION convention: starts with `<7-char-hash>-`).
+    If they do not match, a warning is emitted. This was added
+    after observing the maintainer ship 9 commits without bumping
+    `VERSION`, causing every downstream `vibe doctor` to falsely
+    report "version is up to date".
+
 53. **Pre-commit verification gate**: Every `git commit` must be wrapped
     in the `vibe commit` wrapper, not invoked as raw `git commit`.
     The wrapper enforces three discipline steps that agents otherwise
