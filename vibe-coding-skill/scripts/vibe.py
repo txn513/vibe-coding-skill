@@ -249,6 +249,11 @@ def main() -> None:
         help="Declare that you have inspected the diff content (Rule 53 review gate). "
         "Without this flag, vibe commit blocks at the review step.",
     )
+    commit_cmd.add_argument(
+        "--quick", action="store_true",
+        help="Skip review gate for docs-only or low-risk commits. "
+        "Still runs verify. Trailer becomes Vibe-Commit: quick.",
+    )
 
     policy_scan = sub.add_parser("policy-scan")
     policy_scan.add_argument("project_root")
@@ -475,6 +480,7 @@ def main() -> None:
         no_verify = "--no-verify" in sys.argv
         full_verify = "--full-verify" in sys.argv
         reviewed = "--reviewed" in sys.argv
+        quick = "--quick" in sys.argv
         staged_only = getattr(args, "staged", False)
         paths = getattr(args, "paths", None) or []
         run_argv = [args.project_root, *args.git_args]
@@ -486,6 +492,8 @@ def main() -> None:
             run_argv = ["--full-verify", *run_argv]
         if reviewed:
             run_argv = ["--reviewed", *run_argv]
+        if quick:
+            run_argv = ["--quick", *run_argv]
         if no_verify:
             run_argv = ["--no-verify", *run_argv]
         raise SystemExit(commit.run(run_argv))

@@ -560,6 +560,14 @@ artifacts merely because a template exists.
        This two-step design prevents the observed failure mode where
        the Agent adds `--reviewed` upfront and never actually reads
        the diff.
+       
+       Before the review gate, the wrapper runs an advisory
+       evidence-grep pass that highlights sensitive patterns in the
+       diff (emit/write/INSERT/UPDATE/DELETE/fetch POST/json.dumps).
+       These patterns commonly hide "test passes but data semantics
+       are wrong" bugs. The grep is non-blocking — it just prints
+       a risk summary so the Agent knows where to focus attention
+       during review.
     2. **Verify** — run every command listed in
        `workflow.json.commands.verify`. If any command exits non-zero,
        the commit is aborted before a single byte reaches the project
@@ -571,6 +579,12 @@ artifacts merely because a template exists.
        longer match the worktree.
     3. **Commit** — only if both pass, hand off to `git commit` with
        the user's argv unchanged.
+
+    `--quick` escape hatch: for docs-only or low-risk chore commits,
+    `vibe commit --quick` skips the review gate but still runs verify.
+    The commit trailer becomes `Vibe-Commit: quick` so doctor can
+    distinguish quick commits from normal ones. This is the honest
+    escape hatch — it does not hide that the gate was skipped.
 
     Failure modes the gate is designed to catch (all observed in
     real projects):

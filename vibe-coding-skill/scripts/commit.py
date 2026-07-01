@@ -36,6 +36,39 @@ from workflow_state import (
 )
 
 
+def _print_evidence_grep(project_root: str, diff_text: str) -> None:
+    """Highlight sensitive patterns in the diff for Agent attention.
+
+    Grep for patterns that commonly hide data-semantic bugs:
+    emit/write/INSERT/DELETE/UPDATE that change data shapes.
+    This is advisory (not blocking), just highlights risk areas.
+    """
+    if not diff_text or diff_text == "(no tracked changes)":
+        return
+    import re
+    # Patterns that change data shape — these are the most common
+    # hiding spots for "test passes but data semantics are wrong" bugs
+    patterns = {
+        "emit/emit": "事件发射（字段名/值是否跟 schema 一致？）",
+        "write": "写入调用（写入的数据结构是否跟下游期望一致？）",
+        "INSERT": "SQL INSERT（列名/值是否跟表定义一致？）",
+        "UPDATE": "SQL UPDATE（更新字段是否正确？是否遗漏了关联字段？）",
+        "DELETE": "SQL DELETE / 删除操作（是否有级联影响？）",
+        "fetch": "POST 请求（请求体字段是否跟 API 接口一致？）",
+        "json.dumps": "JSON 序列化（键名是否跟消费端期望一致？）",
+    }
+    hits = {}
+    for pattern, hint in patterns.items():
+        matches = re.findall(re.escape(pattern), diff_text, re.IGNORECASE)
+        if matches:
+            hits[pattern] = (len(matches), hint)
+    if hits:
+        print("🔍 数据语义高亮 (Rule 53): diff 中发现以下敏感模式：")
+        for pattern, (count, hint) in hits.items():
+            print(f"   - {pattern}: {count} 处 → {hint}")
+        print()
+
+
 def _run(argv: list[str], cwd: str) -> tuple[int, str, str]:
     """Run argv in cwd; return (exit_code, stdout, stderr)."""
     completed = subprocess.run(
@@ -141,6 +174,7 @@ def commit(
     full_verify: bool = False,
     reviewed: bool = False,
     no_verify: bool = False,
+    quick: bool = False,
 ) -> int:
     """Run Rule 53 gate, then hand off to `git commit` if all clear.
 
@@ -228,13 +262,20 @@ def commit(
     # The --reviewed flag is the Agent's explicit declaration:
     # "I read the diff, here is what I found." Without it, the
     # commit is blocked at the review gate.
+    # Rule 53 review declaration gate + evidence grep.
+    # After showing the full diff, grep for sensitive patterns
+    # that commonly hide "data semantic mismatch" bugs:
+    # emit/write/INSERT/DELETE/fetch POST that change data shapes.
+    # This is the lowest-cost, highest-value enhancement — it
+    # doesn't block the commit, just highlights risk areas.
+    _print_evidence_grep(project_root, full_diff)
     print("<!-- vibe:commit_review: diff_shown -->")
     print("🔒 Review 声明门禁 (Rule 53):")
     print("   Agent 必须确认已逐文件审查 diff 内容。")
     print("   加 --reviewed 标志声明审查完成，否则 commit 被阻止。")
-    print("   审查要点: 意外修改 / 范围蔓延 / 回归 / 空文件 / 配置泄露")
+    print("   审查要点: 意外修改 / 范围蔓延 / 回归 / 空文件 / 配置泄露 / 数据语义错位")
     print("<!-- vibe:commit_review_gate: pending -->")
-    if not reviewed and not no_verify:
+    if not reviewed and not quick and not no_verify:
         print()
         print("🔒 Review 门禁 — diff 已展示，请审查后重新提交 (Rule 53)。")
         print("   这是强制两步操作：")
@@ -333,7 +374,8 @@ def commit(
     # Adding a git trailer so doctor can detect commits that bypassed
     # vibe commit (raw `git commit` won't have this trailer).
     print("✅ Verify 全通过，转交 git commit")
-    trailer_argv = ["git", "commit", *commit_argv, "--trailer", "Vibe-Commit=yes"]
+    trailer_key = "quick" if quick else "yes"
+    trailer_argv = ["git", "commit", *commit_argv, "--trailer", f"Vibe-Commit={trailer_key}"]
     completed = subprocess.run(trailer_argv, cwd=project_root)
     return completed.returncode
 
@@ -349,6 +391,7 @@ def run(argv: list[str]) -> int:
     staged_only = False
     full_verify = False
     reviewed = False
+    quick = False
     paths: list[str] = []
     cleaned: list[str] = []
     i = 0
@@ -364,6 +407,10 @@ def run(argv: list[str]) -> int:
             continue
         if a == "--reviewed":
             reviewed = True
+            i += 1
+            continue
+        if a == "--quick":
+            quick = True
             i += 1
             continue
         if a == "--full-verify":
@@ -385,7 +432,7 @@ def run(argv: list[str]) -> int:
     argv = cleaned
     if not argv:
         print("Usage: vibe commit <project_root> [--staged | --paths p1,p2] "
-              "[--no-verify] [--full-verify] [--reviewed] [git commit args...]")
+              "[--no-verify] [--full-verify] [--reviewed] [--quick] [git commit args...]")
         return 2
     project_root = argv[0]
     git_args = argv[1:]
@@ -406,7 +453,7 @@ def run(argv: list[str]) -> int:
         )
         return completed.returncode
 
-    return commit(project_root, git_args, staged_only=staged_only, paths=paths, full_verify=full_verify, reviewed=reviewed, no_verify=no_verify)
+    return commit(project_root, git_args, staged_only=staged_only, paths=paths, full_verify=full_verify, reviewed=reviewed, no_verify=no_verify, quick=quick)
 
 
 def main() -> None:

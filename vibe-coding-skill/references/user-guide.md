@@ -193,6 +193,7 @@ vibe ui-redesign-contract <spec> --source-type opendesign --source-artifacts des
 - 批量提交模式：中间 commit 用 `vibe commit --staged --no-verify -m 'task N'`，最终 commit 用 `vibe commit --full-verify -m 'batch done'`；如果项目配了 `verify_scope`，默认 `vibe commit` 就走快速验证
 - `vibe commit --paths a.py,b.py -m '...'` 只提交指定文件；`vibe commit --staged -m '...'` 只提交已 stage 的文件（支持一个逻辑单元一个 commit）
 - 项目没配 verify 命令时 vibe commit 直接拒绝并提示怎么配；`vibe commit --no-verify` 是显式 escape hatch，建议只在 docs-only 或紧急 hotfix 时用
+- `vibe commit --quick` 跳过 review gate 但保留 verify，适合 docs-only 或低风险 chore commit；trailer 为 `Vibe-Commit: quick`，doctor 可识别
 - 老项目升级到新版 Skill：跑 `vibe upgrade <project>`，会自动写 `.agents/.skill-version` 让 Rule 52 开始工作，并诊断 `commands.verify` 是否已配（Rule 53 前置条件）；命令幂等，可重复跑
 - 子 spec 全部 done 后自动要求父 spec 意图对账（Rule 29）
 - 新 spec 模板自动使用 `AC1`、`AC2`... 显式验收标准编号（Rule 30）
