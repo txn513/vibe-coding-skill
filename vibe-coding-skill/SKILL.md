@@ -552,14 +552,24 @@ artifacts merely because a template exists.
        logic errors, accidental deletions, or wrong variable names.
        The commit process enforces a mandatory two-step review:
        (1) `vibe commit` shows the full diff and then stops (exit 5),
-       forcing the Agent to read the diff before proceeding.
-       (2) `vibe commit --reviewed` runs verify and commits, but
-       only after the Agent has seen the diff in step 1. The Agent
-       must not combine these into a single step — `vibe commit
-       --reviewed` without a prior review step is a policy violation.
-       This two-step design prevents the observed failure mode where
-       the Agent adds `--reviewed` upfront and never actually reads
-       the diff.
+       forcing the Agent to read the diff before proceeding. As a
+       side effect, step 1 writes a marker to
+       `.agents/.vibe-review-pending` (auto-added to `.gitignore`).
+       (2) `vibe commit --reviewed` runs verify and commits, but only
+       when the step-1 marker exists in the target project. If the
+       marker is missing (because the Agent skipped step 1, or ran
+       step 1 in a different project), `--reviewed` is rejected with
+       exit 6. The marker is removed after a successful commit, so
+       the next commit must repeat step 1.
+
+       The Agent must not combine these into a single step —
+       `vibe commit --reviewed` without a prior review step is a
+       policy violation. This enforced two-step design prevents the
+       observed failure mode where the Agent adds `--reviewed`
+       upfront and never actually reads the diff. Note: `--quick`
+       skips the gate entirely (no marker required) for docs-only /
+       low-risk commits; `--no-verify` skips both gates for
+       emergencies.
        
        Before the review gate, the wrapper runs an advisory
        evidence-grep pass that highlights sensitive patterns in the

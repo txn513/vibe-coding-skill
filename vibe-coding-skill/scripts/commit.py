@@ -36,6 +36,52 @@ from workflow_state import (
 )
 
 
+def _review_marker_path(project_root: str) -> str:
+    """Path to the marker file that records "step 1 (diff shown) was run".
+
+    Forces the two-step commit pattern by requiring --reviewed to come
+    after a prior vibe commit that showed the diff. The marker is removed
+    after a successful --reviewed commit, so the next commit must repeat
+    step 1.
+    """
+    return os.path.join(project_root, ".agents", ".vibe-review-pending")
+
+
+def _write_review_marker(project_root: str) -> None:
+    """Write the marker after step 1 (vibe commit shows diff).
+
+    Also ensures `.gitignore` (at the project root) ignores the marker,
+    so `git add -A` during commit does not pick it up. Idempotent.
+    """
+    path = _review_marker_path(project_root)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write("step1: diff shown, ready for step2 (vibe commit --reviewed)")
+    # Ensure .gitignore covers the marker so `git add -A` doesn't include it.
+    gitignore = os.path.join(project_root, ".gitignore")
+    marker_relpath = ".agents/.vibe-review-pending"
+    existing = ""
+    if os.path.exists(gitignore):
+        with open(gitignore, "r", encoding="utf-8") as gi:
+            existing = gi.read()
+    if marker_relpath not in existing.splitlines():
+        with open(gitignore, "a", encoding="utf-8") as gi:
+            if existing and not existing.endswith("\n"):
+                gi.write("\n")
+            gi.write(f"{marker_relpath}\n")
+
+
+def _read_and_clear_review_marker(project_root: str) -> str | None:
+    """Read and remove the marker. Returns its content or None."""
+    path = _review_marker_path(project_root)
+    if not os.path.exists(path):
+        return None
+    with open(path, "r", encoding="utf-8") as handle:
+        content = handle.read()
+    os.remove(path)
+    return content
+
+
 def _print_evidence_grep(project_root: str, diff_text: str) -> None:
     """Highlight sensitive patterns in the diff for Agent attention.
 
@@ -270,6 +316,20 @@ def commit(
     # doesn't block the commit, just highlights risk areas.
     _print_evidence_grep(project_root, full_diff)
     print("<!-- vibe:commit_review: diff_shown -->")
+    # Step 2 enforcement: --reviewed must come after a prior step 1
+    # (vibe commit without --reviewed) that wrote the marker.
+    if reviewed and not quick and not no_verify:
+        marker_content = _read_and_clear_review_marker(project_root)
+        if marker_content is None:
+            print("🔒 Review 门禁升级 — 检测到跳过第 1 步 (Rule 53):")
+            print("   `--reviewed` 需要在一次 `vibe commit`（不传 --reviewed）之后执行。")
+            print("   上一次 `vibe commit` 在哪个项目跑的？是否跟当前项目不一致？")
+            print("   如果确实要先看 diff: 先跑 `vibe commit`（不带 --reviewed），再跑 `vibe commit --reviewed`。")
+            print("   如果要跳过 review gate: 用 `--quick`（docs-only）或 `--no-verify`（紧急）。")
+            print("<!-- vibe:commit_review_gate: skipped_step1 -->")
+            return 6
+        else:
+            print("<!-- vibe:commit_review_gate: step1_verified -->")
     print("🔒 Review 声明门禁 (Rule 53):")
     print("   Agent 必须确认已逐文件审查 diff 内容。")
     print("   加 --reviewed 标志声明审查完成，否则 commit 被阻止。")
@@ -283,6 +343,9 @@ def commit(
         print("     第 2 步: vibe commit --reviewed（确认审查完成，跑 verify + 提交）")
         print("   审查要点: 意外修改 / 范围蔓延 / 回归 / 空文件 / 配置泄露")
         print("   如果发现问题: 先修复，再从第 1 步重新开始。")
+        # Write the step-1 marker so a subsequent --reviewed can verify step 1 happened.
+        _write_review_marker(project_root)
+        print("<!-- vibe:commit_review: marker_written -->")
         print("<!-- vibe:commit_review: blocked_pending_review -->")
         return 5
     untracked = _list_untracked(project_root)

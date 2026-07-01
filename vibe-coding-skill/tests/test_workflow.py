@@ -4763,6 +4763,12 @@ class PreCommitGateTests(unittest.TestCase):
             ["git", "config", "user.name", "Test"],
             cwd=str(self.project), check=True,
         )
+        # Add .gitignore so the Rule 53 marker file (and other local artifacts)
+        # doesn't get swept up by `git add -A` during commit tests.
+        (self.project / ".gitignore").write_text(
+            ".agents/.vibe-review-pending\n",
+            encoding="utf-8",
+        )
         subprocess.run(["git", "add", "-A"], cwd=str(self.project), check=True)
         subprocess.run(
             ["git", "commit", "-q", "-m", "init"],
@@ -4781,6 +4787,12 @@ class PreCommitGateTests(unittest.TestCase):
         """vibe commit must refuse when workflow.json has no verify command."""
         import commit
         self._add_change()
+        # Mark step-1 complete so --reviewed passes the gate (Rule 53 enforcement)
+        import os
+        marker_dir = os.path.join(str(self.project), ".agents")
+        os.makedirs(marker_dir, exist_ok=True)
+        with open(os.path.join(marker_dir, ".vibe-review-pending"), "w") as f2:
+            f2.write("test step1")
         rc = commit.commit(str(self.project), ["-m", "no verify cmd"], reviewed=True)
         self.assertEqual(rc, 4)
 
@@ -4802,6 +4814,12 @@ class PreCommitGateTests(unittest.TestCase):
             ["git", "commit", "-q", "-m", "config"],
             cwd=str(self.project), check=True,
         )
+        # Mark step-1 complete so --reviewed passes the gate (Rule 53 enforcement)
+        import os
+        marker_dir = os.path.join(str(self.project), ".agents")
+        os.makedirs(marker_dir, exist_ok=True)
+        with open(os.path.join(marker_dir, ".vibe-review-pending"), "w") as f2:
+            f2.write("test step1")
         rc = commit.commit(str(self.project), ["-m", "empty"], reviewed=True)
         self.assertEqual(rc, 2)
 
@@ -4817,6 +4835,12 @@ class PreCommitGateTests(unittest.TestCase):
             workflow,
         )
         self._add_change()
+        # Mark step-1 complete so --reviewed passes the gate (Rule 53 enforcement)
+        import os
+        marker_dir = os.path.join(str(self.project), ".agents")
+        os.makedirs(marker_dir, exist_ok=True)
+        with open(os.path.join(marker_dir, ".vibe-review-pending"), "w") as f2:
+            f2.write("test step1")
         rc = commit.commit(str(self.project), ["-m", "should fail"], reviewed=True)
         self.assertEqual(rc, 3)
 
@@ -4832,6 +4856,12 @@ class PreCommitGateTests(unittest.TestCase):
             workflow,
         )
         self._add_change()
+        # Mark step-1 complete so --reviewed passes the gate (Rule 53 enforcement)
+        import os
+        marker_dir = os.path.join(str(self.project), ".agents")
+        os.makedirs(marker_dir, exist_ok=True)
+        with open(os.path.join(marker_dir, ".vibe-review-pending"), "w") as f2:
+            f2.write("test step1")
         rc = commit.commit(str(self.project), ["-m", "feat: add new.txt"], reviewed=True)
         self.assertEqual(rc, 0)
         # Confirm commit actually landed
@@ -4841,6 +4871,23 @@ class PreCommitGateTests(unittest.TestCase):
             cwd=str(self.project), capture_output=True, text=True,
         )
         self.assertIn("feat: add new.txt", log.stdout)
+
+    def test_step1_marker_required_for_reviewed(self) -> None:
+        """Rule 53 step 2 enforcement: --reviewed must come after step 1.
+
+        If --reviewed is passed without a prior `vibe commit` (which
+        writes the marker), commit must reject with rc=6. The two-step
+        pattern is mandatory; the agent cannot skip straight to --reviewed.
+        """
+        import commit
+        import os
+        # Make sure no stale marker exists from a previous test
+        marker = os.path.join(str(self.project), ".agents", ".vibe-review-pending")
+        if os.path.exists(marker):
+            os.remove(marker)
+        self._add_change()
+        rc = commit.commit(str(self.project), ["-m", "skip step1"], reviewed=True)
+        self.assertEqual(rc, 6)
 
     def test_no_verify_flag_bypasses_gate(self) -> None:
         """`--no-verify` must skip the gate and run raw git commit."""
@@ -5725,6 +5772,11 @@ class SplitCommitTests(unittest.TestCase):
         wf = json.loads(wf_path.read_text())
         wf["commands"]["verify"] = [["true"]]
         wf_path.write_text(json.dumps(wf))
+        # Add .gitignore for the Rule 53 marker so it's not in `git add -A`.
+        (self.project / ".gitignore").write_text(
+            ".agents/.vibe-review-pending\n",
+            encoding="utf-8",
+        )
         subprocess.run(["git", "add", "-A"], cwd=str(self.project), check=True)
         subprocess.run(
             ["git", "commit", "-q", "-m", "init"],
@@ -5733,6 +5785,14 @@ class SplitCommitTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.tmp.cleanup()
+
+    def _mark_step1(self) -> None:
+        """Write the Rule 53 step-1 marker so `--reviewed` passes the gate."""
+        import os
+        marker_dir = os.path.join(str(self.project), ".agents")
+        os.makedirs(marker_dir, exist_ok=True)
+        with open(os.path.join(marker_dir, ".vibe-review-pending"), "w") as f2:
+            f2.write("test step1")
 
     def _git_log_files(self) -> list[tuple[str, list[str]]]:
         """Return [(commit_msg, [files])] from newest to oldest.
@@ -5767,6 +5827,7 @@ class SplitCommitTests(unittest.TestCase):
         for f in ["a.py", "b.py", "c.py", "d.py", "e.py", "f.py"]:
             (self.project / f).write_text(f"x {f}", encoding="utf-8")
         import commit as commit_mod
+        self._mark_step1()
         rc = commit_mod.run(
             ["--reviewed", str(self.project), "--paths", "a.py,b.py", "-m", "task 1"]
         )
@@ -5783,6 +5844,7 @@ class SplitCommitTests(unittest.TestCase):
             (self.project / f).write_text(f"x {f}", encoding="utf-8")
         import subprocess, commit as commit_mod
         subprocess.run(["git", "add", "c.py", "d.py"], cwd=str(self.project), check=True)
+        self._mark_step1()
         rc = commit_mod.run(
             ["--reviewed", str(self.project), "--staged", "-m", "task 2"]
         )
@@ -5797,6 +5859,7 @@ class SplitCommitTests(unittest.TestCase):
         for f in ["a.py", "b.py"]:
             (self.project / f).write_text(f"x {f}", encoding="utf-8")
         import commit as commit_mod
+        self._mark_step1()
         rc = commit_mod.run(["--reviewed", str(self.project), "-m", "all in one"])
         self.assertEqual(rc, 0)
         commits = self._git_log_files()
@@ -5811,6 +5874,7 @@ class SplitCommitTests(unittest.TestCase):
         import subprocess, commit as commit_mod
         # Pre-stage a.py only — agent is signalling "I want just this".
         subprocess.run(["git", "add", "a.py"], cwd=str(self.project), check=True)
+        self._mark_step1()
         rc = commit_mod.run(["--reviewed", str(self.project), "-m", "single staged"])
         self.assertEqual(rc, 0)
         commits = self._git_log_files()
@@ -5826,6 +5890,7 @@ class SplitCommitTests(unittest.TestCase):
         # Stage a.py via raw git add
         subprocess.run(["git", "add", "a.py"], cwd=str(self.project), check=True)
         # Now --paths b.py,c.py — should ignore the previously staged a.py
+        self._mark_step1()
         rc = commit_mod.run(
             ["--reviewed", str(self.project), "--paths", "b.py,c.py", "-m", "explicit only"]
         )
@@ -5871,6 +5936,11 @@ class VerifyScopeTests(unittest.TestCase):
         wf["commands"]["verify"] = [["true"]]
         wf["commands"]["verify_full"] = [["true"]]
         wf_path.write_text(json.dumps(wf))
+        # Add .gitignore for the Rule 53 marker so it's not in `git add -A`.
+        (self.project / ".gitignore").write_text(
+            ".agents/.vibe-review-pending\n",
+            encoding="utf-8",
+        )
         subprocess.run(["git", "add", "-A"], cwd=str(self.project), check=True)
         subprocess.run(
             ["git", "commit", "-q", "-m", "init"],
@@ -5880,10 +5950,19 @@ class VerifyScopeTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.tmp.cleanup()
 
+    def _mark_step1(self) -> None:
+        """Write the Rule 53 step-1 marker so --reviewed passes the gate."""
+        import os
+        marker_dir = os.path.join(str(self.project), ".agents")
+        os.makedirs(marker_dir, exist_ok=True)
+        with open(os.path.join(marker_dir, ".vibe-review-pending"), "w") as f2:
+            f2.write("test step1")
+
     def test_default_uses_verify_scope_when_configured(self) -> None:
         """When verify_scope is configured, `vibe commit` uses it (fast path)."""
         (self.project / "a.py").write_text("x", encoding="utf-8")
         import commit as commit_mod
+        self._mark_step1()
         rc = commit_mod.run(["--reviewed", str(self.project), "-m", "scoped"])
         self.assertEqual(rc, 0)
 
@@ -5891,6 +5970,7 @@ class VerifyScopeTests(unittest.TestCase):
         """--full-verify selects verify_full tier, not verify_scope."""
         (self.project / "a.py").write_text("x", encoding="utf-8")
         import commit as commit_mod
+        self._mark_step1()
         rc = commit_mod.run(["--reviewed", str(self.project), "--full-verify", "-m", "full"])
         self.assertEqual(rc, 0)
 
@@ -5902,6 +5982,7 @@ class VerifyScopeTests(unittest.TestCase):
         wf["commands"]["verify_full"] = []  # not configured
         wf_path.write_text(json.dumps(wf))
         import commit as commit_mod
+        self._mark_step1()
         rc = commit_mod.run(["--reviewed", str(self.project), "--full-verify", "-m", "full fallback"])
         self.assertEqual(rc, 0)
 
@@ -5915,6 +5996,7 @@ class VerifyScopeTests(unittest.TestCase):
         wf["commands"]["verify_full"] = []
         wf_path.write_text(json.dumps(wf))
         import commit as commit_mod
+        self._mark_step1()
         rc = commit_mod.run(["--reviewed", str(self.project), "-m", "no verify"])
         self.assertEqual(rc, 4)
 
