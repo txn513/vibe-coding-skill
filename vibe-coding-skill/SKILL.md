@@ -577,6 +577,15 @@ artifacts merely because a template exists.
        spec-verify and commit, the agent may have touched other
        files, and the verify evidence the gate relied on may no
        longer match the worktree.
+
+       **Fail-open protection**: If the verify phase itself crashes
+       (e.g. regex bug in a verify command, misconfigured command),
+       the wrapper catches the exception, prints a warning, and
+       allows the commit to proceed with a `Verify-Crash: <ErrorType>`
+       trailer. This prevents a broken verify configuration from
+       blocking all commits — the commit still happens, but doctor
+       can detect that the verify gate was bypassed due to an
+       internal error.
     3. **Commit** — only if both pass, hand off to `git commit` with
        the user's argv unchanged.
 
