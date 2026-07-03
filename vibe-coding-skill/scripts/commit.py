@@ -221,6 +221,7 @@ def commit(
     reviewed: bool = False,
     no_verify: bool = False,
     quick: bool = False,
+    review_summary: str = "",
 ) -> int:
     """Run Rule 53 gate, then hand off to `git commit` if all clear.
 
@@ -330,6 +331,22 @@ def commit(
             return 6
         else:
             print("<!-- vibe:commit_review_gate: step1_verified -->")
+    # Step 2 enhancement: require an actual review summary, not just
+    # the bare `--reviewed` flag. Without this, the Agent could mark
+    # step 1 as reviewed without ever reading the diff. An empty
+    # summary is rejected (exit 7) so the gate cannot be rubber-stamped.
+    if reviewed and not quick and not no_verify:
+        summary = review_summary.strip()
+        if not summary:
+            print("🔒 Review 门禁升级 — 缺 review summary (Rule 53):")
+            print("   `--reviewed` 必须配 `--review-summary '<text>'`，描述你读 diff 时实际发现了什么。")
+            print("   例: --review-summary '确认只改了 commit.py + tests；无意外文件'")
+            print("   如果只是文档/chore 改动: 用 `--quick` 跳过 review gate 但保留 verify。")
+            print("   如果是紧急绕过: 用 `--no-verify`（会同时跳过 verify）。")
+            print("<!-- vibe:commit_review_gate: missing_summary -->")
+            return 7
+        snippet = summary[:60] + ("..." if len(summary) > 60 else "")
+        print(f"<!-- vibe:commit_review_summary: {snippet} -->")
     print("🔒 Review 声明门禁 (Rule 53):")
     print("   Agent 必须确认已逐文件审查 diff 内容。")
     print("   加 --reviewed 标志声明审查完成，否则 commit 被阻止。")
@@ -461,6 +478,8 @@ def commit(
     trailer_argv = ["git", "commit", *commit_argv, "--trailer", f"Vibe-Commit={trailer_key}"]
     if verify_exception:
         trailer_argv.extend(["--trailer", f"Verify-Crash={type(verify_exception).__name__}"])
+    if reviewed and not quick and not no_verify and review_summary.strip():
+        trailer_argv.extend(["--trailer", f"Review-Summary={review_summary.strip()}"])
     completed = subprocess.run(trailer_argv, cwd=project_root)
     return completed.returncode
 
@@ -478,6 +497,7 @@ def run(argv: list[str]) -> int:
     reviewed = False
     quick = False
     paths: list[str] = []
+    review_summary = ""
     cleaned: list[str] = []
     i = 0
     while i < len(argv):
@@ -502,6 +522,16 @@ def run(argv: list[str]) -> int:
             full_verify = True
             i += 1
             continue
+        if a == "--review-summary":
+            # The next token is the literal summary text (do NOT split
+            # on spaces — the summary may contain spaces). Empty string
+            # is allowed here so the enforcement block can reject it
+            # with a clear error.
+            i += 1
+            if i < len(argv):
+                review_summary = argv[i]
+                i += 1
+            continue
         if a == "--paths":
             # Collect subsequent comma-separated tokens until the next
             # flag (anything starting with "-" — both long "--staged"
@@ -517,7 +547,8 @@ def run(argv: list[str]) -> int:
     argv = cleaned
     if not argv:
         print("Usage: vibe commit <project_root> [--staged | --paths p1,p2] "
-              "[--no-verify] [--full-verify] [--reviewed] [--quick] [git commit args...]")
+              "[--no-verify] [--full-verify] [--reviewed --review-summary '<text>'] "
+              "[--quick] [git commit args...]")
         return 2
     project_root = argv[0]
     git_args = argv[1:]
@@ -525,7 +556,9 @@ def run(argv: list[str]) -> int:
     if no_verify:
         # Direct hand-off, no gate. Documented escape hatch. Stage
         # selection is also skipped: the user opted out of the full
-        # vibe commit flow.
+        # vibe commit flow. Note: --no-verify bypasses the Vibe-Commit
+        # trailer injection too, so doctor can only see this as a raw
+        # `git commit` (no Vibe-Commit trailer at all).
         project_root = os.path.abspath(project_root)
         if not _is_git_repo(project_root):
             print("❌ 当前项目不是 git 仓库")
@@ -538,7 +571,17 @@ def run(argv: list[str]) -> int:
         )
         return completed.returncode
 
-    return commit(project_root, git_args, staged_only=staged_only, paths=paths, full_verify=full_verify, reviewed=reviewed, no_verify=no_verify, quick=quick)
+    return commit(
+        project_root,
+        git_args,
+        staged_only=staged_only,
+        paths=paths,
+        full_verify=full_verify,
+        reviewed=reviewed,
+        no_verify=no_verify,
+        quick=quick,
+        review_summary=review_summary,
+    )
 
 
 def main() -> None:

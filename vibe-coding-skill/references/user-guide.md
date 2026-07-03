@@ -193,6 +193,7 @@ vibe ui-redesign-contract <spec> --source-type opendesign --source-artifacts des
 - 批量提交模式：中间 commit 用 `vibe commit --staged --no-verify -m 'task N'`，最终 commit 用 `vibe commit --full-verify -m 'batch done'`；如果项目配了 `verify_scope`，默认 `vibe commit` 就走快速验证
 - `vibe commit --paths a.py,b.py -m '...'` 只提交指定文件；`vibe commit --staged -m '...'` 只提交已 stage 的文件（支持一个逻辑单元一个 commit）
 - 项目没配 verify 命令时 vibe commit 直接拒绝并提示怎么配；`vibe commit --no-verify` 是显式 escape hatch，建议只在 docs-only 或紧急 hotfix 时用
+- 第 2 步 `vibe commit --reviewed` 强制要求 `--review-summary '<文本>'`：空摘要直接退出 7 并打 marker `missing_summary`；非空摘要写入 commit trailer `Review-Summary: <文本>` 让 `git log --grep='^Review-Summary:'` 可审计 Agent 到底有没有读 diff
 - `vibe commit --quick` 跳过 review gate 但保留 verify，适合 docs-only 或低风险 chore commit；trailer 为 `Vibe-Commit: quick`，doctor 可识别
 - verify 阶段异常时自动 fail-open：打印警告、允许 commit 继续、trailer 加 `Verify-Crash: <ErrorType>`，doctor 可识别
 - 老项目升级到新版 Skill：跑 `vibe upgrade <project>`，会自动写 `.agents/.skill-version` 让 Rule 52 开始工作，并诊断 `commands.verify` 是否已配（Rule 53 前置条件）；命令幂等，可重复跑

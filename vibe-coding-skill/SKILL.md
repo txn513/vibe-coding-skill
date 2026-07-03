@@ -645,6 +645,23 @@ artifacts merely because a template exists.
     written claims), and means Rule 53 cannot accidentally regress
     to "trust the agent" mode.
 
+    `--review-summary` (mandatory when using `--reviewed`): the second
+    step of the two-step gate MUST include a short text describing
+    what the Agent actually found while reading the diff. The wrapper
+    rejects an empty summary with exit 7 and the marker
+    `<!-- vibe:commit_review_gate: missing_summary -->`. A non-empty
+    summary is written to the commit as a `Review-Summary: <text>`
+    trailer and the success marker
+    `<!-- vibe:commit_review_summary: <first 60 chars>... -->` is
+    emitted. This makes "did the Agent actually read the diff?"
+    observable in the git log — `git log --grep='^Review-Summary:'`
+    shows the summaries and the absence of a trailer on a commit
+    tells the reviewer that the gate was skipped (`--quick` /
+    `--no-verify`) or that the summary was empty (which is now
+    impossible). Failure to provide a summary is treated as
+    equivalent to skipping the review.
+
+
 54. **Doctor warnings must be acted on, not just displayed**: When
     `vibe doctor` or `vibe next`/`vibe status` surface warnings
     (stale context, missing rules, Skill version drift, stage-stall,

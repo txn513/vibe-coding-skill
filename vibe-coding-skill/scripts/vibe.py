@@ -254,6 +254,12 @@ def main() -> None:
         help="Skip review gate for docs-only or low-risk commits. "
         "Still runs verify. Trailer becomes Vibe-Commit: quick.",
     )
+    commit_cmd.add_argument(
+        "--review-summary",
+        help="Mandatory with --reviewed: a short description of what you actually "
+        "found while reading the diff. Empty string is rejected (exit 7). "
+        "Non-empty value is written to the commit as Review-Summary: <text> trailer.",
+    )
 
     policy_scan = sub.add_parser("policy-scan")
     policy_scan.add_argument("project_root")
@@ -483,6 +489,7 @@ def main() -> None:
         quick = "--quick" in sys.argv
         staged_only = getattr(args, "staged", False)
         paths = getattr(args, "paths", None) or []
+        review_summary = getattr(args, "review_summary", None) or ""
         run_argv = [args.project_root, *args.git_args]
         if staged_only:
             run_argv = ["--staged", *run_argv]
@@ -496,6 +503,8 @@ def main() -> None:
             run_argv = ["--quick", *run_argv]
         if no_verify:
             run_argv = ["--no-verify", *run_argv]
+        if review_summary:
+            run_argv = ["--review-summary", review_summary, *run_argv]
         raise SystemExit(commit.run(run_argv))
     elif args.operation == "rule-status":
         rule_status.set_rule_status(root, args.rule_name, args.status, args.reason)

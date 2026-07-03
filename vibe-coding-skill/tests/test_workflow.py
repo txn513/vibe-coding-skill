@@ -4793,7 +4793,7 @@ class PreCommitGateTests(unittest.TestCase):
         os.makedirs(marker_dir, exist_ok=True)
         with open(os.path.join(marker_dir, ".vibe-review-pending"), "w") as f2:
             f2.write("test step1")
-        rc = commit.commit(str(self.project), ["-m", "no verify cmd"], reviewed=True)
+        rc = commit.commit(str(self.project), ["-m", "no verify cmd"], reviewed=True, review_summary="test diff reviewed")
         self.assertEqual(rc, 4)
 
     def test_fails_when_no_changes(self) -> None:
@@ -4841,7 +4841,7 @@ class PreCommitGateTests(unittest.TestCase):
         os.makedirs(marker_dir, exist_ok=True)
         with open(os.path.join(marker_dir, ".vibe-review-pending"), "w") as f2:
             f2.write("test step1")
-        rc = commit.commit(str(self.project), ["-m", "should fail"], reviewed=True)
+        rc = commit.commit(str(self.project), ["-m", "should fail"], reviewed=True, review_summary="test diff reviewed")
         self.assertEqual(rc, 3)
 
     def test_succeeds_when_verify_passes(self) -> None:
@@ -4862,7 +4862,7 @@ class PreCommitGateTests(unittest.TestCase):
         os.makedirs(marker_dir, exist_ok=True)
         with open(os.path.join(marker_dir, ".vibe-review-pending"), "w") as f2:
             f2.write("test step1")
-        rc = commit.commit(str(self.project), ["-m", "feat: add new.txt"], reviewed=True)
+        rc = commit.commit(str(self.project), ["-m", "feat: add new.txt"], reviewed=True, review_summary="only new.txt added, no surprises")
         self.assertEqual(rc, 0)
         # Confirm commit actually landed
         import subprocess
@@ -4905,6 +4905,126 @@ class PreCommitGateTests(unittest.TestCase):
         )
         # Should not fail with rc=4 (the "no verify command" error)
         self.assertNotEqual(result.returncode, 4, f"stdout={result.stdout}\nstderr={result.stderr}")
+
+
+
+
+class ReviewSummaryGateTests(unittest.TestCase):
+    """Cover Rule 53 — `--reviewed` requires `--review-summary '<text>'`.
+
+    Without a summary, the gate cannot distinguish "Agent actually read
+    the diff" from "Agent rubber-stamped --reviewed". This makes the
+    review visible in git history as a Review-Summary: <text> trailer.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name)
+        init_project.init_project(str(self.project), "web")
+        import subprocess
+        subprocess.run(["git", "init", "-q"], cwd=str(self.project), check=True)
+        subprocess.run(["git", "config", "user.email", "t@e"], cwd=str(self.project), check=True)
+        subprocess.run(["git", "config", "user.name", "T"], cwd=str(self.project), check=True)
+        (self.project / ".gitignore").write_text(
+            ".agents/.vibe-review-pending\n", encoding="utf-8",
+        )
+        subprocess.run(["git", "add", "-A"], cwd=str(self.project), check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=str(self.project), check=True)
+        # Configure a no-op verify so the test can pass the verify stage.
+        import workflow_state
+        from common import atomic_write_json
+        workflow, _ = workflow_state.ensure_workflow(str(self.project))
+        workflow.setdefault("commands", {})["verify"] = [["true"]]
+        atomic_write_json(str(self.project / ".agents" / "workflow.json"), workflow)
+        # Pre-write the step-1 marker so the gate is past step 1.
+        marker_path = self.project / ".agents" / ".vibe-review-pending"
+        marker_path.parent.mkdir(parents=True, exist_ok=True)
+        marker_path.write_text("step1 ok\n", encoding="utf-8")
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _add_change(self) -> None:
+        (self.project / "new.txt").write_text("x\n", encoding="utf-8")
+
+    def test_rejects_empty_summary(self) -> None:
+        """Empty --review-summary must exit 7 with missing_summary marker."""
+        import commit
+        self._add_change()
+        rc = commit.commit(
+            str(self.project), ["-m", "x"], reviewed=True, review_summary="",
+        )
+        self.assertEqual(rc, 7, "empty summary should be rejected with exit 7")
+
+    def test_rejects_whitespace_only_summary(self) -> None:
+        """Whitespace-only summary is treated as empty."""
+        import commit
+        self._add_change()
+        rc = commit.commit(
+            str(self.project), ["-m", "x"], reviewed=True, review_summary="   \t  ",
+        )
+        self.assertEqual(rc, 7)
+
+    def test_accepts_non_empty_summary_and_writes_trailer(self) -> None:
+        """Non-empty summary must commit and include Review-Summary trailer."""
+        import commit
+        import subprocess
+        self._add_change()
+        rc = commit.commit(
+            str(self.project), ["-m", "with summary"],
+            reviewed=True,
+            review_summary="read the diff; only new.txt changed; nothing surprising",
+        )
+        self.assertEqual(rc, 0)
+        log = subprocess.run(
+            ["git", "log", "--format=%B", "-1"],
+            cwd=str(self.project), capture_output=True, text=True, check=True,
+        ).stdout
+        self.assertIn("Review-Summary: read the diff", log)
+
+    def test_truncates_long_summary_in_marker(self) -> None:
+        """The success marker snippet must be capped at 60 chars + ellipsis."""
+        import commit
+        import io, contextlib
+        self._add_change()
+        long_text = "x" * 200
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = commit.commit(
+                str(self.project), ["-m", "long"],
+                reviewed=True,
+                review_summary=long_text,
+            )
+        self.assertEqual(rc, 0)
+        out = buf.getvalue()
+        # Marker should contain 60 x's + ellipsis, NOT 200 x's
+        self.assertIn("x" * 60 + "...", out)
+
+    def test_quick_mode_skips_summary_requirement(self) -> None:
+        """--quick bypasses both the two-step gate and the summary gate."""
+        import commit
+        self._add_change()
+        # No marker written, no summary: --quick must succeed.
+        marker_path = self.project / ".agents" / ".vibe-review-pending"
+        if marker_path.exists():
+            marker_path.unlink()
+        rc = commit.commit(
+            str(self.project), ["-m", "quick"], reviewed=True, quick=True,
+        )
+        self.assertEqual(rc, 0)
+
+    def test_no_verify_skips_summary_requirement(self) -> None:
+        """--no-verify bypasses both verify AND the summary gate."""
+        import commit
+        self._add_change()
+        marker_path = self.project / ".agents" / ".vibe-review-pending"
+        if marker_path.exists():
+            marker_path.unlink()
+        rc = commit.commit(
+            str(self.project), ["-m", "nv"], reviewed=True, no_verify=True,
+        )
+        self.assertEqual(rc, 0)
+
 
 
 
@@ -5876,7 +5996,7 @@ class SplitCommitTests(unittest.TestCase):
         import commit as commit_mod
         self._mark_step1()
         rc = commit_mod.run(
-            ["--reviewed", str(self.project), "--paths", "a.py,b.py", "-m", "task 1"]
+            ["--reviewed", "--review-summary", "reviewed the diff", str(self.project), "--paths", "a.py,b.py", "-m", "task 1"]
         )
         self.assertEqual(rc, 0)
         commits = self._git_log_files()
@@ -5893,7 +6013,7 @@ class SplitCommitTests(unittest.TestCase):
         subprocess.run(["git", "add", "c.py", "d.py"], cwd=str(self.project), check=True)
         self._mark_step1()
         rc = commit_mod.run(
-            ["--reviewed", str(self.project), "--staged", "-m", "task 2"]
+            ["--reviewed", "--review-summary", "reviewed the diff", str(self.project), "--staged", "-m", "task 2"]
         )
         self.assertEqual(rc, 0)
         commits = self._git_log_files()
@@ -5907,7 +6027,7 @@ class SplitCommitTests(unittest.TestCase):
             (self.project / f).write_text(f"x {f}", encoding="utf-8")
         import commit as commit_mod
         self._mark_step1()
-        rc = commit_mod.run(["--reviewed", str(self.project), "-m", "all in one"])
+        rc = commit_mod.run(["--reviewed", "--review-summary", "reviewed the diff", str(self.project), "-m", "all in one"])
         self.assertEqual(rc, 0)
         commits = self._git_log_files()
         msg, files = commits[0]
@@ -5922,7 +6042,7 @@ class SplitCommitTests(unittest.TestCase):
         # Pre-stage a.py only — agent is signalling "I want just this".
         subprocess.run(["git", "add", "a.py"], cwd=str(self.project), check=True)
         self._mark_step1()
-        rc = commit_mod.run(["--reviewed", str(self.project), "-m", "single staged"])
+        rc = commit_mod.run(["--reviewed", "--review-summary", "reviewed the diff", str(self.project), "-m", "single staged"])
         self.assertEqual(rc, 0)
         commits = self._git_log_files()
         msg, files = commits[0]
@@ -5939,7 +6059,7 @@ class SplitCommitTests(unittest.TestCase):
         # Now --paths b.py,c.py — should ignore the previously staged a.py
         self._mark_step1()
         rc = commit_mod.run(
-            ["--reviewed", str(self.project), "--paths", "b.py,c.py", "-m", "explicit only"]
+            ["--reviewed", "--review-summary", "reviewed the diff", str(self.project), "--paths", "b.py,c.py", "-m", "explicit only"]
         )
         self.assertEqual(rc, 0)
         commits = self._git_log_files()
@@ -6010,7 +6130,7 @@ class VerifyScopeTests(unittest.TestCase):
         (self.project / "a.py").write_text("x", encoding="utf-8")
         import commit as commit_mod
         self._mark_step1()
-        rc = commit_mod.run(["--reviewed", str(self.project), "-m", "scoped"])
+        rc = commit_mod.run(["--reviewed", "--review-summary", "reviewed the diff", str(self.project), "-m", "scoped"])
         self.assertEqual(rc, 0)
 
     def test_full_verify_flag_uses_verify_full(self) -> None:
@@ -6018,7 +6138,7 @@ class VerifyScopeTests(unittest.TestCase):
         (self.project / "a.py").write_text("x", encoding="utf-8")
         import commit as commit_mod
         self._mark_step1()
-        rc = commit_mod.run(["--reviewed", str(self.project), "--full-verify", "-m", "full"])
+        rc = commit_mod.run(["--reviewed", "--review-summary", "reviewed the diff", str(self.project), "--full-verify", "-m", "full"])
         self.assertEqual(rc, 0)
 
     def test_full_verify_falls_back_to_verify(self) -> None:
@@ -6030,7 +6150,7 @@ class VerifyScopeTests(unittest.TestCase):
         wf_path.write_text(json.dumps(wf))
         import commit as commit_mod
         self._mark_step1()
-        rc = commit_mod.run(["--reviewed", str(self.project), "--full-verify", "-m", "full fallback"])
+        rc = commit_mod.run(["--reviewed", "--review-summary", "reviewed the diff", str(self.project), "--full-verify", "-m", "full fallback"])
         self.assertEqual(rc, 0)
 
     def test_no_verify_configured_at_all(self) -> None:
@@ -6044,7 +6164,7 @@ class VerifyScopeTests(unittest.TestCase):
         wf_path.write_text(json.dumps(wf))
         import commit as commit_mod
         self._mark_step1()
-        rc = commit_mod.run(["--reviewed", str(self.project), "-m", "no verify"])
+        rc = commit_mod.run(["--reviewed", "--review-summary", "reviewed the diff", str(self.project), "-m", "no verify"])
         self.assertEqual(rc, 4)
 
     def test_workflow_state_schema_includes_new_phases(self) -> None:
