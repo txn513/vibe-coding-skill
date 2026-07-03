@@ -1,0 +1,8 @@
+# Test artefacts (created by tests that init_project into the Skill dir)
+.agents/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
