@@ -35,6 +35,8 @@ PLAN_PROGRESS_STALE_STATUSES = {"review", "released", "done"}
 PLAN_PROGRESS_WARNING_THRESHOLD = 80
 
 
+from retro_gap_scan import scan_stale_action_items
+
 def project_status(project_root: str) -> None:
     project_root = os.path.abspath(project_root)
     agents_dir = os.path.join(project_root, ".agents")
@@ -194,6 +196,7 @@ def project_next(project_root: str) -> dict:
     _apply_model_mapping(project_root, recommendation)
     _print_recommendation(recommendation)
     _print_stale_archive_hint(project_root)
+    _print_stale_action_items_hint(project_root)
     _print_version_drift_hint(project_root)
     _print_proposed_rules_hint(project_root)
     _print_missing_retro_hint(project_root)
@@ -202,6 +205,31 @@ def project_next(project_root: str) -> dict:
     _print_git_context_hint(project_root)
     _print_all_clean_signal(project_root, specs)
     return recommendation
+
+
+
+
+def _print_stale_action_items_hint(project_root: str) -> None:
+    """Advisory hint (Rule 60): retro action items still in `[ ]` past
+    the project's natural review cadence. Same pattern as
+    _print_stale_archive_hint — silent when clean, advisory + machine-
+    readable marker (Rule 50) when stale items exist.
+    """
+    if not os.path.exists(os.path.join(project_root, ".agents", "retros")):
+        return
+    try:
+        stale = scan_stale_action_items(project_root, max_cycles=2)
+    except Exception:  # noqa: BLE001
+        # Hint is advisory; never let a scan error block next.
+        return
+    if not stale:
+        return
+    print()
+    print(f"📋 Rule 60: 发现 {len(stale)} 个 retro 行动项仍停在 [ ] 状态 (跨过项目最近的 2 个 retro cycle)")
+    print("   命令: python scripts/retro_gap_scan.py <project> --audit-stale")
+    print("   处置: 把 [ ] 升级为 [active: <rule-id>] / [deferred: <reason>] / [superseded: <id>]")
+    print("   (Rule 60: 行动项必须达到 terminal state，不可停留在 [ ])")
+    print(f"<!-- vibe:stale_action_items: count={len(stale)} -->")
 
 
 def _print_stale_archive_hint(project_root: str) -> None:

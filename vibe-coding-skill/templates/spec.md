@@ -72,7 +72,7 @@
 - **受影响的读路径**: {{READ_PATH_IMPACT}}
   > Rule 44: 如果本 spec 引入写操作 / 状态变更 / 新存储位置，必须列出可能被影响的读路径，或显式标注「无读路径影响」并给出一行原因。留空或跳过均视为不通过 spec-ready 门禁。
 
-{{FIX_SCOPE_SECTION}}
+{{FIX_SCOPE_SECTION}}{{CALL_SITES_SECTION}}
 ## 验证方式
 
 - [ ] 相关回归测试已新增或更新

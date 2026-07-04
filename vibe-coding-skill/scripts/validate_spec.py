@@ -139,6 +139,47 @@ def validate_spec(spec_path: str) -> dict:
             "msg": "状态仍为 draft，建议改为 spec-ready 后再开始编码。使用 set_status.py 修改。",
         })
 
+    # Rule 59 — non-bug specs include a "调用点 (Call Sites)" reminder section
+    # when they touch existing constructors / dependency wiring. The Agent
+    # must either fill in the call-site list (with grep'd file:line) OR
+    # explicitly delete the reminder block. A spec that leaves the reminder
+    # block but does not list any call sites (or does not mark N/A) is
+    # signalling that Rule 59 was triggered but not addressed.
+    call_sites_section = re.search(
+        r"^##\s+调用点.*?(?=^##\s|\Z)",
+        content,
+        re.MULTILINE | re.DOTALL,
+    )
+    if call_sites_section:
+        body = call_sites_section.group(0)
+        # The section is "addressed" if the user either:
+        # (a) listed at least one concrete file:line call site (file.py:NN),
+        #     OR
+        # (b) explicitly disabled it. A disable must be a USER action — a
+        #     line that starts the section body with an explicit "N/A" or
+        #     "不适用" sentinel, NOT the boilerplate reminder sentence
+        #     that the template itself emits.
+        has_call_site_line = bool(
+            re.search(r"^-\s+`[^`]+:\d+", body, re.MULTILINE)
+        )
+        # Disable sentinel: a list item line that contains N/A / 不适用
+        # / <no call sites affected> as an EXPLICIT user annotation. We
+        # accept "- ... N/A: ..." style or a line whose first non-whitespace
+        # token is "N/A" / "不适用".
+        has_disabled_sentinel = bool(
+            re.search(
+                r"^\s*[-*]\s+(?:N/A\b|n/a\b|不适用\b|<no call sites affected>)",
+                body,
+                re.MULTILINE,
+            )
+        )
+        if not has_call_site_line and not has_disabled_sentinel:
+            issues.append({
+                "severity": "warning",
+                "msg": "Rule 59: spec 含 '调用点 (Call Sites)' 段但未列出任何调用点（grep 结果）或显式标注「不适用/N/A」。"
+                       "reviewer 必须独立 grep 验证调用点清单完整性。",
+            })
+
     errors = [i for i in issues if i["severity"] == "error"]
     warnings = [i for i in issues if i["severity"] == "warning"]
 

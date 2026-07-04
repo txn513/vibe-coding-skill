@@ -203,23 +203,200 @@ def suggested_mini_paragraph(
     )
 
 
+
+
+
+# --- Action item state machine (Rule 60) ---
+# A retro "行动项" list item uses one of four states:
+#   `- [ ] text`                 open (default; subject to stagnation audit)
+#   `- [active: <rule-id>] text` promoted into a rule
+#   `- [deferred: <reason>] text` parked with explicit rationale
+#   `- [superseded: <id>] text`   replaced by later work
+# Items persisting as `[ ]` across multiple retro cycles signal forgotten
+# work. The state prefix is the only signal — the surrounding text is freeform.
+
+_ACTION_ITEM_RE = re.compile(
+    r"^\s*[-*]\s+"
+    r"\[(?P<state>\s|active:|deferred:|superseded:)"
+    r"(?P<rest>[^\]]*)\]"
+    r"(?P<text>.*)$"
+)
+_OPEN_STATE = " "  # the literal space inside `[ ]`
+
+
+@dataclass
+class ActionItem:
+    """A single retro action item with state and provenance."""
+
+    retro_path: str
+    retro_name: str
+    state: str  # "open" | "active:<id>" | "deferred:<reason>" | "superseded:<id>"
+    state_payload: str  # the part after the colon (or "" for open)
+    text: str  # the freeform text after the bracket
+    raw_line: str
+
+
+def _iter_action_items(content: str) -> list[tuple[str, str]]:
+    """Yield (state, text) for every action item line found in `content`.
+
+    Scans the whole document for list items matching the action-item
+    regex — does not require a specific heading. This mirrors how
+    project retros currently structure action items under a 行动项
+    section, but tolerates minor heading variations.
+    """
+    items: list[tuple[str, str]] = []
+    for line in content.splitlines():
+        m = _ACTION_ITEM_RE.match(line)
+        if not m:
+            continue
+        state_token = m.group("state")
+        payload = m.group("rest").strip()
+        text = m.group("text").strip()
+        if state_token == _OPEN_STATE:
+            state = "open"
+        elif state_token == "active:":
+            state = "active"
+        elif state_token == "deferred:":
+            state = "deferred"
+        elif state_token == "superseded:":
+            state = "superseded"
+        else:
+            continue
+        items.append((state, text))
+    return items
+
+
+def scan_stale_action_items(
+    project_root: str,
+    max_cycles: int = 2,
+) -> list[ActionItem]:
+    """Return retro action items still in `open` state that have not
+    been updated since the most recent `max_cycles` retro files.
+
+    "Not updated" is measured by ordering retro files by their on-disk
+    mtime (newest first) and checking whether the retro file containing
+    the open item is older than the `max_cycles`th newest retro file.
+    This intentionally uses relative project cadence, not wall-clock
+    deadlines — projects shipping 5 specs/day and 1 spec/week both
+    get an accurate "this is forgotten" signal.
+    """
+    retros_dir = os.path.join(project_root, ".agents", "retros")
+    if not os.path.isdir(retros_dir):
+        return []
+
+    # Order retros by mtime, newest first
+    retro_paths: list[tuple[float, str]] = []
+    for entry in os.listdir(retros_dir):
+        if not entry.endswith(".md"):
+            continue
+        path = os.path.join(retros_dir, entry)
+        try:
+            mtime = os.path.getmtime(path)
+        except OSError:
+            continue
+        retro_paths.append((mtime, path))
+    retro_paths.sort(reverse=True)
+
+    if not retro_paths:
+        return []
+
+    # Threshold: any retro older than the `max_cycles`th newest is "stale".
+    if len(retro_paths) <= max_cycles:
+        # Not enough retros to establish a "stale" cutoff. Treat all
+        # open items as advisory only — return them with state="open"
+        # but the caller should decide what to do with so little data.
+        threshold = float("inf")
+    else:
+        threshold = retro_paths[max_cycles][0]
+
+    stale: list[ActionItem] = []
+    for mtime, path in retro_paths:
+        if mtime > threshold:
+            # Recent retro — items here are too new to call stale
+            continue
+        try:
+            with open(path, encoding="utf-8") as handle:
+                content = handle.read()
+        except OSError:
+            continue
+        retro_name = os.path.basename(path)[:-3]
+        for state, text in _iter_action_items(content):
+            if state == "open" and text:
+                # Parse the original line for richer reporting
+                raw_line = next(
+                    (ln for ln in content.splitlines()
+                     if _ACTION_ITEM_RE.match(ln)
+                     and _ACTION_ITEM_RE.match(ln).group("text").strip() == text),
+                    "",
+                )
+                m = _ACTION_ITEM_RE.match(raw_line) if raw_line else None
+                payload = m.group("rest").strip() if m else ""
+                stale.append(
+                    ActionItem(
+                        retro_path=path,
+                        retro_name=retro_name,
+                        state="open",
+                        state_payload=payload,
+                        text=text,
+                        raw_line=raw_line,
+                    )
+                )
+    return stale
+
+
+def format_stale_items(items: list[ActionItem]) -> str:
+    """Human-readable summary for stdout printing."""
+    if not items:
+        return "✅ No stale retro action items.\n"
+    lines = [f"⚠️  发现 {len(items)} 个停留在 `[ ]` 状态的 retro 行动项:"]
+    for idx, item in enumerate(items, start=1):
+        lines.append(f"   [{idx}] {item.retro_name}: {item.text}")
+        lines.append(
+            "       → 升级为 [active: <rule-id>] / [deferred: <reason>] / [superseded: <id>]"
+        )
+    lines.append("")
+    lines.append("Rule 60 要求: 行动项必须达到 terminal state，不可停留在 `[ ]`。")
+    return "\n".join(lines)
+
+
 if __name__ == "__main__":
     import argparse
     import json
     import sys
 
-    parser = argparse.ArgumentParser(description="Scan retros for gap candidates")
+    parser = argparse.ArgumentParser(
+        description="Scan retros for gap candidates / stale action items (Rule 60)"
+    )
     parser.add_argument("project_root")
     parser.add_argument("--evidence-spec", default="")
     parser.add_argument("--evidence-description", default="")
+    parser.add_argument(
+        "--audit-stale", action="store_true",
+        help="List retro action items still in `[ ]` state past their project\'s "
+             "natural review cadence (Rule 60).",
+    )
+    parser.add_argument(
+        "--max-cycles", type=int, default=2,
+        help="Number of recent retro cycles used as the staleness threshold "
+             "(default 2). Items in retros older than the Nth most recent "
+             "retro are considered stale.",
+    )
+    parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
-    candidates = scan_retro_gaps(
-        args.project_root,
-        args.evidence_spec,
-        args.evidence_description,
-    )
-    if "--json" in sys.argv:
-        print(json.dumps([c.__dict__ for c in candidates], ensure_ascii=False, indent=2))
+    if args.audit_stale:
+        items = scan_stale_action_items(args.project_root, max_cycles=args.max_cycles)
+        if args.json:
+            print(json.dumps([i.__dict__ for i in items], ensure_ascii=False, indent=2))
+        else:
+            print(format_stale_items(items))
     else:
-        print(format_candidates(candidates))
+        candidates = scan_retro_gaps(
+            args.project_root,
+            args.evidence_spec,
+            args.evidence_description,
+        )
+        if args.json:
+            print(json.dumps([c.__dict__ for c in candidates], ensure_ascii=False, indent=2))
+        else:
+            print(format_candidates(candidates))

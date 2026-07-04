@@ -126,6 +126,25 @@ def _get_type_defaults(
 ) -> dict:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
+    # Rule 59 — non-bug specs that touch existing constructors / dependency
+    # wiring must list every call site. We pre-fill the section with a
+    # reminder so the user fills it in IF applicable; if not applicable
+    # (truly additive change), the user deletes the section and
+    # validate_spec does NOT warn (it checks presence only after a
+    # heuristic trigger).
+    non_bug_call_sites_section = (
+        "## 调用点 (Call Sites)\n\n"
+        "> Rule 59: 如果本 spec 修改某个已有 class 的 `__init__` 行为、"
+        "改动关键参数的默认值，或切换第三方 client 的 transport / auth，"
+        "必须用 `grep` 全项目列出该符号的所有调用点 (file:line)，并标注每个调用点的适配状态。\n"
+        "> 不适用本 spec 时，删除本段即可。\n\n"
+        "### 完整调用点清单 (grep `<SymbolName>(` 全项目)\n\n"
+        "- `path/to/file.py:LINE` — adapted / needs-adaptation / n/a (原因)\n"
+        "- `path/to/file.py:LINE` — adapted / needs-adaptation / n/a (原因)\n\n"
+        "### reviewer 独立验证\n\n"
+        "- [ ] reviewer 已独立跑过同样的 grep 并展示原始输出\n"
+    )
+
     base = {
         "SPEC_NAME": name, "SPEC_TYPE": spec_type, "STATUS": "draft",
         "RISK_LEVEL": risk, "RISK_CONFIRMATION": "confirmed",
@@ -146,17 +165,23 @@ def _get_type_defaults(
         "ERROR_HANDLING_1": "", "ERROR_HANDLING_2": "",
         "NEW_FILES": "", "MODIFIED_FILES": "", "DO_NOT_TOUCH": "",
         "FIX_SCOPE_SECTION": "",
+        "CALL_SITES_SECTION": "",
         "PERFORMANCE_REQUIREMENT_1": "(请定义适用于本项目的性能要求与验证方式)",
         "PERFORMANCE_REQUIREMENT_2": "",
         "SECURITY_NFR_1": "(请定义适用于本项目的安全要求与验证方式)",
         "SECURITY_NFR_2": "",
         "ACCESSIBILITY_REQUIREMENT_1": "(请定义适用于本项目的可访问性或兼容性要求)",
         "ACCESSIBILITY_REQUIREMENT_2": "",
+        "CALL_SITES_SECTION": non_bug_call_sites_section,
     }
 
     if spec_type == "bug":
         return {
             **base,
+            # Bug specs have their own Fix Scope section that already lists
+            # every touched file; Rule 59's Call Sites section is for
+            # non-bug specs that modify existing constructors / wiring.
+            "CALL_SITES_SECTION": "",
             "INTENT": f"修复 {name} 的 Bug\n\n**复现步骤**: (描述如何复现)\n**实际行为**: (Bug 表现)\n**期望行为**: (修复后应该怎样)\n**影响范围**: (哪些用户/场景受影响)",
             "SUCCESS_CRITERION_1": "(请定义问题不再发生的可验证条件)",
             "SUCCESS_CRITERION_2": "(请定义需要保持不变的行为及验证方式)",

@@ -5029,6 +5029,256 @@ class ReviewSummaryGateTests(unittest.TestCase):
 
 
 
+class Rule59CallSitesSectionTests(unittest.TestCase):
+    """Cover Rule 59 — spec validation warns when '调用点 (Call Sites)'
+    section is present but not addressed by either listing concrete call
+    sites (file:line) or an explicit N/A sentinel as a list item.
+    """
+
+    def _make_spec(self, body: str) -> str:
+        return (
+            "# SPEC: demo\n"
+            "> 状态: spec-ready\n\n"
+            "## 意图\n\nTest intent.\n\n"
+            "## 验收标准\n\n- AC1\n\n"
+            "## 涉及范围\n\n- **新增文件**: x.py\n"
+            "- **修改文件**: \n- **不动文件**: \n"
+            "- **受影响的读路径**: 无\n\n"
+            + body
+        )
+
+    def _validate(self, spec_text: str) -> list:
+        import validate_spec
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
+            f.write(spec_text)
+            path = f.name
+        result = validate_spec.validate_spec(path)
+        return [i for i in result["issues"] if "Rule 59" in i["msg"]]
+
+    def test_warns_when_section_present_with_no_call_sites(self) -> None:
+        """Template reminder block, no call sites, no N/A → warn."""
+        body = (
+            "## 调用点 (Call Sites)\n\n"
+            "> Rule 59: ...\n"
+            "> 不适用本 spec 时，删除本段即可。\n\n"
+            "### 完整调用点清单 (grep \\`ClassName(\\` 全项目)\n\n"
+            "### reviewer 独立验证\n\n"
+            "- [ ] reviewer 已独立跑过同样的 grep 并展示原始输出\n"
+        )
+        issues = self._validate(self._make_spec(body))
+        self.assertTrue(len(issues) >= 1, "expected Rule 59 warning")
+        self.assertEqual(issues[0]["severity"], "warning")
+
+    def test_silent_when_call_sites_listed(self) -> None:
+        """Concrete file.py:NN line in the call-sites list → no warning."""
+        body = (
+            "## 调用点 (Call Sites)\n\n"
+            "### 完整调用点清单\n\n"
+            "- `backend/app/handler.py:42` — adapted\n"
+            "- `backend/app/handler.py:99` — needs-adaptation\n\n"
+            "### reviewer 独立验证\n\n"
+            "- [x] reviewer 已独立跑过 grep\n"
+        )
+        issues = self._validate(self._make_spec(body))
+        self.assertEqual(issues, [])
+
+    def test_silent_when_user_disables_via_N_A_sentinel(self) -> None:
+        """A list-item line whose first token is N/A / 不适用 → no warning.
+
+        Note: the boilerplate reminder text itself contains the phrase
+        '不适用本 spec 时', but that's not a list-item line, so it must
+        NOT count as a user disable.
+        """
+        body = (
+            "## 调用点 (Call Sites)\n\n"
+            "> Rule 59: ...\n"
+            "> 不适用本 spec 时，删除本段即可。\n\n"
+            "### 完整调用点清单\n\n"
+            "- 不适用: 本 spec 是纯新增，不改任何已有 class\n\n"
+            "### reviewer 独立验证\n\n"
+            "- [ ] reviewer 已独立跑过同样的 grep\n"
+        )
+        issues = self._validate(self._make_spec(body))
+        self.assertEqual(issues, [])
+
+    def test_silent_when_section_absent(self) -> None:
+        """Specs that don't trigger Rule 59 (no constructor changes) don't
+        need the Call Sites section at all — no warning even if missing.
+        """
+        body = (
+            "## 涉及范围\n\n- **新增文件**: y.py\n"
+            "- **修改文件**: \n- **不动文件**: \n"
+        )
+        issues = self._validate(self._make_spec("").split("## 涉及范围")[0] + body)
+        self.assertEqual(issues, [])
+
+
+class Rule60RetroActionItemStateMachineTests(unittest.TestCase):
+    """Cover Rule 60 — retro action items must reach a terminal state.
+
+    The scanner recognises four states:
+    - `[ ]` open (default)
+    - `[active: <rule-id>]` promoted to a rule
+    - `[deferred: <reason>]` parked
+    - `[superseded: <id>]` replaced
+
+    `--audit-stale` lists open items in retros older than the project's
+    `max_cycles` most recent retro files. Items in terminal states are
+    silently skipped.
+    """
+
+    def setUp(self) -> None:
+        import retro_gap_scan
+        self.scanner = retro_gap_scan
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name)
+        (self.project / ".agents" / "retros").mkdir(parents=True)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _write_retro(self, name: str, items: list[str], mtime_offset: int = 0) -> None:
+        import os, time
+        path = self.project / ".agents" / "retros" / f"{name}.md"
+        body = (
+            f"# Retro {name}\n\n"
+            "## 行动项\n\n"
+            + "\n".join(items) + "\n"
+        )
+        path.write_text(body, encoding="utf-8")
+        # Set mtime so the test can control ordering
+        mtime = time.time() - mtime_offset
+        os.utime(path, (mtime, mtime))
+
+    def test_open_item_in_old_retro_is_stale(self) -> None:
+        """[ ] in a retro older than max_cycles → reported as stale."""
+        self._write_retro("recent", ["- [x] done"], mtime_offset=0)
+        self._write_retro(
+            "old", ["- [ ] still open action"],
+            mtime_offset=100000,
+        )
+        stale = self.scanner.scan_stale_action_items(str(self.project), max_cycles=1)
+        self.assertEqual(len(stale), 1)
+        self.assertEqual(stale[0].retro_name, "old")
+        self.assertIn("still open action", stale[0].text)
+
+    def test_terminal_states_are_not_stale(self) -> None:
+        """active / deferred / superseded items must be skipped."""
+        self._write_retro("recent", ["- [x] done"], mtime_offset=0)
+        self._write_retro(
+            "old",
+            [
+                "- [active: rule-59] promoted",
+                "- [deferred: waiting on next spec] parked",
+                "- [superseded: rule-60] replaced",
+            ],
+            mtime_offset=100000,
+        )
+        stale = self.scanner.scan_stale_action_items(str(self.project), max_cycles=1)
+        self.assertEqual(stale, [])
+
+    def test_recent_retro_open_items_not_stale(self) -> None:
+        """Open items in retros within max_cycles window are not stale."""
+        self._write_retro("r1", ["- [ ] item A"], mtime_offset=10)
+        self._write_retro("r2", ["- [ ] item B"], mtime_offset=20)
+        self._write_retro("r3", ["- [ ] item C"], mtime_offset=30)
+        # max_cycles=2 means only retros older than r2 are stale → r3
+        stale = self.scanner.scan_stale_action_items(str(self.project), max_cycles=2)
+        self.assertEqual(len(stale), 1)
+        self.assertEqual(stale[0].retro_name, "r3")
+
+    def test_audit_stale_cli_outputs_summary(self) -> None:
+        """`python retro_gap_scan.py --audit-stale` prints human-readable output."""
+        import subprocess, sys
+        self._write_retro("r1", ["- [ ] open 1"], mtime_offset=0)
+        self._write_retro(
+            "r2",
+            ["- [ ] open 2"],
+            mtime_offset=100000,
+        )
+        result = subprocess.run(
+            [
+                sys.executable,
+                "scripts/retro_gap_scan.py",
+                str(self.project),
+                "--audit-stale",
+                "--max-cycles", "1",
+            ],
+            cwd=os.path.dirname(self.scanner.__file__) + "/..",
+            capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("Rule 60", result.stdout)
+        self.assertIn("open 2", result.stdout)
+        self.assertNotIn("open 1", result.stdout)
+
+    def test_format_stale_items_empty(self) -> None:
+        """Empty result returns the success message, not empty string."""
+        msg = self.scanner.format_stale_items([])
+        self.assertIn("No stale", msg)
+
+
+class Rule61MultiCallSiteCoverageTests(unittest.TestCase):
+    """Cover Rule 61 — multi-call-site gap requires grep'd list as source
+    of truth, with `latent` state for call sites that pass today but
+    depend on behavior being changed.
+
+    These tests validate the *template / documentation* of Rule 61 — they
+    assert that the user-facing helper text exists in SKILL.md and the
+    retro template mentions the latent state. The actual grep enforcement
+    happens at spec/review time (covered by Rule 59 tests + manual review).
+    """
+
+    def test_skill_md_documents_latent_state(self) -> None:
+        """Rule 61 must mention the `latent` state explicitly."""
+        skill_path = Path(__file__).parent.parent / "SKILL.md"
+        content = skill_path.read_text(encoding="utf-8")
+        # Find Rule 61
+        m = re.search(
+            r"61\.\s+\*\*[^\n]+",
+            content,
+        )
+        self.assertIsNotNone(m, "Rule 61 header not found in SKILL.md")
+        rule_body_start = m.start()
+        # Take a 2000-char window after Rule 61's header
+        body_window = content[rule_body_start:rule_body_start + 2000]
+        self.assertIn("latent", body_window)
+        self.assertIn("pending", body_window)
+        self.assertIn("active", body_window)
+        self.assertIn("n/a", body_window.lower())
+
+    def test_skill_md_documents_grep_as_source_of_truth(self) -> None:
+        """Rule 61 must say grep is the source of truth, not numbering."""
+        skill_path = Path(__file__).parent.parent / "SKILL.md"
+        content = skill_path.read_text(encoding="utf-8")
+        m = re.search(r"61\.\s+\*\*[^\n]+", content)
+        self.assertIsNotNone(m)
+        body_window = content[m.start():m.start() + 2000]
+        self.assertIn("source of truth", body_window)
+        self.assertIn("grep", body_window.lower())
+
+    def test_template_spec_includes_call_sites_reminder_for_non_bug(self) -> None:
+        """The create_spec helper must inject a Call Sites reminder for
+        feature / refactor / hardening specs but NOT for bug specs (which
+        use Fix Scope instead).
+        """
+        import sys
+        sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
+        import create_spec
+        for spec_type in ("feature", "refactor", "hardening"):
+            d = create_spec._get_type_defaults(spec_type=spec_type, name="demo")
+            self.assertIn("Rule 59", d["CALL_SITES_SECTION"])
+            self.assertEqual(d["FIX_SCOPE_SECTION"], "")
+        # Bug specs must NOT carry the Call Sites reminder (they have Fix Scope)
+        d = create_spec._get_type_defaults(spec_type="bug", name="demo")
+        self.assertEqual(d["CALL_SITES_SECTION"], "")
+        self.assertIn("修复范围", d["FIX_SCOPE_SECTION"])
+
+
+
+
+
 class SkillUpgradeCommandTests(unittest.TestCase):
     """Cover `vibe upgrade` — bring an existing project up to the current Skill.
 

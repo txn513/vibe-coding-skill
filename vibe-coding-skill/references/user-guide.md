@@ -138,6 +138,33 @@ vibe ui-redesign-contract <spec> --source-type opendesign --source-artifacts des
 
 ---
 
+## 八点五、Retro 行动项与 multi-call-site gap (Rule 60 / 61)
+
+| 你说 | Skill 做什么 |
+|---|---|
+| `哪些 retro 行动项还停在 [ ]` | `python scripts/retro_gap_scan.py <project> --audit-stale` 列出所有跨 retro cycle 仍为 `[ ]` 的行动项 |
+| `把这条行动项升级成正式规则` | 改成 `- [active: <rule-id>] <text>` 写入项目 `.agents/rules/` |
+| `这条行动项先放着` | 改成 `- [deferred: <reason>] <text>` |
+| `这条已经被另一条 retro 覆盖了` | 改成 `- [superseded: <other-id>] <text>` |
+| `我改的 __init__ 行为会影响哪些调用点` | grep `<ClassName>(` 全项目，每行标注 adapted / needs-adaptation / n/a + 写入 spec §调用点 |
+| `reviewer 怎么验证调用点没漏` | reviewer 必须独立 grep 并展示原始输出，不能只信 builder 报告 |
+
+行动项的合法终止态 (Rule 60):
+- `[ ]` 停留超过项目最近的 2 个 retro cycle → `vibe retro --audit-stale` 会标记为 stale
+- `[active: <rule-id>]` → 已沉淀成规则
+- `[deferred: <reason>]` → 显式延后（理由不能是 "等等再说"）
+- `[superseded: <id>]` → 被后续工作替代
+
+调用点清单 (Rule 61) 状态机:
+- `active` 当前工作正常
+- `pending` 需要本次 fix 适配
+- `latent` 当前测试通过但依赖的行为正在被改（"看起来 done 实则依赖原行为"）
+- `n/a` 不适用 + 理由
+
+`vibe next` 也会在每次推进前 surface stale 行动项，作为 advisory 提示。
+
+---
+
 ## 九、特殊场景
 
 | 场景 | 你说 |
