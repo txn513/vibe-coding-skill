@@ -165,6 +165,35 @@ vibe ui-redesign-contract <spec> --source-type opendesign --source-artifacts des
 
 ---
 
+## 八点六、调用点门禁 (Rule 62)
+
+| 你说 | Skill 做什么 |
+|---|---|
+| `检查 spec 调用点是否已列` | `vibe next` 会在 spec-ready 推进时被 Rule 59 warning 拦截（如果 Call Sites 段没列调用点也没标 N/A） |
+| `在 workflow.json 加 call_site_check` | 项目级可选配置。配了之后 `vibe commit` 会在 verify 之后跑调用点覆盖检查，失败时 exit 8 |
+| `扫描所有 retro 的调用点覆盖` | `python scripts/retro_gap_scan.py <project> --check-call-site-coverage` 列出提到调用点但缺 grep 清单的 retro |
+
+配置 call_site_check 的例子（项目 `.agents/workflow.json`）:
+
+```json
+{
+  "commands": {
+    "verify": [["pytest", "tests/", "-v"]],
+    "call_site_check": [
+      ["bash", "-c", "grep -rn 'parse_link(' backend/ | wc -l | grep -q 6"]
+    ]
+  }
+}
+```
+
+Rule 62 的门禁结构:
+- **spec-ready gate（强）**: validate_spec Rule 59 warning 阻止 draft → spec-ready
+- **commit verify gate（可选）**: 项目配 `commands.call_site_check` 时启用，未配不强制
+- **retro gate（advisory）**: `vibe retro --check-call-site-coverage` 列出 retro gap，不阻断流程
+- **commit review gate（文本约束）**: 保持 Rule 59 "reviewer 必须独立 grep" 的 MUST 要求；不做机械化 parse（review content 不可靠解析）
+
+---
+
 ## 九、特殊场景
 
 | 场景 | 你说 |

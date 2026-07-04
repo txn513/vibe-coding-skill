@@ -5279,6 +5279,176 @@ class Rule61MultiCallSiteCoverageTests(unittest.TestCase):
 
 
 
+
+class Rule62CallSiteGateTests(unittest.TestCase):
+    """Cover Rule 62 — call-site grep gate enforcement.
+
+    (a) Spec-ready gate: validate_spec Rule 59 warning blocks spec-ready
+    (already tested in Rule59CallSitesSectionTests; here we verify the
+    set_status integration).
+    (b) Commit verify gate: optional call_site_check commands.
+    (c) Retro gate: --check-call-site-coverage flags retros missing
+    grep-generated call-site lists.
+    """
+
+    def test_spec_ready_blocked_when_call_sites_unaddressed(self) -> None:
+        """Spec with Call Sites section but no entries cannot reach spec-ready."""
+        import sys
+        sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
+        import init_project, set_status as ss
+
+        tmp = tempfile.TemporaryDirectory()
+        project = Path(tmp.name)
+        init_project.init_project(str(project), "web")
+
+        spec_text = (
+            "# SPEC: r62-test\n"
+            "> 状态: draft\n> 类型: feature\n> 风险: medium\n"
+            "> 风险确认: confirmed\n> 创建时间: 2026-07-05\n> 更新时间: 2026-07-05\n\n"
+            "## 意图\n\nTest.\n\n"
+            "## 验收标准\n\n### 正常路径\n\n1. AC1\n\n"
+            "## 涉及范围\n\n- **新增文件**: x.py\n- **修改文件**: \n"
+            "- **不动文件**: \n- **受影响的读路径**: 无\n\n"
+            "## 调用点 (Call Sites)\n\n"
+            "> Rule 59: ...\n\n### 完整调用点清单\n\n"
+            "### reviewer 独立验证\n\n- [ ] reviewer 已独立跑过 grep\n"
+        )
+        spec_file = project / ".agents" / "specs" / "r62-test.md"
+        spec_file.write_text(spec_text, encoding="utf-8")
+
+        result = ss.set_status(str(project), spec_name="r62-test", new_status="spec-ready")
+        self.assertIsNone(result, "spec-ready should be blocked when Call Sites not addressed")
+        tmp.cleanup()
+
+    def test_spec_ready_passes_when_call_sites_listed(self) -> None:
+        """Spec with Call Sites section + concrete entries can reach spec-ready."""
+        import sys
+        sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
+        import init_project, set_status as ss
+
+        tmp = tempfile.TemporaryDirectory()
+        project = Path(tmp.name)
+        init_project.init_project(str(project), "web")
+
+        spec_text = (
+            "# SPEC: r62-test-ok\n"
+            "> 状态: draft\n> 类型: feature\n> 风险: medium\n"
+            "> 风险确认: confirmed\n> 创建时间: 2026-07-05\n> 更新时间: 2026-07-05\n\n"
+            "## 意图\n\nTest.\n\n"
+            "## 验收标准\n\n### 正常路径\n\n1. AC1\n\n"
+            "## 涉及范围\n\n- **新增文件**: x.py\n- **修改文件**: \n"
+            "- **不动文件**: \n- **受影响的读路径**: 无\n\n"
+            "## 调用点 (Call Sites)\n\n### 完整调用点清单\n\n"
+            "- `backend/app/handler.py:42` — adapted\n\n"
+            "### reviewer 独立验证\n\n- [x] reviewer 已独立跑过 grep\n"
+        )
+        spec_file = project / ".agents" / "specs" / "r62-test-ok.md"
+        spec_file.write_text(spec_text, encoding="utf-8")
+
+        result = ss.set_status(str(project), spec_name="r62-test-ok", new_status="spec-ready")
+        self.assertIsNotNone(result, "spec-ready should pass when Call Sites are listed")
+        tmp.cleanup()
+
+    def test_commit_rejects_on_call_site_check_failure(self) -> None:
+        """vibe commit rejects (exit 8) when call_site_check command fails."""
+        import sys
+        sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
+        import init_project, commit
+        from common import atomic_write_json
+        import subprocess
+
+        tmp = tempfile.TemporaryDirectory()
+        project = Path(tmp.name)
+        init_project.init_project(str(project), "web")
+        subprocess.run(["git", "init", "-q"], cwd=str(project), check=True)
+        subprocess.run(["git", "config", "user.email", "t@e"], cwd=str(project), check=True)
+        subprocess.run(["git", "config", "user.name", "T"], cwd=str(project), check=True)
+        (project / ".gitignore").write_text(".agents/.vibe-review-pending\n", encoding="utf-8")
+        subprocess.run(["git", "add", "-A"], cwd=str(project), check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=str(project), check=True)
+
+        # Configure verify + call_site_check (call_site_check fails)
+        import workflow_state
+        workflow, _ = workflow_state.ensure_workflow(str(project))
+        workflow.setdefault("commands", {})["verify"] = [["true"]]
+        workflow["commands"]["call_site_check"] = [["false"]]
+        atomic_write_json(str(project / ".agents" / "workflow.json"), workflow)
+
+        # Write step-1 marker + add a change
+        marker = project / ".agents" / ".vibe-review-pending"
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text("step1 ok\n", encoding="utf-8")
+        (project / "new.txt").write_text("x\n", encoding="utf-8")
+
+        rc = commit.commit(
+            str(project), ["-m", "test"],
+            reviewed=True,
+            review_summary="reviewed the diff",
+        )
+        self.assertEqual(rc, 8, "call_site_check failure should exit 8")
+        tmp.cleanup()
+
+    def test_commit_passes_when_no_call_site_check_configured(self) -> None:
+        """vibe commit succeeds normally when call_site_check is not configured."""
+        import sys
+        sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
+        import init_project, commit
+        from common import atomic_write_json
+        import subprocess
+
+        tmp = tempfile.TemporaryDirectory()
+        project = Path(tmp.name)
+        init_project.init_project(str(project), "web")
+        subprocess.run(["git", "init", "-q"], cwd=str(project), check=True)
+        subprocess.run(["git", "config", "user.email", "t@e"], cwd=str(project), check=True)
+        subprocess.run(["git", "config", "user.name", "T"], cwd=str(project), check=True)
+        (project / ".gitignore").write_text(".agents/.vibe-review-pending\n", encoding="utf-8")
+        subprocess.run(["git", "add", "-A"], cwd=str(project), check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=str(project), check=True)
+
+        import workflow_state
+        workflow, _ = workflow_state.ensure_workflow(str(project))
+        workflow.setdefault("commands", {})["verify"] = [["true"]]
+        # No call_site_check configured
+        atomic_write_json(str(project / ".agents" / "workflow.json"), workflow)
+
+        marker = project / ".agents" / ".vibe-review-pending"
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text("step1 ok\n", encoding="utf-8")
+        (project / "new.txt").write_text("x\n", encoding="utf-8")
+
+        rc = commit.commit(
+            str(project), ["-m", "test"],
+            reviewed=True,
+            review_summary="reviewed the diff",
+        )
+        self.assertEqual(rc, 0, "commit should pass when call_site_check not configured")
+        tmp.cleanup()
+
+    def test_retro_check_flags_missing_call_site_list(self) -> None:
+        """Retro mentioning call-site keyword but missing grep list is flagged."""
+        import sys
+        sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
+        import retro_gap_scan
+
+        tmp = tempfile.TemporaryDirectory()
+        project = Path(tmp.name)
+        retros_dir = project / ".agents" / "retros"
+        retros_dir.mkdir(parents=True)
+
+        # Retro that mentions 调用点 but has no structured grep list
+        (retros_dir / "test-retro.md").write_text(
+            "# Retro\n\n## 问题\n\n改了 parse_link 的行为，漏了调用点\n",
+            encoding="utf-8",
+        )
+        issues = retro_gap_scan.check_call_site_coverage(str(project))
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0].issue, "missing_call_site_list")
+
+        tmp.cleanup()
+
+
+
 class SkillUpgradeCommandTests(unittest.TestCase):
     """Cover `vibe upgrade` — bring an existing project up to the current Skill.
 

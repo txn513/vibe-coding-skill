@@ -359,6 +359,108 @@ def format_stale_items(items: list[ActionItem]) -> str:
     return "\n".join(lines)
 
 
+
+# --- Call-site coverage check (Rule 62 retro gate) ---
+_CALL_SITE_KEYWORDS = (
+    "调用点",
+    "call site",
+    "call-site",
+    "entrypoint",
+    "入口",
+    "调用方",
+    "grep",
+)
+
+
+@dataclass
+class CallSiteCoverageIssue:
+    retro_path: str
+    retro_name: str
+    issue: str  # "missing_call_site_list" / "missing_latent_state"
+
+
+def check_call_site_coverage(project_root: str) -> list[CallSiteCoverageIssue]:
+    """Check retros for multi-call-site coverage (Rule 62 retro gate).
+
+    A retro is flagged if it mentions any call-site keyword but does NOT
+    contain a grep-generated call-site list with the 4-state classification
+    (active / pending / latent / n/a).
+    """
+    retros_dir = os.path.join(project_root, ".agents", "retros")
+    if not os.path.isdir(retros_dir):
+        return []
+
+    issues: list[CallSiteCoverageIssue] = []
+    for entry in sorted(os.listdir(retros_dir)):
+        if not entry.endswith(".md"):
+            continue
+        path = os.path.join(retros_dir, entry)
+        try:
+            with open(path, encoding="utf-8") as handle:
+                content = handle.read()
+        except OSError:
+            continue
+        retro_name = entry[:-3]
+
+        has_keyword = any(kw in content.lower() for kw in _CALL_SITE_KEYWORDS)
+        if not has_keyword:
+            continue
+
+        # Structured list: "- `path/to/file.py:LINE` — adapted/pending/latent/n/a"
+        has_structured_list = bool(
+            re.search(r"^\s*[-*]\s+`[^`]+:\d+`\s+—", content, re.MULTILINE)
+        )
+        has_table = bool(
+            re.search(r"\|.*:\d+.*\|.*(active|pending|latent|n/a|adapted)", content, re.IGNORECASE)
+        )
+
+        if not has_structured_list and not has_table:
+            issues.append(
+                CallSiteCoverageIssue(
+                    retro_path=path,
+                    retro_name=retro_name,
+                    issue="missing_call_site_list",
+                )
+            )
+            continue
+
+        # Check latent state for behavior-change retros
+        has_latent = bool(re.search(r"latent", content, re.IGNORECASE))
+        has_behavior_change = bool(
+            re.search(r"行为.*变|behavior.*change|签名没变|签名不变|dormant", content, re.IGNORECASE)
+        )
+        if has_behavior_change and not has_latent:
+            issues.append(
+                CallSiteCoverageIssue(
+                    retro_path=path,
+                    retro_name=retro_name,
+                    issue="missing_latent_state",
+                )
+            )
+
+    return issues
+
+
+def format_call_site_coverage_issues(issues: list[CallSiteCoverageIssue]) -> str:
+    if not issues:
+        return "✅ All relevant retros have call-site coverage.\n"
+    lines = [f"⚠️  发现 {len(issues)} 个 retro 调用点覆盖问题 (Rule 62):"]
+    for idx, issue in enumerate(issues, start=1):
+        if issue.issue == "missing_call_site_list":
+            lines.append(
+                f"   [{idx}] {issue.retro_name}: 提到了调用点但没含 grep 清单 + 4 状态分类"
+            )
+        elif issue.issue == "missing_latent_state":
+            lines.append(
+                f"   [{idx}] {issue.retro_name}: 有行为变更但没标注 latent 状态"
+            )
+        else:
+            lines.append(f"   [{idx}] {issue.retro_name}: {issue.issue}")
+    lines.append("")
+    lines.append("Rule 62: retro 涉及多调用点 / 行为变更时，必须含 grep 清单 + 4 状态 (active/pending/latent/n/a)")
+    return "\n".join(lines)
+
+
 if __name__ == "__main__":
     import argparse
     import json
@@ -381,10 +483,22 @@ if __name__ == "__main__":
              "(default 2). Items in retros older than the Nth most recent "
              "retro are considered stale.",
     )
+    parser.add_argument(
+        "--check-call-site-coverage", action="store_true",
+        help="Check whether retros that reference multi-call-site symbols "
+             "contain a grep-generated call-site list with 4-state "
+             "classification (Rule 62 retro gate).",
+    )
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
-    if args.audit_stale:
+    if args.check_call_site_coverage:
+        issues = check_call_site_coverage(args.project_root)
+        if args.json:
+            print(json.dumps([i.__dict__ for i in issues], ensure_ascii=False, indent=2))
+        else:
+            print(format_call_site_coverage_issues(issues))
+    elif args.audit_stale:
         items = scan_stale_action_items(args.project_root, max_cycles=args.max_cycles)
         if args.json:
             print(json.dumps([i.__dict__ for i in items], ensure_ascii=False, indent=2))

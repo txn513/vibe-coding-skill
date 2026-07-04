@@ -470,10 +470,41 @@ def commit(
         print("   修复失败后重跑 `vibe commit`；或临时绕过：`vibe commit --no-verify`")
         return 3
 
+    # 2.5 Optional call-site check (Rule 62)
+    # If the project has configured `commands.call_site_check` in
+    # workflow.json, run it after verify but before commit. This lets
+    # projects enforce "all call sites of modified symbols have been
+    # adapted" as a gate — without forcing every project to configure it.
+    call_site_commands = configured_commands(workflow, "call_site_check")
+    if call_site_commands and not no_verify:
+        print(f"🔍 跑 {len(call_site_commands)} 条 call_site_check 命令 (Rule 62, 调用点覆盖检查):")
+        cs_passed = True
+        for idx, argv in enumerate(call_site_commands, 1):
+            print(f"   [{idx}/{len(call_site_commands)}] {' '.join(argv)}")
+            rc, out, err = _run(argv, project_root)
+            if rc != 0:
+                cs_passed = False
+                print(f"   ❌ 调用点检查失败 (exit {rc})")
+                if out.strip():
+                    print("   --- stdout ---")
+                    print(out.rstrip())
+                if err.strip():
+                    print("   --- stderr ---")
+                    print(err.rstrip())
+                break
+            print(f"   ✅ 调用点覆盖通过")
+        if not cs_passed:
+            print("❌ Call-site check 失败 — 取消本次 commit (Rule 62)。")
+            print("   说明: verify 测试通过，但有调用点未被覆盖。")
+            print("   修复: grep 受影响符号的全项目调用点，确保每个都已适配。")
+            print("   临时绕过: `vibe commit --no-verify`")
+            return 8
+        print()
+
     # 3. Commit — hand off to git, with Rule 53 trailer
     # Adding a git trailer so doctor can detect commits that bypassed
     # vibe commit (raw `git commit` won't have this trailer).
-    print("✅ Verify 全通过，转交 git commit")
+    print("✅ Verify 全通过" + (" + 调用点覆盖通过" if call_site_commands else "") + "，转交 git commit")
     trailer_key = "quick" if quick else "yes"
     trailer_argv = ["git", "commit", *commit_argv, "--trailer", f"Vibe-Commit={trailer_key}"]
     if verify_exception:
