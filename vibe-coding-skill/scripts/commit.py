@@ -556,9 +556,13 @@ def run(argv: list[str]) -> int:
     if no_verify:
         # Direct hand-off, no gate. Documented escape hatch. Stage
         # selection is also skipped: the user opted out of the full
-        # vibe commit flow. Note: --no-verify bypasses the Vibe-Commit
-        # trailer injection too, so doctor can only see this as a raw
-        # `git commit` (no Vibe-Commit trailer at all).
+        # vibe commit flow.
+        #
+        # Even when bypassing verify, we still inject a Review-Summary
+        # trailer if --reviewed + --review-summary were passed — without
+        # this the audit trail is broken (Agent "reviewed" but the claim
+        # is invisible in git history). Vibe-Commit=no-verify distinguishes
+        # this from a normal commit so doctor can detect the bypass.
         project_root = os.path.abspath(project_root)
         if not _is_git_repo(project_root):
             print("❌ 当前项目不是 git 仓库")
@@ -566,8 +570,13 @@ def run(argv: list[str]) -> int:
         if paths:
             _run(["git", "reset", "HEAD"], project_root)
             _run(["git", "add", "--"] + paths, project_root)
+        augmented_argv = [*git_args, "--trailer", "Vibe-Commit=no-verify"]
+        if reviewed and review_summary.strip():
+            augmented_argv.extend([
+                "--trailer", f"Review-Summary={review_summary.strip()}",
+            ])
         completed = subprocess.run(
-            ["git", "commit", *git_args], cwd=project_root
+            ["git", "commit", *augmented_argv], cwd=project_root
         )
         return completed.returncode
 
