@@ -439,6 +439,9 @@ def doctor(project_root: str) -> dict:
             "run `vibe archive-stale <root> [--apply]` (Rule 45)"
         )
 
+    _check_spec_frontmatter_uniqueness(project_root, warnings)
+    _check_stale_retro_action_items(project_root, warnings)
+
     for name in _missing_auxiliaries():
         warnings.append(
             f"suite auxiliary not installed: {name} — run "
@@ -468,6 +471,74 @@ def doctor(project_root: str) -> dict:
         print(f"<!-- vibe:adjacent_protection: total={total} protected={protected} skipped={skipped} -->")
     print(f"<!-- vibe:doctor_health: {health} issues={len(issues)} warnings={len(warnings)} -->")
     return {"workflow": workflow, "issues": issues, "warnings": warnings}
+
+
+# Frontmatter fields that MUST be unique in a spec (one line per field).
+# `依赖` is intentionally excluded — multiple dependencies are valid
+# (`> 依赖: spec-a, spec-b`). All other governance-critical fields
+# should appear exactly once; duplicates indicate a write tool bug
+# (e.g. an older set_status.py appending without dedup).
+_UNIQUE_FRONTMATTER_FIELDS = (
+    "状态",
+    "风险",
+    "风险确认",
+    "更新时间",
+)
+
+
+def _check_spec_frontmatter_uniqueness(project_root: Path, warnings: list[str]) -> None:
+    """Advisory: flag specs whose governance-critical frontmatter fields
+    appear more than once. Likely a tool bug or manual edit error.
+    Only advisory — project migration periods may legitimately have
+    duplicates while dedup scripts run.
+    """
+    specs_dir = Path(project_root) / ".agents" / "specs"
+    if not specs_dir.exists():
+        return
+    for spec_path in sorted(specs_dir.glob("*.md")):
+        if spec_path.name.endswith("-amendments.md"):
+            continue
+        try:
+            content = spec_path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        spec_name = spec_path.stem
+        for field in _UNIQUE_FRONTMATTER_FIELDS:
+            pattern = rf"^>\s*{re.escape(field)}:\s*\S"
+            matches = re.findall(pattern, content, re.MULTILINE)
+            if len(matches) > 1:
+                warnings.append(
+                    f"spec '{spec_name}' frontmatter 字段 '{field}' 出现 "
+                    f"{len(matches)} 行（应唯一）— 可能是 set_status / "
+                    f"confirm_risk 写入 bug，建议清理"
+                )
+
+
+def _check_stale_retro_action_items(project_root: Path, warnings: list[str]) -> None:
+    """Advisory: flag retro action items still in `[ ]` past the project's
+    natural review cadence. Mirrors the hint that vibe next emits, but
+    also surfaces here so `vibe doctor` is self-contained.
+
+    Reuses scan_stale_action_items() from retro_gap_scan (Rule 60).
+    """
+    from retro_gap_scan import scan_stale_action_items
+    retros_dir = Path(project_root) / ".agents" / "retros"
+    if not retros_dir.exists():
+        return
+    try:
+        stale = scan_stale_action_items(str(project_root), max_cycles=2)
+    except Exception:  # noqa: BLE001
+        # Advisory only; never let a retro scan error block doctor.
+        return
+    if not stale:
+        return
+    warnings.append(
+        f"{len(stale)} retro action item(s) still in `[ ]` past the "
+        f"project's 2-cycle review cadence (Rule 60). Run "
+        f"`python scripts/retro_gap_scan.py <project> --audit-stale` "
+        f"for the full list and upgrade each to "
+        f"[active: <id>] / [deferred: <reason>] / [superseded: <id>]."
+    )
 
 
 def _audit_context_freshness(project_root: Path, warnings: list[str]) -> None:

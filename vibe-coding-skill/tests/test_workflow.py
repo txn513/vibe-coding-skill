@@ -5449,6 +5449,187 @@ class Rule62CallSiteGateTests(unittest.TestCase):
 
 
 
+
+class DoctorSpecFrontmatterUniquenessTests(unittest.TestCase):
+    """Cover the new doctor advisory that flags duplicate frontmatter
+    fields in spec files. Only the 4 governance-critical fields are
+    checked (状态 / 风险 / 风险确认 / 更新时间). 依赖 is intentionally
+    excluded because multiple dependencies are valid.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name)
+        init_project.init_project(str(self.project), "web")
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _write_spec(self, name: str, content: str) -> None:
+        specs_dir = self.project / ".agents" / "specs"
+        specs_dir.mkdir(parents=True, exist_ok=True)
+        (specs_dir / f"{name}.md").write_text(content, encoding="utf-8")
+
+    def _doctor_warnings(self) -> list[str]:
+        import sys
+        sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
+        import doctor_project
+        result = doctor_project.doctor(str(self.project))
+        return [w for w in result["warnings"] if "frontmatter" in w and "出现" in w]
+
+    def test_clean_spec_no_warning(self) -> None:
+        """Spec with each governance field appearing once → no warning."""
+        self._write_spec("clean", (
+            "# SPEC: clean\n"
+            "> 状态: draft\n"
+            "> 风险: medium\n"
+            "> 风险确认: confirmed\n"
+            "> 更新时间: 2026-07-06\n\n"
+            "## 意图\n\nTest\n"
+        ))
+        self.assertEqual(self._doctor_warnings(), [])
+
+    def test_duplicate_status_flagged(self) -> None:
+        """Two `> 状态:` lines → warning."""
+        self._write_spec("dup-status", (
+            "# SPEC: dup-status\n"
+            "> 状态: draft\n"
+            "> 状态: spec-ready\n"
+            "> 风险: medium\n"
+            "> 风险确认: confirmed\n"
+            "> 更新时间: 2026-07-06\n\n"
+            "## 意图\n\nTest\n"
+        ))
+        warnings = self._doctor_warnings()
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("'dup-status'", warnings[0])
+        self.assertIn("'状态'", warnings[0])
+        self.assertIn("2 行", warnings[0])
+
+    def test_duplicate_risk_flagged(self) -> None:
+        """Two `> 风险:` lines → warning."""
+        self._write_spec("dup-risk", (
+            "# SPEC: dup-risk\n"
+            "> 状态: draft\n"
+            "> 风险: low\n"
+            "> 风险: medium\n"
+            "> 风险确认: confirmed\n"
+            "> 更新时间: 2026-07-06\n\n"
+            "## 意图\n\nTest\n"
+        ))
+        warnings = self._doctor_warnings()
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("'风险'", warnings[0])
+
+    def test_duplicate_dependency_not_flagged(self) -> None:
+        """Multiple `> 依赖:` lines are valid (multiple deps), not flagged."""
+        self._write_spec("multi-dep", (
+            "# SPEC: multi-dep\n"
+            "> 状态: draft\n"
+            "> 风险: medium\n"
+            "> 风险确认: confirmed\n"
+            "> 更新时间: 2026-07-06\n"
+            "> 依赖: spec-a\n"
+            "> 依赖: spec-b\n"
+            "> 依赖: spec-c\n\n"
+            "## 意图\n\nTest\n"
+        ))
+        self.assertEqual(self._doctor_warnings(), [])
+
+    def test_amendments_file_excluded(self) -> None:
+        """`<name>-amendments.md` is auto-generated, not checked."""
+        self._write_spec("amend-target-amendments", (
+            "# SPEC: amend-target-amendments\n"
+            "> 状态: draft\n"
+            "> 状态: spec-ready\n"
+            "> 状态: in-progress\n\n"
+        ))
+        # Even though there are duplicate 状态 lines, this is the
+        # amendments file which doctor does not scan.
+        self.assertEqual(self._doctor_warnings(), [])
+
+    def test_multiple_specs_each_with_dup(self) -> None:
+        """Each duplicate field gets its own warning."""
+        self._write_spec("spec-a", (
+            "# SPEC: spec-a\n> 状态: draft\n> 状态: spec-ready\n"
+        ))
+        self._write_spec("spec-b", (
+            "# SPEC: spec-b\n> 风险: low\n> 风险: medium\n"
+        ))
+        warnings = self._doctor_warnings()
+        self.assertEqual(len(warnings), 2)
+
+
+class DoctorStaleRetroActionItemsTests(unittest.TestCase):
+    """Cover the new doctor advisory that surfaces stale retro action
+    items. Reuses scan_stale_action_items from retro_gap_scan (Rule 60).
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name)
+        init_project.init_project(str(self.project), "web")
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _write_retro(self, name: str, items: list[str], mtime_offset: int = 0) -> None:
+        import os, time
+        retros_dir = self.project / ".agents" / "retros"
+        retros_dir.mkdir(parents=True, exist_ok=True)
+        path = retros_dir / f"{name}.md"
+        path.write_text(
+            f"# Retro {name}\n\n## 行动项\n\n" + "\n".join(items) + "\n",
+            encoding="utf-8",
+        )
+        mtime = time.time() - mtime_offset
+        os.utime(path, (mtime, mtime))
+
+    def _doctor_warnings(self) -> list[str]:
+        import sys
+        sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
+        import doctor_project
+        result = doctor_project.doctor(str(self.project))
+        return [w for w in result["warnings"] if "retro action item" in w.lower()]
+
+    def test_no_retros_no_warning(self) -> None:
+        """Empty retros dir → no stale items warning."""
+        self.assertEqual(self._doctor_warnings(), [])
+
+    def test_only_terminal_states_no_warning(self) -> None:
+        """All retro items in terminal states → no stale warning."""
+        self._write_retro("r1", ["- [x] done"], mtime_offset=0)
+        self._write_retro("r2", [
+            "- [active: rule-x] promoted",
+            "- [deferred: waiting] parked",
+            "- [superseded: rule-y] replaced",
+        ], mtime_offset=100000)
+        self.assertEqual(self._doctor_warnings(), [])
+
+    def test_stale_open_items_warning(self) -> None:
+        """Open items in old retros → stale advisory in doctor."""
+        self._write_retro("recent", ["- [x] done"], mtime_offset=0)
+        self._write_retro("old", ["- [ ] still open"], mtime_offset=100000)
+        warnings = self._doctor_warnings()
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("1 retro action item", warnings[0])
+        self.assertIn("Rule 60", warnings[0])
+        self.assertIn("--audit-stale", warnings[0])
+
+    def test_warnings_count_matches(self) -> None:
+        """Advisory count matches actual stale items."""
+        self._write_retro("recent", ["- [x] done"], mtime_offset=0)
+        self._write_retro("old", [
+            "- [ ] item 1",
+            "- [ ] item 2",
+            "- [ ] item 3",
+        ], mtime_offset=100000)
+        warnings = self._doctor_warnings()
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("3 retro action item", warnings[0])
+
+
+
 class SkillUpgradeCommandTests(unittest.TestCase):
     """Cover `vibe upgrade` — bring an existing project up to the current Skill.
 
