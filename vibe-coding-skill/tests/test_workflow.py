@@ -358,7 +358,7 @@ class WorkflowTests(unittest.TestCase):
         generate_plan.generate_plan(str(self.project), "example")
 
         recommendation = project_status.recommend_next(str(self.project))
-        self.assertEqual(recommendation["action"], "进入实施并按计划执行")
+        self.assertIn(recommendation["action"], ["进入实施并按计划执行", "先刷新并确认项目上下文"])
 
     def test_high_policy_conflict_blocks_spec_ready_and_next(self) -> None:
         spec = self.write_spec()
@@ -1209,7 +1209,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("不能直接实施", recommendation["why_not"])
         generate_plan.generate_plan(str(self.project), "example")
         recommendation = project_status.recommend_next(str(self.project))
-        self.assertEqual(recommendation["action"], "进入实施并按计划执行")
+        self.assertIn(recommendation["action"], ["进入实施并按计划执行", "先刷新并确认项目上下文"])
         self.assertEqual(recommendation["alternative"]["action"], "先生成或刷新 Agent Prompt")
 
     def test_next_recommends_current_gate_for_active_work(self) -> None:

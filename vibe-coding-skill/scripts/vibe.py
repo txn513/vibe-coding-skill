@@ -40,6 +40,7 @@ import set_status
 import self_analyze
 import spec_amend
 import retrospective
+import update_agents
 
 
 def main() -> None:
@@ -286,6 +287,10 @@ def main() -> None:
     policy_override.add_argument("--reason", required=True)
     policy_override.add_argument("--actor", default="")
 
+    update_agents_cmd = sub.add_parser("update-agents")
+    update_agents_cmd.add_argument("project_root")
+    update_agents_cmd.add_argument("--force", action="store_true")
+
     args = parser.parse_args()
 
     # install-auxiliary: project_root 不需要；直接转发到 install_auxiliary.main()
@@ -337,6 +342,11 @@ def main() -> None:
         raise SystemExit(1 if result["issues"] else 0)
     elif args.operation == "context-refresh":
         refresh_context.refresh_context(root)
+    elif args.operation == "update-agents":
+        result = update_agents.update_agents(root, args.force)
+        print(result["message"])
+        if not result["success"]:
+            raise SystemExit(1)
     elif args.operation == "boundary":
         result = knowledge_gate.audit_skill(args.skill_root, root)
         knowledge_gate.print_audit(result)

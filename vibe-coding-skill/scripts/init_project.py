@@ -60,7 +60,7 @@ def init_project(path: str, project_type: str = "generic", force: bool = False) 
         os.makedirs(d, exist_ok=True)
 
     # Generate AGENTS.md
-    tmpl = _read("agents.md")
+    tmpl = _read("agents-phase-gates.md")
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     defaults = _defaults(project_type, project_name)
 
@@ -115,7 +115,7 @@ def init_project(path: str, project_type: str = "generic", force: bool = False) 
     policy_manifest = scan_policy_sources(Path(path), apply=True)
 
     print(f"✅ 项目初始化完成: {path}")
-    print(f"   AGENTS.md     — Agent 上下文文件")
+    print(f"   AGENTS.md     — Agent 上下文文件（含阶段强制规范）")
     print(f"   .agents/rules/ — 编码规范 (api, db, error, security, frontend)")
     print(f"   .agents/specs/ — 功能规格")
     print(f"   .agents/plans/ — 实施计划")

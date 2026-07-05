@@ -42,7 +42,7 @@ def onboard_project(root: str, project_type: str = "generic", force: bool = Fals
         os.makedirs(os.path.join(agents_dir, sub), exist_ok=True)
 
     # Generate AGENTS.md
-    tmpl_path = os.path.join(TEMPLATE_DIR, "agents.md")
+    tmpl_path = os.path.join(TEMPLATE_DIR, "agents-phase-gates.md")
     if os.path.exists(tmpl_path):
         with open(tmpl_path) as f:
             template = f.read()
@@ -113,7 +113,7 @@ def onboard_project(root: str, project_type: str = "generic", force: bool = Fals
 
     # Summary
     print(f"✅ 项目已接手: {root}")
-    print(f"   AGENTS.md 已生成（基于自动检测）")
+    print(f"   AGENTS.md 已生成（基于自动检测，含阶段强制规范）")
     print()
     print(f"📋 检测结果:")
     print(f"   语言: {language}")

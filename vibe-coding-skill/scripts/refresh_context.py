@@ -9,6 +9,24 @@ from datetime import datetime, timezone
 
 from common import atomic_write
 
+# Lazy import to avoid circular dependency
+_update_agents = None
+
+def _get_update_agents():
+    global _update_agents
+    if _update_agents is None:
+        import importlib.util
+        import sys
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        spec = importlib.util.spec_from_file_location("update_agents", os.path.join(script_dir, "update_agents.py"))
+        if spec and spec.loader:
+            mod = importlib.util.module_from_spec(spec)
+            sys.modules["update_agents"] = mod
+            spec.loader.exec_module(mod)
+            _update_agents = mod
+    return _update_agents
+
+
 IGNORED_DIRS = {
     ".git", "node_modules", "__pycache__", ".venv", "venv", ".next", "dist",
     "build", ".agents", ".codex", "target", ".idea", ".vscode",
@@ -102,6 +120,20 @@ def refresh_context(project_root: str) -> None:
     elif os.path.exists(snapshot):
         os.remove(snapshot)
 
+    # Check if phase-gates section needs update
+    phase_gates_advisory = []
+    try:
+        update_agents_mod = _get_update_agents()
+        if update_agents_mod:
+            result = update_agents_mod.update_agents(project_root)
+            if result.get("success") and not result.get("updated"):
+                # Version matches, no update needed
+                pass
+            elif result.get("success") and result.get("updated"):
+                phase_gates_advisory.append(f"阶段强制规范已更新: {result.get('message')}")
+    except Exception:
+        pass  # Don't fail context-refresh if phase-gates check fails
+
     print(f"✅ AGENTS.md 已刷新 ({now})")
     if updates:
         print("   变更:")
@@ -109,6 +141,10 @@ def refresh_context(project_root: str) -> None:
             print(f"   - {u}")
     else:
         print("   (上下文已是最新，无需变更)")
+    if phase_gates_advisory:
+        print("   阶段强制规范:")
+        for advisory in phase_gates_advisory:
+            print(f"   - {advisory}")
     if suggestions:
         print(f"   待人工核对: {len(suggestions)} 项，见 .agents/context-refresh.md")
     print()
