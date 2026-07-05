@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 """Update project's AGENTS.md with the latest phase-gates template from Skill.
 
-This command allows existing projects to receive updates to the phase-gates
-section without losing their project-specific content (tech stack, architecture
-constraints, etc.).
+Supports project-level overrides via the `## 阶段覆盖声明` section in AGENTS.md.
 
 Usage:
     vibe update-agents [--force]
@@ -11,10 +9,14 @@ Usage:
 The command:
 1. Reads the latest agents-phase-gates.md template from Skill
 2. Extracts the "阶段强制规范" section from the template
-3. Replaces or appends this section in the project's AGENTS.md
-4. Records the Skill version used for the update
+3. Reads project's "阶段覆盖声明" section (if any)
+4. Merges: Skill template + project overrides = final AGENTS.md
+5. Records the Skill version used for the update
 
-If AGENTS.md doesn't exist, suggests running init_project.py first.
+Merge rules:
+- Project override takes precedence over Skill default
+- If no override, use Skill default
+- If conflict, project wins but warns
 """
 
 import argparse
@@ -30,6 +32,7 @@ TEMPLATE_DIR = os.path.join(SKILL_DIR, "templates")
 
 # Marker for the phase-gates section in AGENTS.md
 PHASE_GATES_START_MARKER = "## 阶段强制规范（Phase Gates）"
+OVERRIDE_SECTION_MARKER = "## 阶段覆盖声明（Phase Gates Override）"
 PHASE_GATES_END_MARKER = "## 技术栈"
 
 # Template file name
@@ -43,7 +46,6 @@ def _read_template() -> str:
     """Read the latest phase-gates template from Skill."""
     path = os.path.join(TEMPLATE_DIR, PHASE_GATES_TEMPLATE)
     if not os.path.exists(path):
-        # Fallback: try the old template
         path = os.path.join(TEMPLATE_DIR, "agents.md")
         if not os.path.exists(path):
             raise FileNotFoundError(f"找不到模板文件: {path}")
@@ -53,23 +55,48 @@ def _read_template() -> str:
 
 def _extract_phase_gates_section(template_content: str) -> str:
     """Extract the phase-gates section from the template."""
-    # Find the section between PHASE_GATES_START_MARKER and PHASE_GATES_END_MARKER
     start_idx = template_content.find(PHASE_GATES_START_MARKER)
     if start_idx == -1:
         raise ValueError(f"模板中找不到 '{PHASE_GATES_START_MARKER}' 标记")
     
-    # Find the end marker - look for the next ## 标题 after the start marker
     after_start = template_content[start_idx + len(PHASE_GATES_START_MARKER):]
-    # Find the next ## heading
     end_match = re.search(r"\n## ", after_start)
     if end_match:
-        # Include everything up to but not including the next ## heading
         section = template_content[start_idx:start_idx + len(PHASE_GATES_START_MARKER) + end_match.start()]
     else:
-        # No next heading, take everything to the end
         section = template_content[start_idx:]
     
     return section.strip()
+
+
+def _extract_project_overrides(agents_content: str) -> str | None:
+    """Extract the phase-gates override section from project's AGENTS.md."""
+    start_idx = agents_content.find(OVERRIDE_SECTION_MARKER)
+    if start_idx == -1:
+        return None
+    
+    after_start = agents_content[start_idx + len(OVERRIDE_SECTION_MARKER):]
+    end_match = re.search(r"\n## ", after_start)
+    if end_match:
+        section = agents_content[start_idx:start_idx + len(OVERRIDE_SECTION_MARKER) + end_match.start()]
+    else:
+        section = agents_content[start_idx:]
+    
+    return section.strip()
+
+
+def _merge_phase_gates(skill_section: str, project_overrides: str | None) -> str:
+    """Merge Skill phase-gates with project overrides."""
+    if not project_overrides:
+        return skill_section
+    
+    merged = skill_section + "\n\n"
+    merged += "---\n\n"
+    merged += "> **阶段覆盖声明**: 本项目对标准阶段强制规范有覆盖。"
+    merged += "标准规则仍然适用，除非满足覆盖条件。\n\n"
+    merged += project_overrides + "\n"
+    
+    return merged
 
 
 def _get_skill_version() -> str:
@@ -108,11 +135,9 @@ def update_agents(project_root: str, force: bool = False) -> dict:
             "updated": False,
         }
     
-    # Read existing AGENTS.md
     with open(agents_path, encoding="utf-8") as f:
         existing_content = f.read()
     
-    # Read latest template
     try:
         template_content = _read_template()
     except (FileNotFoundError, ValueError) as e:
@@ -123,7 +148,6 @@ def update_agents(project_root: str, force: bool = False) -> dict:
             "updated": False,
         }
     
-    # Extract phase-gates section from template
     try:
         phase_gates_section = _extract_phase_gates_section(template_content)
     except ValueError as e:
@@ -134,12 +158,13 @@ def update_agents(project_root: str, force: bool = False) -> dict:
             "updated": False,
         }
     
-    # Get versions
+    project_overrides = _extract_project_overrides(existing_content)
+    merged_section = _merge_phase_gates(phase_gates_section, project_overrides)
+    
     skill_version = _get_skill_version()
     existing_version = _extract_existing_version(existing_content)
     
-    # Check if update is needed
-    if not force and existing_version == skill_version:
+    if not force and existing_version == skill_version and not project_overrides:
         return {
             "success": True,
             "message": f"AGENTS.md 阶段强制规范已是最新 (版本: {skill_version})，无需更新",
@@ -147,46 +172,36 @@ def update_agents(project_root: str, force: bool = False) -> dict:
             "updated": False,
         }
     
-    # Add version marker to the section
     version_line = f"{VERSION_MARKER}{skill_version} -->"
-    phase_gates_section_with_version = f"{phase_gates_section}\n\n{version_line}\n"
+    section_with_version = f"{merged_section}\n\n{version_line}\n"
     
-    # Replace or append the phase-gates section in AGENTS.md
-    # Find if the section already exists
     start_idx = existing_content.find(PHASE_GATES_START_MARKER)
     
     if start_idx != -1:
-        # Section exists, replace it
-        # Find where the section ends (next ## heading or end of file)
         after_start = existing_content[start_idx + len(PHASE_GATES_START_MARKER):]
         end_match = re.search(r"\n## ", after_start)
         
         if end_match:
             end_pos = start_idx + len(PHASE_GATES_START_MARKER) + end_match.start()
-            new_content = existing_content[:start_idx] + phase_gates_section_with_version + "\n\n" + existing_content[end_pos:]
+            new_content = existing_content[:start_idx] + section_with_version + "\n\n" + existing_content[end_pos:]
         else:
-            # Section is at the end, replace everything from start
-            new_content = existing_content[:start_idx] + phase_gates_section_with_version
+            new_content = existing_content[:start_idx] + section_with_version
     else:
-        # Section doesn't exist, append before "## 技术栈" or at the end
         tech_stack_idx = existing_content.find("## 技术栈")
         if tech_stack_idx != -1:
-            new_content = existing_content[:tech_stack_idx] + phase_gates_section_with_version + "\n\n" + existing_content[tech_stack_idx:]
+            new_content = existing_content[:tech_stack_idx] + section_with_version + "\n\n" + existing_content[tech_stack_idx:]
         else:
-            # Append at the end
-            new_content = existing_content + "\n\n" + phase_gates_section_with_version
+            new_content = existing_content + "\n\n" + section_with_version
     
-    # Backup existing file
     agents_dir = os.path.join(project_root, ".agents")
     backup_file(agents_path, os.path.join(agents_dir, "backups", "agents-update"))
-    
-    # Write updated content
     atomic_write(agents_path, new_content)
     
     action = "更新" if start_idx != -1 else "新增"
+    override_note = "（含项目覆盖声明）" if project_overrides else ""
     return {
         "success": True,
-        "message": f"AGENTS.md 阶段强制规范已{action} (Skill 版本: {skill_version})",
+        "message": f"AGENTS.md 阶段强制规范已{action}{override_note} (Skill 版本: {skill_version})",
         "version": skill_version,
         "updated": True,
     }
