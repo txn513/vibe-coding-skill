@@ -75,6 +75,64 @@ def record_evidence(
     if command:
         commands = [command]
 
+    # Advisory A: suggest filling actor/role (Record-Side Identity Hint)
+    # If user did not pass --actor or --role, suggest filling them.
+    # This is advisory only; we do not silently default because:
+    # (1) different phases of the same spec may be recorded by different
+    # roles (builder in-progress, releaser release, observer observe);
+    # (2) the recorded identity is the agent/person recording the evidence,
+    # which is a different fact from the project role assigned to the spec.
+    if not actor or not role:
+        phase_to_role = {
+            "verify": "builder",
+            "release": "releaser",
+            "observe": "observer",
+        }
+        suggested_role = phase_to_role.get(phase)
+        missing = []
+        if not actor:
+            missing.append("--actor")
+        if not role and suggested_role:
+            missing.append(f"--role {suggested_role}")
+        if missing:
+            hint = (
+                f"\u26a0\ufe0f  证据未记录执行者身份: 建议补充 {' '.join(missing)}"
+            )
+            if suggested_role:
+                hint += (
+                    f" (项目级默认可在 .agents/workflow.json 的 "
+                    f"roles.{suggested_role} 配置)"
+                )
+            print(hint)
+            print(
+                "<!-- vibe:evidence_identity_hint: missing="
+                + ",".join(
+                    name
+                    for name, present in (("actor", actor), ("role", role))
+                    if not present
+                )
+                + " -->"
+            )
+
+    # Advisory B: suggest --configured when project has commands but
+    # user did not use it (Command-Digests Auto-Capture Hint)
+    if not configured and not command:
+        all_commands = (
+            configured_commands(workflow, phase)
+            or configured_commands(workflow, "verify")
+            or []
+        )
+        if all_commands:
+            print(
+                f"\u26a0\ufe0f  项目已配置 {len(all_commands)} 条 {phase} 命令，"
+                f"建议加 --configured 自动捕获 Command-Digests 与执行结果，"
+                f"否则 verify gate 可能报 evidence exists but digest mismatch。"
+            )
+            print(
+                f"<!-- vibe:evidence_configured_hint: phase={phase} "
+                f"commands={len(all_commands)} -->"
+            )
+
     command_output = ""
     exit_codes: list[str] = []
     command_digests: list[str] = []

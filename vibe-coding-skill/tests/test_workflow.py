@@ -670,6 +670,56 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("verified-output", evidence)
         self.assertIn("Snapshot:", evidence)
 
+    def test_record_evidence_hints_missing_actor_role(self) -> None:
+        self.write_spec(status="in-progress")
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            record_evidence.record_evidence(
+                str(self.project), "example", "verify", "passed", "checks passed",
+                "claude-code", "builder",
+            )
+        self.assertNotIn("evidence_identity_hint", output.getvalue())
+
+    def test_record_evidence_hints_when_actor_missing(self) -> None:
+        self.write_spec(status="in-progress")
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            record_evidence.record_evidence(
+                str(self.project), "example", "verify", "passed", "checks passed",
+                "", "builder",
+            )
+        text = output.getvalue()
+        self.assertIn("未记录执行者身份", text)
+        self.assertIn("evidence_identity_hint", text)
+
+    def test_record_evidence_hints_when_role_missing(self) -> None:
+        self.write_spec(status="in-progress")
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            record_evidence.record_evidence(
+                str(self.project), "example", "verify", "passed", "checks passed",
+                "claude-code", "",
+            )
+        text = output.getvalue()
+        self.assertIn("未记录执行者身份", text)
+        self.assertIn("--role builder", text)
+
+    def test_record_evidence_hints_suggest_configured(self) -> None:
+        self.write_spec(status="in-progress")
+        wf_path = Path(self.project) / ".agents" / "workflow.json"
+        wf = json.loads(wf_path.read_text(encoding="utf-8"))
+        wf.setdefault("commands", {})["verify"] = [["echo", "ok"]]
+        wf_path.write_text(json.dumps(wf), encoding="utf-8")
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            record_evidence.record_evidence(
+                str(self.project), "example", "verify", "passed", "checks passed",
+                "claude-code", "builder",
+            )
+        text = output.getvalue()
+        self.assertIn("项目已配置", text)
+        self.assertIn("evidence_configured_hint", text)
+
     def test_repeated_evidence_is_archived_before_replacement(self) -> None:
         self.write_spec(status="in-progress")
         record_evidence.record_evidence(
