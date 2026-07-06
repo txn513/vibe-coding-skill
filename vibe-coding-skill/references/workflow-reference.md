@@ -530,7 +530,26 @@ the current snapshot.
 ```bash
 python3 scripts/refresh_context.py <project_root>
 ```
-Only fill unconfirmed fields automatically. Preserve confirmed project decisions and stage detected disagreements in `.agents/context-refresh.md` for review.
+Only fill unconfirmed fields automatically. Preserve confirmed project decisions and stage detected disagreements in `.agents/context-refresh.md` for review. Also checks whether the phase-gates section needs updating from the latest Skill template; if so, it updates the section automatically and preserves any project-level overrides.
+
+**`scripts/update_agents.py`** — Update project's phase-gates section from the latest Skill template:
+```bash
+python3 scripts/update_agents.py <project_root>
+python3 scripts/update_agents.py <project_root> --force   # force update even if version matches
+# or via the outer CLI:
+vibe update-agents <project_root>
+vibe update-agents <project_root> --force
+```
+
+Reads the latest `agents-phase-gates.md` template from the Skill, extracts the
+`## 阶段强制规范（Phase Gates）` section, and replaces or appends it in the
+project's AGENTS.md. The section is versioned with a
+`<!-- vibe:phase-gates-version: <hash> -->` marker so the Skill can detect
+drift. If the project has a `## 阶段覆盖声明（Phase Gates Override）` section,
+the merge preserves project overrides — project-level declarations take
+precedence over Skill defaults, and the merged section annotates the override.
+`vibe context-refresh` also calls this automatically, so the phase-gates
+section stays current without a separate command in most cases.
 
 **`scripts/sync_rules.py`** — Sync project rules with latest skill templates:
 ```bash

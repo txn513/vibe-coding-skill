@@ -14,6 +14,8 @@
 | `检查一下项目健康` | 运行 doctor，检查结构完整性、规范冲突、配置缺失 |
 | `刷新上下文` | 更新 AGENTS.md 里的技术栈、当前阶段等项目信息 |
 | `有哪些待确认的规范` | 列出接管老项目后尚未确认的规范差异 |
+| `更新 AGENTS.md 的阶段规范` | 把 Skill 最新的阶段强制规范同步到项目 AGENTS.md（保留项目覆盖声明） |
+| `老项目升级阶段规范` | 同上；`vibe update-agents <project>` 或 `vibe update-agents <project> --force` |
 
 ---
 
@@ -114,6 +116,7 @@ vibe ui-redesign-contract <spec> --source-type opendesign --source-artifacts des
 | `这个功能涉及 fallback，验证一下` | 触发降级链路验证规则 |
 | `这个功能涉及缓存过期，验证一下` | 触发 TTL/过期验证规则 |
 | `这个治理源扫描器不识别, 我手动声明保留` | 跑 `vibe policy-override-add <root> <source_id> --reason "..." --actor <you>`, 把 `manifest_override: true` + reason + actor 写进 manifest + audit.md, doctor 不再报 missing warning |
+| `项目有自己的阶段规范覆盖` | 在 AGENTS.md 中添加 `## 阶段覆盖声明（Phase Gates Override）` 章节，声明覆盖的阶段、标准规则、覆盖为、生效条件。`vibe update-agents` 合并时保留项目覆盖 |
 
 ---
 
@@ -231,6 +234,8 @@ Rule 62 的门禁结构:
 - 验证自动要求用户可感知证据（Rule 28）
 - 记录 evidence 时如果只写"跑了 pytest"而没附可重跑命令，会出 non-blocking 提示让你补 --command 或在证据里贴完整命令行（Rule 28.3）
 - 新建的 spec 会自动写 `> Prompt version: 1`，`spec amend` 时自动 bump 到 N+1；老 spec 缺这行时 `doctor` 会提醒补（Rule 47）
+- AGENTS.md 中的 `## 阶段强制规范（Phase Gates）` 章节会在 Skill 升级后自动提示更新；`vibe context-refresh` 会自动检查并更新，版本由 `<!-- vibe:phase-gates-version: <hash> -->` 标记跟踪
+- 项目级阶段覆盖声明（`## 阶段覆盖声明`）在 `vibe update-agents` 合并时始终保留，项目规则优先于 Skill 默认
 - `vibe status`/`next`/`doctor`/`advance` 输出末尾会带 `<!-- vibe:<key>: <value> -->` 标记（如 `next_action`、`gate_verdict`），agent 可以 grep 这些 marker 做结构化解析；不识别 marker 的消费者照常看自然语言（Rule 50）
 - type=bug 的 spec 会在创建时自动加 `## 修复范围 (Fix Scope)` 段（已修位置 / 故意不改的相邻位置 / 判断依据），老 spec 缺这节时 `doctor` 会提醒补；目的是防止"bug 改了一处漏改 N 处"的回归（Rule 51）
 - `vibe doctor` 会自动检查 Skill 版本：项目记录的版本（旧 `.agents/.skill-version`）vs Skill 当前安装版本（`VERSION`），不一致时出 advisory 提醒你开新 session 或重载 skill（Rule 52）
