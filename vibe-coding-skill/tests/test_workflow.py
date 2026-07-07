@@ -489,9 +489,9 @@ class WorkflowTests(unittest.TestCase):
 
     def test_repeated_amendments_write_real_values(self) -> None:
         self.write_spec(status="spec-ready")
-        spec_amend.amend_spec(str(self.project), "example", "first change")
+        spec_amend.amend_spec(str(self.project), "example", "first change", apply=True)
         time.sleep(0.01)
-        spec_amend.amend_spec(str(self.project), "example", "second | change")
+        spec_amend.amend_spec(str(self.project), "example", "second | change", apply=True)
 
         spec = (self.project / ".agents" / "specs" / "example.md").read_text(
             encoding="utf-8"
@@ -511,7 +511,7 @@ class WorkflowTests(unittest.TestCase):
         generate_plan.generate_plan(str(self.project), "example")
         generate_prompt.generate_and_save(str(self.project), "example")
 
-        spec_amend.amend_spec(str(self.project), "example", "requirements changed")
+        spec_amend.amend_spec(str(self.project), "example", "requirements changed", apply=True)
 
         spec = (self.project / ".agents" / "specs" / "example.md").read_text(
             encoding="utf-8"
@@ -901,7 +901,7 @@ class WorkflowTests(unittest.TestCase):
 
     def test_amendment_requires_explicit_risk_reconfirmation(self) -> None:
         self.write_spec(status="spec-ready")
-        spec_amend.amend_spec(str(self.project), "example", "scope expanded")
+        spec_amend.amend_spec(str(self.project), "example", "scope expanded", apply=True)
         spec = self.project / ".agents" / "specs" / "example.md"
         self.assertIn("> 风险确认: pending", spec.read_text(encoding="utf-8"))
         self.assertIsNone(
@@ -2997,7 +2997,7 @@ class IntegrationTests(unittest.TestCase):
         self._approve_review("amend-me")
         self._advance("amend-me", "done")
 
-        r = self._vibe("amend", str(self.project), "amend-me", "需求变更")
+        r = self._vibe("amend", str(self.project), "amend-me", "需求变更", "--apply")
         self.assertEqual(r.returncode, 0, msg=_combined(r))
 
         self.assertIn("draft", spec_file.read_text(encoding="utf-8"))
@@ -4477,7 +4477,7 @@ class TwelveFactorPromptVersionTests(unittest.TestCase):
         import spec_amend
         path = self._write_spec("amendable", version="3")
         # spec_amend writes a per-spec amend log; we just call the function.
-        spec_amend.amend_spec(str(self.project), "amendable", "test amendment")
+        spec_amend.amend_spec(str(self.project), "amendable", "test amendment", apply=True)
         after = path.read_text(encoding="utf-8")
         self.assertRegex(after, r">\s*Prompt version:\s*4\b")
 
@@ -4485,7 +4485,7 @@ class TwelveFactorPromptVersionTests(unittest.TestCase):
         """Pre-Rule-47 specs (no Prompt version) get one appended on amend."""
         import spec_amend
         path = self._write_spec("legacy", with_prompt_version=False)
-        spec_amend.amend_spec(str(self.project), "legacy", "test amendment")
+        spec_amend.amend_spec(str(self.project), "legacy", "test amendment", apply=True)
         after = path.read_text(encoding="utf-8")
         self.assertRegex(after, r">\s*Prompt version:\s*2\b")
 
@@ -7067,3 +7067,58 @@ class ReviewSummaryPerFileTests(unittest.TestCase):
             no_verify=False,
         )
         self.assertEqual(rc, 0)
+
+
+class AmendDryRunTests(unittest.TestCase):
+    """Cover vibe amend dry-run vs --apply behavior."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name)
+        init_project.init_project(str(self.project), "web")
+        self.specs_dir = self.project / ".agents" / "specs"
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _write_spec(self, name: str, status: str = "draft", version: str = "1") -> Path:
+        path = self.specs_dir / f"{name}.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            f"# {name}\n\n"
+            f"> 状态: {status} | 创建: 2026-01-01 | 更新: 2026-01-01\n"
+            f"> 类型: feature\n"
+            f"> 风险: low\n"
+            f"> Prompt version: {version}\n"
+            f"\n## 意图 (Intent)\n\nbody\n",
+            encoding="utf-8",
+        )
+        return path
+
+    def test_amend_default_is_dry_run(self) -> None:
+        import spec_amend
+        path = self._write_spec("dryrun", status="in-progress")
+        result = spec_amend.amend_spec(str(self.project), "dryrun", "test change")
+        self.assertIsNone(result, "dry-run must return None")
+        after = path.read_text(encoding="utf-8")
+        self.assertIn("in-progress", after, "status must NOT change in dry-run")
+
+    def test_amend_apply_executes(self) -> None:
+        import spec_amend
+        path = self._write_spec("applyme", status="in-progress")
+        result = spec_amend.amend_spec(str(self.project), "applyme", "test change", apply=True)
+        self.assertIsNotNone(result, "--apply must return amend file path")
+        after = path.read_text(encoding="utf-8")
+        self.assertIn("draft", after, "status must be reset with --apply")
+
+    def test_amend_dry_run_on_draft(self) -> None:
+        import spec_amend
+        path = self._write_spec("draftspec", status="draft")
+        result = spec_amend.amend_spec(str(self.project), "draftspec", "test change")
+        self.assertIsNone(result, "draft spec also dry-runs by default")
+
+    def test_amend_apply_on_draft(self) -> None:
+        import spec_amend
+        path = self._write_spec("draftapply", status="draft")
+        result = spec_amend.amend_spec(str(self.project), "draftapply", "test change", apply=True)
+        self.assertIsNotNone(result, "--apply on draft must succeed")

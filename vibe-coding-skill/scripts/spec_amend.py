@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from common import atomic_write, validate_artifact_name
 
 
-def amend_spec(project_root: str, spec_name: str, description: str) -> str | None:
+def amend_spec(project_root: str, spec_name: str, description: str, apply: bool = False) -> str | None:
     spec_name = validate_artifact_name(spec_name, "规格名称")
     description = " ".join(description.split()).replace("|", r"\|")
     if not description:
@@ -32,18 +32,26 @@ def amend_spec(project_root: str, spec_name: str, description: str) -> str | Non
         current_spec = f.read()
     status_match = re.search(r">\s*状态:\s*(\S+)", current_spec)
     current_status = status_match.group(1) if status_match else "draft"
-    if current_status not in {"draft", "cancelled"}:
-        print("⚠️  amend 是破坏性操作:")
+    is_destructive = current_status not in {"draft", "cancelled"}
+
+    if is_destructive:
+        print("📋 Dry-run — 以下变更将被执行（加 --apply 实际执行）:")
         print(f"   - 重置状态: {current_status} → draft（Rule 19）")
         print("   - 归档现有 review/evidence 到 .agents/archive/<spec>/<timestamp>/（Rule 7）")
         print("   - bump Prompt version N → N+1（Rule 47）")
         print("   - 现有 review-decision 结论将被作废（digest mismatch）")
         print("   如果只是修格式/标签，考虑直接编辑 spec 而不用 amend。")
-        print("   继续 amend？（--yes 跳过此提示）")
-        # Non-interactive: just print the warning. Agents calling
-        # via CLI can add --yes to suppress. The warning itself is
-        # the key improvement — agents read stdout and self-correct.
+    else:
+        print("📋 Dry-run — 以下变更将被执行（加 --apply 实际执行）:")
+        print("   - 追加变更记录表格")
+        print("   - bump Prompt version N → N+1（Rule 47）")
+        print("   - 重置风险确认为 pending")
 
+    if not apply:
+        print()
+        print("💡 加 --apply 实际执行。")
+        print("<!-- vibe:amend_dry_run: preview_only -->")
+        return None
 
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     now_short = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
@@ -204,6 +212,7 @@ if __name__ == "__main__":
     p.add_argument("project_root", help="Project root directory")
     p.add_argument("spec_name", help="Spec name")
     p.add_argument("description", help="Description of the change")
-    p.add_argument("--yes", action="store_true", help="Skip destructive-operation warning")
+    p.add_argument("--apply", action="store_true", help="Actually execute the amend; default is dry-run preview")
+    p.add_argument("--yes", action="store_true", help="Skip confirmation prompt (requires --apply)")
     args = p.parse_args()
-    amend_spec(os.path.abspath(args.project_root), args.spec_name, args.description)
+    amend_spec(os.path.abspath(args.project_root), args.spec_name, args.description, apply=args.apply)

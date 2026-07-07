@@ -191,6 +191,7 @@ def main() -> None:
     amend.add_argument("project_root")
     amend.add_argument("spec_name")
     amend.add_argument("description")
+    amend.add_argument("--apply", action="store_true", help="Execute the amend; default is dry-run preview")
 
     risk = sub.add_parser("risk")
     risk.add_argument("project_root")
@@ -481,7 +482,7 @@ def main() -> None:
         if result is None:
             raise SystemExit(1)
     elif args.operation == "amend":
-        spec_amend.amend_spec(root, args.spec_name, args.description)
+        spec_amend.amend_spec(root, args.spec_name, args.description, apply=args.apply)
     elif args.operation == "risk":
         confirm_risk.confirm_risk(root, args.spec_name, args.risk, args.reason)
     elif args.operation == "upgrade":
