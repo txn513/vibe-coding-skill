@@ -7069,6 +7069,127 @@ class ReviewSummaryPerFileTests(unittest.TestCase):
         self.assertEqual(rc, 0)
 
 
+class ReviewSummaryLineRefAdvisoryTests(unittest.TestCase):
+    """Cover Rule 53 + Rule 55 advisory: review-summary should reference
+    actual diff observations (line numbers / code fragments) instead of
+    memory-based descriptions like '+12 lines added helper'.
+
+    Proposal: 2026-07-08-review-summary-must-cite-diff.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name)
+        import subprocess, json
+        subprocess.run(["git", "init", "-q"], cwd=str(self.project), check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "t@t.com"],
+            cwd=str(self.project), check=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "t"],
+            cwd=str(self.project), check=True,
+        )
+        agents_dir = self.project / ".agents"
+        agents_dir.mkdir(exist_ok=True)
+        wf_path = agents_dir / "workflow.json"
+        wf = {
+            "roles": {"builder": "b", "reviewer": "r",
+                      "releaser": "l", "observer": "o"},
+            "risk_profiles": {"low": {}, "medium": {}, "high": {}},
+            "commands": {"verify": [["true"]]},
+        }
+        wf_path.write_text(json.dumps(wf), encoding="utf-8")
+        (self.project / ".gitignore").write_text(
+            ".agents/.vibe-review-pending\n", encoding="utf-8"
+        )
+        subprocess.run(["git", "add", "-A"], cwd=str(self.project), check=True)
+        subprocess.run(
+            ["git", "commit", "-q", "-m", "init"],
+            cwd=str(self.project), check=True,
+        )
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _capture(self, fn, *args, **kwargs):
+        import io, contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            try:
+                rc = fn(*args, **kwargs)
+            except SystemExit as e:
+                rc = e.code
+        return buf.getvalue(), rc
+
+    def test_no_line_ref_emits_advisory_marker(self) -> None:
+        """Memory-style summary without line refs triggers the advisory."""
+        import commit
+        (self.project / "app.py").write_text("print('hello')\n", encoding="utf-8")
+        # Step 1: show diff, write marker
+        self._capture(commit.commit, str(self.project), ["-m", "test"],
+                      quick=False, no_verify=False)
+        # Step 2: reviewed with memory-style summary
+        out, rc = self._capture(
+            commit.commit, str(self.project), ["-m", "test"],
+            reviewed=True, review_summary="app.py: new file, no side effects",
+            quick=False, no_verify=False,
+        )
+        self.assertEqual(rc, 0, "advisory must be non-blocking")
+        self.assertIn("advisory-no-line-refs", out)
+        self.assertIn("缺行号引用", out)
+
+    def test_line_ref_quiet(self) -> None:
+        """Summary with L<n> ref is silent."""
+        import commit
+        (self.project / "app.py").write_text("print('hello')\n", encoding="utf-8")
+        self._capture(commit.commit, str(self.project), ["-m", "test"],
+                      quick=False, no_verify=False)
+        out, rc = self._capture(
+            commit.commit, str(self.project), ["-m", "test"],
+            reviewed=True,
+            review_summary="app.py: L1 new file `print('hello')` no side effects",
+            quick=False, no_verify=False,
+        )
+        self.assertEqual(rc, 0)
+        self.assertNotIn("advisory-no-line-refs", out)
+
+    def test_code_fragment_ref_quiet(self) -> None:
+        """Summary with backtick-wrapped code fragment is silent."""
+        import commit
+        (self.project / "app.py").write_text("print('hello')\n", encoding="utf-8")
+        self._capture(commit.commit, str(self.project), ["-m", "test"],
+                      quick=False, no_verify=False)
+        out, rc = self._capture(
+            commit.commit, str(self.project), ["-m", "test"],
+            reviewed=True,
+            review_summary="app.py: new file containing `print('hello')` helper",
+            quick=False, no_verify=False,
+        )
+        self.assertEqual(rc, 0)
+        self.assertNotIn("advisory-no-line-refs", out)
+
+    def test_partial_line_refs_real_two_files(self) -> None:
+        """Two changed files, one summary part lacks refs → advisory fires."""
+        import commit
+        (self.project / "app.py").write_text("print('v3')\n", encoding="utf-8")
+        (self.project / "utils.py").write_text("def h2(): pass\n", encoding="utf-8")
+        # Step 1: diff shows two files
+        self._capture(commit.commit, str(self.project), ["-m", "x"],
+                      quick=False, no_verify=False)
+        # Step 2: only one conclusion has line ref → advisory fires for the other
+        out, rc = self._capture(
+            commit.commit, str(self.project), ["-m", "x"],
+            reviewed=True,
+            review_summary="app.py: L1 print changed; utils.py: helper added",
+            quick=False, no_verify=False,
+        )
+        self.assertEqual(rc, 0, "advisory must be non-blocking")
+        self.assertIn("advisory-no-line-refs", out)
+        self.assertIn("utils.py", out)
+
+
+
 class AmendDryRunTests(unittest.TestCase):
     """Cover vibe amend dry-run vs --apply behavior."""
 

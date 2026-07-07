@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 
@@ -392,6 +393,43 @@ def commit(
                 print("   \u4f8b: app.py: \u52203\u884c+\u52a02\u884c, \u8bed\u4e49\u7b49\u4ef7; utils.py: \u65b0\u589ehelper, \u65e0\u526f\u4f5c\u7528")
                 print("<!-- vibe:commit_review_gate: missing_file_review -->")
                 return 8
+
+        # Per-file-summary 行号引用 advisory (Rule 53 + Rule 55 精神)
+        # 提案: 2026-07-08-review-summary-must-cite-diff
+        # 上面的 hard gate 只检查"每个变更文件被提及"。但 Agent 可以
+        # 在 review-summary 里写"+12 行 — 加了 helper"这类写代码时的
+        # 记忆性描述, 而不是真正读 diff 后的观察。本 advisory 检测每条
+        # 文件结论是否含至少一个行号或代码片段信号, 防止"看起来审查了,
+        # 实际只是凭记忆写"。Non-blocking (与 Rule 39/43/46 一致) —
+        # 让 doctor 可见, 形成软约束。
+        line_ref_pattern = re.compile(
+            r"(?:L[0-9]+|line\s+[0-9]+|:[0-9]+|`[^`]+`)", re.IGNORECASE
+        )
+        file_parts = [p.strip() for p in summary.split(";") if p.strip()]
+        no_line_ref_parts = []
+        for part in file_parts:
+            # 跳过纯文件名前缀 (eg "app.py:" 无结论部分) — 这些在 missing
+            # file gate 已经处理过了; 这里只关心有结论描述的部分。
+            if ":" not in part:
+                continue
+            # 提取 ":" 后面的结论文字
+            _, _, conclusion = part.partition(":")
+            if not line_ref_pattern.search(conclusion):
+                no_line_ref_parts.append(part)
+        if no_line_ref_parts:
+            print()
+            print("⚠️ Review 门禁提醒 — review-summary 缺行号引用 (Rule 53 + Rule 55 精神):")
+            print("   以下文件结论缺少行号/L标识/代码片段引用, 可能是凭记忆写而非读 diff 后总结:")
+            for p in no_line_ref_parts[:5]:
+                print(f"     - {p[:80]}{'...' if len(p) > 80 else ''}")
+            if len(no_line_ref_parts) > 5:
+                print(f"     ... 还有 {len(no_line_ref_parts) - 5} 个")
+            print()
+            print("   建议: 用 `git diff <file>` 实际读一遍, 再写带行号的审查结论")
+            print("   格式: <file>: L<行号> <观察>; 例: app.py: L25 fast-path 增加")
+            print("        closed 检查, 无锁开销")
+            print("   注: 这是 advisory, 不阻断 commit, 但 doctor 会识别 marker")
+            print("<!-- vibe:commit_review_quality: advisory-no-line-refs -->")
     print("🔒 Review 声明门禁 (Rule 53):")
     print("   Agent 必须确认已逐文件审查 diff 内容。")
     print("   加 --reviewed 标志声明审查完成，否则 commit 被阻止。")

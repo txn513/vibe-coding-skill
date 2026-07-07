@@ -639,6 +639,20 @@ artifacts merely because a template exists.
     distinguish quick commits from normal ones. This is the honest
     escape hatch — it does not hide that the gate was skipped.
 
+    Per-file-summary line-ref advisory (2026-07-08): after the
+    per-file mention gate passes, `vibe commit --reviewed` ALSO emits
+    a non-blocking advisory if any per-file conclusion in the summary
+    lacks a line-number reference (`L25` / `line 25` / `:25`) or a
+    backtick-wrapped code fragment. The advisory is meant to defeat
+    the failure mode where an Agent writes "file A: +12 lines added
+    helper" from memory without ever re-reading the actual diff —
+    the format passes but the review substance is hollow. The advisory
+    is non-blocking (commit still succeeds) but writes a
+    `<!-- vibe:commit_review_quality: advisory-no-line-refs -->` marker
+    that doctor can surface. Per-file-summary bypass via `--quick` /
+    `--no-verify` still skips this advisory — it is bound to the
+    per-file review gate, not a separate enforcement.
+
     Failure modes the gate is designed to catch (all observed in
     real projects):
 
