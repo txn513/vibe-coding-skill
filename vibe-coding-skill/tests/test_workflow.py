@@ -7441,3 +7441,142 @@ class DesignVersioningTests(unittest.TestCase):
         main_text = legacy.read_text(encoding="utf-8")
         self.assertRegex(main_text, r"当前版本:\s*v2\b")
         self.assertRegex(main_text, r"历史版本:\s*v1\b")
+
+
+class CommitHelpAndDoctorTrailerRecoveryTests(unittest.TestCase):
+    """Cover 2026-07-08 候选 1 + 候选 2a:
+
+    1. `vibe commit` with no args must print the --review-summary template
+       (per-file + line-ref + business conclusion trio) so the Agent has a
+       concrete example instead of guessing.
+
+    2. doctor + project_status must tell the Agent how to RECOVER from a
+       missing Vibe-Commit trailer: reset --soft + redo the two-step vibe
+       commit, never amend.
+    """
+
+    def test_commit_help_prints_review_summary_template(self) -> None:
+        """Empty argv shows the template with L<n> examples + bypass note."""
+        import io, contextlib
+        import commit
+        # Project root must exist (git repo) so we reach the "if not argv"
+        # branch that prints the help block. We pass a non-existent path
+        # because the empty-argv guard fires before any git check.
+        import tempfile, os
+        from pathlib import Path
+        # run() (the CLI entry point) with empty argv prints the help
+        # block and returns 2.
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            try:
+                rc = commit.run([])
+            except SystemExit as e:
+                rc = e.code
+        out = buf.getvalue()
+        self.assertEqual(rc, 2, "empty argv must exit 2")
+        self.assertIn("--review-summary 模板", out)
+        self.assertIn("per-file + 行号 + 业务结论", out)
+        # At least one concrete line-ref example
+        self.assertRegex(out, r"L\d+")
+        # Bypass note for --quick / --no-verify
+        self.assertIn("--quick", out)
+        self.assertIn("--no-verify", out)
+
+    def test_doctor_trailer_recovery_guidance(self) -> None:
+        """Missing Vibe-Commit trailer warning includes recovery steps."""
+        import subprocess, json, tempfile, os
+        from pathlib import Path
+        tmp = tempfile.TemporaryDirectory()
+        proj = Path(tmp.name)
+        os.makedirs(proj / ".agents", exist_ok=True)
+        (proj / ".agents" / "workflow.json").write_text(json.dumps({
+            "roles": {"builder": "b", "reviewer": "r",
+                      "releaser": "l", "observer": "o"},
+            "risk_profiles": {"low": {}, "medium": {}, "high": {}},
+            "commands": {"verify": [["true"]]},
+        }))
+        subprocess.run(["git", "init", "-q"], cwd=str(proj), check=True)
+        subprocess.run(["git", "config", "user.email", "t@t.com"],
+                       cwd=str(proj), check=True)
+        subprocess.run(["git", "config", "user.name", "t"],
+                       cwd=str(proj), check=True)
+        # Two commits: one with trailer, one raw (without Vibe-Commit: yes).
+        # The "init" commit is exempted by the doctor check; we add a
+        # second commit without the trailer so doctor flags exactly one.
+        (proj / "init.txt").write_text("init\n")
+        subprocess.run(["git", "add", "-A"], cwd=str(proj), check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "init: trailer"],
+                       cwd=str(proj), check=True)
+        # Add a trailer to the first commit retroactively (doctor skips
+        # the very first commit when no Vibe-Commit trailer is present,
+        # but the body-based check flags the second one regardless).
+        subprocess.run(["git", "log", "--format=%B", "-1"],
+                       cwd=str(proj), check=True, capture_output=True)
+        # Create a raw commit (no Vibe-Commit trailer)
+        (proj / "raw.txt").write_text("raw\n")
+        subprocess.run(["git", "add", "-A"], cwd=str(proj), check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "raw: no trailer"],
+                       cwd=str(proj), check=True)
+
+        # Run doctor
+        import io, contextlib
+        import doctor_project
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            try:
+                doctor_project.doctor(str(proj))
+            except SystemExit:
+                pass
+        out = buf.getvalue()
+
+        # The raw commit must be detected
+        self.assertIn("Vibe-Commit trailer", out)
+        # Recovery guidance must be present
+        self.assertIn("git reset --soft", out)
+        # Explicit prohibition of amend
+        self.assertIn("--amend", out)
+        tmp.cleanup()
+
+    def test_project_status_trailer_recovery_guidance(self) -> None:
+        """project_status also surfaces the recovery line (lighter check)."""
+        import subprocess, json, tempfile, os
+        from pathlib import Path
+        tmp = tempfile.TemporaryDirectory()
+        proj = Path(tmp.name)
+        os.makedirs(proj / ".agents", exist_ok=True)
+        (proj / ".agents" / "workflow.json").write_text(json.dumps({
+            "roles": {"builder": "b", "reviewer": "r",
+                      "releaser": "l", "observer": "o"},
+            "risk_profiles": {"low": {}, "medium": {}, "high": {}},
+            "commands": {"verify": [["true"]]},
+        }))
+        subprocess.run(["git", "init", "-q"], cwd=str(proj), check=True)
+        subprocess.run(["git", "config", "user.email", "t@t.com"],
+                       cwd=str(proj), check=True)
+        subprocess.run(["git", "config", "user.name", "t"],
+                       cwd=str(proj), check=True)
+        # First commit with trailer (so init is exempt), second without
+        (proj / "init.txt").write_text("init\n")
+        subprocess.run(["git", "add", "-A"], cwd=str(proj), check=True)
+        subprocess.run(["git", "commit", "-q", "-m",
+                        "first\n\nVibe-Commit: yes"],
+                       cwd=str(proj), check=True)
+        (proj / "raw.txt").write_text("raw\n")
+        subprocess.run(["git", "add", "-A"], cwd=str(proj), check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "raw: no trailer"],
+                       cwd=str(proj), check=True)
+
+        # Call the lightweight trailer check directly
+        import io, contextlib
+        import project_status
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            try:
+                project_status._print_raw_commit_warning(str(proj))
+            except SystemExit:
+                pass
+        out = buf.getvalue()
+        self.assertIn("Vibe-Commit trailer", out)
+        self.assertIn("git reset --soft", out)
+        self.assertIn("--amend", out)
+        tmp.cleanup()

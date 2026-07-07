@@ -426,9 +426,9 @@ def commit(
                 print(f"     ... 还有 {len(no_line_ref_parts) - 5} 个")
             print()
             print("   行号引用格式: L<行号> / line <行号> / :<行号>")
-            print("   代码片段格式: \`<identifier>\` (反引号包住)")
+            print("   代码片段格式: ` (反引号) 包住任意 identifier 或代码片段")
             print("   例: app.py: L25 fast-path 增加 closed 检查, 无锁开销")
-            print("        utils.py: 新增 \`process_helper\` 包装, 调用点 grep 已确认")
+            print("        utils.py: 新增 `process_helper` 包装, 调用点 grep 已确认")
             print()
             print("   Bypass: --quick (跳过整个 review gate, 保留 verify) 或")
             print("           --no-verify (跳过 review + verify)")
@@ -667,6 +667,14 @@ def run(argv: list[str]) -> int:
         print("Usage: vibe commit <project_root> [--staged | --paths p1,p2] "
               "[--no-verify] [--full-verify] [--reviewed --review-summary '<text>'] "
               "[--quick] [git commit args...]")
+        print()
+        print("--review-summary 模板 (per-file + 行号 + 业务结论三件套):")
+        print("  app.py: L25-L30 fast-path 加 closed 检查, 无锁开销; 业务逻辑等价")
+        print("  utils.py: 新增 `process_helper` 包装, 调用点 grep 已确认")
+        print("  test_x.py: L100-L120 新增 fixture, 不影响旧测试")
+        print()
+        print("接受的行号信号: L25 / line 25 / :25 / `code_fragment`")
+        print("无行号 → exit 9 (硬门禁, --quick 或 --no-verify 可绕过)")
         return 2
     project_root = argv[0]
     git_args = argv[1:]

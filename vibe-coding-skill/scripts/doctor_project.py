@@ -282,6 +282,15 @@ def _audit_raw_git_commits(project_root: str, warnings: list[str]) -> None:
                 f"这些 commit 可能用 raw `git commit` 提交，绕过了 review + verify gate。"
                 f"  SHA: {', '.join(raw_commits[:5])}"
             )
+            # Recovery guidance: tell the Agent exactly how to replay the commit
+            # so the audit trail is restored. (2026-07-08 候选 2a)
+            warnings.append(
+                "  修复: 用 `git reset --soft HEAD~N` 回到违规 commit 之前，"
+                "然后按顺序跑 `vibe commit` (step 1, 看 diff) + "
+                "`vibe commit --reviewed --review-summary '...'` (step 2, "
+                "verify + commit with trailer)。严禁用 `git commit --amend` 改 "
+                "message 补 trailer — amend 会改变 commit SHA, trailer 校验会失效。"
+            )
     except (OSError, subprocess.TimeoutExpired):
         return
 

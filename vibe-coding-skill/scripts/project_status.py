@@ -535,7 +535,9 @@ def _print_raw_commit_warning(project_root: str) -> None:
                 f"⚠️  最近 {len(raw_shas)} 个 commit 缺 Vibe-Commit trailer "
                 f"(可能绕过 vibe commit, Rule 53): {', '.join(raw_shas)}"
             )
-            print("   以后用 `vibe commit --reviewed` 代替 raw `git commit`")
+            print("   修复: `git reset --soft HEAD~N` + 重做 `vibe commit` (step 1) + "
+                  "`vibe commit --reviewed --review-summary '...'` (step 2)")
+            print("   严禁 `git commit --amend` 改 message 补 trailer — SHA 会变, trailer 校验失效")
     except (OSError, subprocess.TimeoutExpired):
         return
 

@@ -659,6 +659,14 @@ artifacts merely because a template exists.
 
     Suggested format: `<file>: L<line> <observation>; <file>: L<line> <observation>`
 
+    Help-text template: `vibe commit` with no args (or `vibe commit --help`)
+    prints a worked template (per-file + L<n> + backtick code fragment) so
+    Agents do not have to guess. Doctor and project_status output the
+    recovery steps when a commit is missing Vibe-Commit trailer:
+    `git reset --soft HEAD~N` then redo the two-step `vibe commit`.
+    Amending the message to add a trailer is forbidden — the SHA changes,
+    invalidating the trailer hash.
+
     Failure modes the gate is designed to catch (all observed in
     real projects):
 
