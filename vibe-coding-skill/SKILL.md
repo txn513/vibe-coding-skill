@@ -639,19 +639,25 @@ artifacts merely because a template exists.
     distinguish quick commits from normal ones. This is the honest
     escape hatch — it does not hide that the gate was skipped.
 
-    Per-file-summary line-ref advisory (2026-07-08): after the
-    per-file mention gate passes, `vibe commit --reviewed` ALSO emits
-    a non-blocking advisory if any per-file conclusion in the summary
-    lacks a line-number reference (`L25` / `line 25` / `:25`) or a
-    backtick-wrapped code fragment. The advisory is meant to defeat
-    the failure mode where an Agent writes "file A: +12 lines added
-    helper" from memory without ever re-reading the actual diff —
-    the format passes but the review substance is hollow. The advisory
-    is non-blocking (commit still succeeds) but writes a
-    `<!-- vibe:commit_review_quality: advisory-no-line-refs -->` marker
-    that doctor can surface. Per-file-summary bypass via `--quick` /
-    `--no-verify` still skips this advisory — it is bound to the
-    per-file review gate, not a separate enforcement.
+    Per-file-summary line-ref hard gate (2026-07-08, scheme B): after
+    the per-file mention gate passes, `vibe commit --reviewed` runs a
+    second scan that rejects the commit (exit 9) if any per-file
+    conclusion in the summary lacks a line-number reference
+    (`L25` / `line 25` / `:25`) or a backtick-wrapped code fragment.
+    The gate defeats the failure mode where an Agent writes
+    "file A: +12 lines added helper" from memory without ever
+    re-reading the actual diff — the format passed the per-file
+    mention check but the review substance is hollow. Failure marker:
+    `<!-- vibe:commit_review_gate: missing_line_refs -->`. Bypass:
+    `--quick` (skips the entire review gate, still runs verify) or
+    `--no-verify` (skips review + verify). Acceptable signals:
+
+    - `L25`, `L25-L30` — explicit line number
+    - `line 25`, `line 25-30` — line-range reference
+    - `:25` — diff-style position (matches what `git diff` shows)
+    - `` `helper_name` `` — backtick-wrapped identifier or code fragment
+
+    Suggested format: `<file>: L<line> <observation>; <file>: L<line> <observation>`
 
     Failure modes the gate is designed to catch (all observed in
     real projects):

@@ -4843,7 +4843,7 @@ class PreCommitGateTests(unittest.TestCase):
         os.makedirs(marker_dir, exist_ok=True)
         with open(os.path.join(marker_dir, ".vibe-review-pending"), "w") as f2:
             f2.write("test step1")
-        rc = commit.commit(str(self.project), ["-m", "no verify cmd"], reviewed=True, review_summary="new.txt: new file, workflow.json: config update")
+        rc = commit.commit(str(self.project), ["-m", "no verify cmd"], reviewed=True, review_summary="new.txt: L1 new file; workflow.json: L3 config update")
         self.assertEqual(rc, 4)
 
     def test_fails_when_no_changes(self) -> None:
@@ -4891,7 +4891,7 @@ class PreCommitGateTests(unittest.TestCase):
         os.makedirs(marker_dir, exist_ok=True)
         with open(os.path.join(marker_dir, ".vibe-review-pending"), "w") as f2:
             f2.write("test step1")
-        rc = commit.commit(str(self.project), ["-m", "should fail"], reviewed=True, review_summary="new.txt: new file, workflow.json: config update")
+        rc = commit.commit(str(self.project), ["-m", "should fail"], reviewed=True, review_summary="new.txt: L1 new file; workflow.json: L3 config update")
         self.assertEqual(rc, 3)
 
     def test_succeeds_when_verify_passes(self) -> None:
@@ -4912,7 +4912,7 @@ class PreCommitGateTests(unittest.TestCase):
         os.makedirs(marker_dir, exist_ok=True)
         with open(os.path.join(marker_dir, ".vibe-review-pending"), "w") as f2:
             f2.write("test step1")
-        rc = commit.commit(str(self.project), ["-m", "feat: add new.txt"], reviewed=True, review_summary="new.txt: new file, workflow.json: config update")
+        rc = commit.commit(str(self.project), ["-m", "feat: add new.txt"], reviewed=True, review_summary="new.txt: L1 new file; workflow.json: L3 config update")
         self.assertEqual(rc, 0)
         # Confirm commit actually landed
         import subprocess
@@ -5023,21 +5023,21 @@ class ReviewSummaryGateTests(unittest.TestCase):
         rc = commit.commit(
             str(self.project), ["-m", "with summary"],
             reviewed=True,
-            review_summary="new.txt: new file, workflow.json: config update",
+            review_summary="new.txt: L1 new file; workflow.json: L3 config update",
         )
         self.assertEqual(rc, 0)
         log = subprocess.run(
             ["git", "log", "--format=%B", "-1"],
             cwd=str(self.project), capture_output=True, text=True, check=True,
         ).stdout
-        self.assertIn("Review-Summary: new.txt: new file, workflow.json: config update", log)
+        self.assertIn("Review-Summary: new.txt: L1 new file; workflow.json: L3 config update", log)
 
     def test_truncates_long_summary_in_marker(self) -> None:
         """The success marker snippet must be capped at 60 chars + ellipsis."""
         import commit
         import io, contextlib
         self._add_change()
-        long_text = "new.txt workflow.json: " + "x" * 200
+        long_text = "new.txt: L1 " + "x" * 200 + "; workflow.json: L3 "
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             rc = commit.commit(
@@ -5048,7 +5048,7 @@ class ReviewSummaryGateTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         out = buf.getvalue()
         # Marker should contain truncated summary (60 chars + "...")
-        # The summary starts with "new.txt workflow.json: " + 200 x's,
+        # The summary starts with "new.txt: L1 " + 200 x's + "; workflow.json: L3",
         # so the 60-char snippet will be the first 60 chars of that + "..."
         self.assertIn("...", out)
         # Verify the marker is present and truncated, not the full 200+ chars
@@ -5437,7 +5437,7 @@ class Rule62CallSiteGateTests(unittest.TestCase):
         rc = commit.commit(
             str(project), ["-m", "test"],
             reviewed=True,
-            review_summary="new.txt workflow.json: changes ok",
+            review_summary="new.txt: L1 added; workflow.json: L3 updated",
         )
         self.assertEqual(rc, 8, "call_site_check failure should exit 8")
         tmp.cleanup()
@@ -5474,7 +5474,7 @@ class Rule62CallSiteGateTests(unittest.TestCase):
         rc = commit.commit(
             str(project), ["-m", "test"],
             reviewed=True,
-            review_summary="new.txt workflow.json: changes ok",
+            review_summary="new.txt: L1 added; workflow.json: L3 updated",
         )
         self.assertEqual(rc, 0, "commit should pass when call_site_check not configured")
         tmp.cleanup()
@@ -6651,7 +6651,7 @@ class SplitCommitTests(unittest.TestCase):
         import commit as commit_mod
         self._mark_step1()
         rc = commit_mod.run(
-            ["--reviewed", "--review-summary", "a.py b.py c.py d.py e.py f.py: new files", str(self.project), "--paths", "a.py,b.py", "-m", "task 1"]
+            ["--reviewed", "--review-summary", "a.py: L1 new; b.py: L1 new; c.py: L1 new; d.py: L1 new; e.py: L1 new; f.py: L1 new", str(self.project), "--paths", "a.py,b.py", "-m", "task 1"]
         )
         self.assertEqual(rc, 0)
         commits = self._git_log_files()
@@ -6668,7 +6668,7 @@ class SplitCommitTests(unittest.TestCase):
         subprocess.run(["git", "add", "c.py", "d.py"], cwd=str(self.project), check=True)
         self._mark_step1()
         rc = commit_mod.run(
-            ["--reviewed", "--review-summary", "a.py b.py c.py d.py e.py f.py: new files", str(self.project), "--staged", "-m", "task 2"]
+            ["--reviewed", "--review-summary", "a.py: L1 new; b.py: L1 new; c.py: L1 new; d.py: L1 new; e.py: L1 new; f.py: L1 new", str(self.project), "--staged", "-m", "task 2"]
         )
         self.assertEqual(rc, 0)
         commits = self._git_log_files()
@@ -6682,7 +6682,7 @@ class SplitCommitTests(unittest.TestCase):
             (self.project / f).write_text(f"x {f}", encoding="utf-8")
         import commit as commit_mod
         self._mark_step1()
-        rc = commit_mod.run(["--reviewed", "--review-summary", "a.py b.py: new files", str(self.project), "-m", "all in one"])
+        rc = commit_mod.run(["--reviewed", "--review-summary", "a.py: L1 new; b.py: L1 new", str(self.project), "-m", "all in one"])
         self.assertEqual(rc, 0)
         commits = self._git_log_files()
         msg, files = commits[0]
@@ -6697,7 +6697,7 @@ class SplitCommitTests(unittest.TestCase):
         # Pre-stage a.py only — agent is signalling "I want just this".
         subprocess.run(["git", "add", "a.py"], cwd=str(self.project), check=True)
         self._mark_step1()
-        rc = commit_mod.run(["--reviewed", "--review-summary", "a.py b.py c.py d.py: new files", str(self.project), "-m", "single staged"])
+        rc = commit_mod.run(["--reviewed", "--review-summary", "a.py: L1 new; b.py: L1 new; c.py: L1 new; d.py: L1 new", str(self.project), "-m", "single staged"])
         self.assertEqual(rc, 0)
         commits = self._git_log_files()
         msg, files = commits[0]
@@ -6714,7 +6714,7 @@ class SplitCommitTests(unittest.TestCase):
         # Now --paths b.py,c.py — should ignore the previously staged a.py
         self._mark_step1()
         rc = commit_mod.run(
-            ["--reviewed", "--review-summary", "a.py b.py c.py: new files", str(self.project), "--paths", "b.py,c.py", "-m", "explicit only"]
+            ["--reviewed", "--review-summary", "a.py: L1 new; b.py: L1 new; c.py: L1 new", str(self.project), "--paths", "b.py,c.py", "-m", "explicit only"]
         )
         self.assertEqual(rc, 0)
         commits = self._git_log_files()
@@ -6785,7 +6785,7 @@ class VerifyScopeTests(unittest.TestCase):
         (self.project / "a.py").write_text("x", encoding="utf-8")
         import commit as commit_mod
         self._mark_step1()
-        rc = commit_mod.run(["--reviewed", "--review-summary", "a.py workflow.json: changes ok", str(self.project), "-m", "scoped"])
+        rc = commit_mod.run(["--reviewed", "--review-summary", "a.py: L1 added; workflow.json: L3 updated", str(self.project), "-m", "scoped"])
         self.assertEqual(rc, 0)
 
     def test_full_verify_flag_uses_verify_full(self) -> None:
@@ -6793,7 +6793,7 @@ class VerifyScopeTests(unittest.TestCase):
         (self.project / "a.py").write_text("x", encoding="utf-8")
         import commit as commit_mod
         self._mark_step1()
-        rc = commit_mod.run(["--reviewed", "--review-summary", "a.py workflow.json: changes ok", str(self.project), "--full-verify", "-m", "full"])
+        rc = commit_mod.run(["--reviewed", "--review-summary", "a.py: L1 added; workflow.json: L3 updated", str(self.project), "--full-verify", "-m", "full"])
         self.assertEqual(rc, 0)
 
     def test_full_verify_falls_back_to_verify(self) -> None:
@@ -6805,7 +6805,7 @@ class VerifyScopeTests(unittest.TestCase):
         wf_path.write_text(json.dumps(wf))
         import commit as commit_mod
         self._mark_step1()
-        rc = commit_mod.run(["--reviewed", "--review-summary", "a.py workflow.json: changes ok", str(self.project), "--full-verify", "-m", "full fallback"])
+        rc = commit_mod.run(["--reviewed", "--review-summary", "a.py: L1 added; workflow.json: L3 updated", str(self.project), "--full-verify", "-m", "full fallback"])
         self.assertEqual(rc, 0)
 
     def test_no_verify_configured_at_all(self) -> None:
@@ -6819,7 +6819,7 @@ class VerifyScopeTests(unittest.TestCase):
         wf_path.write_text(json.dumps(wf))
         import commit as commit_mod
         self._mark_step1()
-        rc = commit_mod.run(["--reviewed", "--review-summary", "a.py workflow.json: changes ok", str(self.project), "-m", "no verify"])
+        rc = commit_mod.run(["--reviewed", "--review-summary", "a.py: L1 added; workflow.json: L3 updated", str(self.project), "-m", "no verify"])
         self.assertEqual(rc, 4)
 
     def test_workflow_state_schema_includes_new_phases(self) -> None:
@@ -7013,7 +7013,7 @@ class ReviewSummaryPerFileTests(unittest.TestCase):
             str(self.project),
             ["-m", "test"],
             reviewed=True,
-            review_summary="app.py: new file, no side effects",
+            review_summary="app.py: L1 new file `print(...)` no side effects",
             quick=False,
             no_verify=False,
         )
@@ -7031,7 +7031,7 @@ class ReviewSummaryPerFileTests(unittest.TestCase):
             str(self.project),
             ["-m", "test"],
             reviewed=True,
-            review_summary="app.py: new file, no side effects",
+            review_summary="app.py: L1 new file `print(...)` no side effects",
             quick=False,
             no_verify=False,
         )
@@ -7048,7 +7048,7 @@ class ReviewSummaryPerFileTests(unittest.TestCase):
             str(self.project),
             ["-m", "test"],
             reviewed=True,
-            review_summary="app.py: new file, no side effects",
+            review_summary="app.py: L1 new file `print(...)` no side effects",
             quick=False,
             no_verify=False,
         )
@@ -7069,12 +7069,12 @@ class ReviewSummaryPerFileTests(unittest.TestCase):
         self.assertEqual(rc, 0)
 
 
-class ReviewSummaryLineRefAdvisoryTests(unittest.TestCase):
-    """Cover Rule 53 + Rule 55 advisory: review-summary should reference
+class ReviewSummaryLineRefGateTests(unittest.TestCase):
+    """Cover Rule 53 + Rule 55 hard gate: review-summary MUST reference
     actual diff observations (line numbers / code fragments) instead of
     memory-based descriptions like '+12 lines added helper'.
 
-    Proposal: 2026-07-08-review-summary-must-cite-diff.
+    Proposal: 2026-07-08-review-summary-must-cite-diff, scheme B (blocking).
     """
 
     def setUp(self) -> None:
@@ -7122,22 +7122,33 @@ class ReviewSummaryLineRefAdvisoryTests(unittest.TestCase):
                 rc = e.code
         return buf.getvalue(), rc
 
-    def test_no_line_ref_emits_advisory_marker(self) -> None:
-        """Memory-style summary without line refs triggers the advisory."""
+    def test_no_line_ref_hard_blocks(self) -> None:
+        """Memory-style summary without line refs hard-blocks the commit (exit 9)."""
         import commit
         (self.project / "app.py").write_text("print('hello')\n", encoding="utf-8")
         # Step 1: show diff, write marker
         self._capture(commit.commit, str(self.project), ["-m", "test"],
                       quick=False, no_verify=False)
-        # Step 2: reviewed with memory-style summary
+        # Step 2: reviewed with memory-style summary (NO line refs)
         out, rc = self._capture(
             commit.commit, str(self.project), ["-m", "test"],
             reviewed=True, review_summary="app.py: new file, no side effects",
             quick=False, no_verify=False,
         )
-        self.assertEqual(rc, 0, "advisory must be non-blocking")
-        self.assertIn("advisory-no-line-refs", out)
+        self.assertEqual(rc, 9, "missing line refs must hard-block (exit 9)")
+        self.assertIn("missing_line_refs", out)
         self.assertIn("缺行号引用", out)
+
+    def test_quick_mode_bypasses_line_ref_gate(self) -> None:
+        """--quick bypasses the line-ref gate (intentional escape hatch)."""
+        import commit
+        (self.project / "app.py").write_text("print('hello')\n", encoding="utf-8")
+        rc = self._capture(
+            commit.commit, str(self.project), ["-m", "test"],
+            reviewed=True, review_summary="generic summary",
+            quick=True, no_verify=False,
+        )[1]
+        self.assertEqual(rc, 0)
 
     def test_line_ref_quiet(self) -> None:
         """Summary with L<n> ref is silent."""
@@ -7152,7 +7163,7 @@ class ReviewSummaryLineRefAdvisoryTests(unittest.TestCase):
             quick=False, no_verify=False,
         )
         self.assertEqual(rc, 0)
-        self.assertNotIn("advisory-no-line-refs", out)
+        self.assertNotIn("missing_line_refs", out)
 
     def test_code_fragment_ref_quiet(self) -> None:
         """Summary with backtick-wrapped code fragment is silent."""
@@ -7167,7 +7178,7 @@ class ReviewSummaryLineRefAdvisoryTests(unittest.TestCase):
             quick=False, no_verify=False,
         )
         self.assertEqual(rc, 0)
-        self.assertNotIn("advisory-no-line-refs", out)
+        self.assertNotIn("missing_line_refs", out)
 
     def test_partial_line_refs_real_two_files(self) -> None:
         """Two changed files, one summary part lacks refs → advisory fires."""
@@ -7184,8 +7195,8 @@ class ReviewSummaryLineRefAdvisoryTests(unittest.TestCase):
             review_summary="app.py: L1 print changed; utils.py: helper added",
             quick=False, no_verify=False,
         )
-        self.assertEqual(rc, 0, "advisory must be non-blocking")
-        self.assertIn("advisory-no-line-refs", out)
+        self.assertEqual(rc, 9, "missing line refs on utils.py must hard-block")
+        self.assertIn("missing_line_refs", out)
         self.assertIn("utils.py", out)
 
 

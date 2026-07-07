@@ -394,14 +394,14 @@ def commit(
                 print("<!-- vibe:commit_review_gate: missing_file_review -->")
                 return 8
 
-        # Per-file-summary 行号引用 advisory (Rule 53 + Rule 55 精神)
-        # 提案: 2026-07-08-review-summary-must-cite-diff
+        # Per-file-summary 行号引用 hard gate (Rule 53 + Rule 55)
+        # 提案: 2026-07-08-review-summary-must-cite-diff (方案 B, 强制)
         # 上面的 hard gate 只检查"每个变更文件被提及"。但 Agent 可以
         # 在 review-summary 里写"+12 行 — 加了 helper"这类写代码时的
-        # 记忆性描述, 而不是真正读 diff 后的观察。本 advisory 检测每条
-        # 文件结论是否含至少一个行号或代码片段信号, 防止"看起来审查了,
-        # 实际只是凭记忆写"。Non-blocking (与 Rule 39/43/46 一致) —
-        # 让 doctor 可见, 形成软约束。
+        # 记忆性描述, 而不是真正读 diff 后的观察。本 hard gate 检测
+        # 每条文件结论是否含至少一个行号或代码片段信号, 防止"看起来
+        # 审查了, 实际只是凭记忆写"。Bypass: --quick (整段跳过 review)
+        # 或 --no-verify (整段跳过), 与现有 per-file gate 一致。
         line_ref_pattern = re.compile(
             r"(?:L[0-9]+|line\s+[0-9]+|:[0-9]+|`[^`]+`)", re.IGNORECASE
         )
@@ -418,18 +418,22 @@ def commit(
                 no_line_ref_parts.append(part)
         if no_line_ref_parts:
             print()
-            print("⚠️ Review 门禁提醒 — review-summary 缺行号引用 (Rule 53 + Rule 55 精神):")
-            print("   以下文件结论缺少行号/L标识/代码片段引用, 可能是凭记忆写而非读 diff 后总结:")
+            print("🔒 Review 门禁升级 — review-summary 缺行号引用 (Rule 53 + Rule 55):")
+            print(f"   以下 {len(no_line_ref_parts)} 个文件结论缺少行号/L标识/代码片段引用:")
             for p in no_line_ref_parts[:5]:
                 print(f"     - {p[:80]}{'...' if len(p) > 80 else ''}")
             if len(no_line_ref_parts) > 5:
                 print(f"     ... 还有 {len(no_line_ref_parts) - 5} 个")
             print()
-            print("   建议: 用 `git diff <file>` 实际读一遍, 再写带行号的审查结论")
-            print("   格式: <file>: L<行号> <观察>; 例: app.py: L25 fast-path 增加")
-            print("        closed 检查, 无锁开销")
-            print("   注: 这是 advisory, 不阻断 commit, 但 doctor 会识别 marker")
-            print("<!-- vibe:commit_review_quality: advisory-no-line-refs -->")
+            print("   行号引用格式: L<行号> / line <行号> / :<行号>")
+            print("   代码片段格式: \`<identifier>\` (反引号包住)")
+            print("   例: app.py: L25 fast-path 增加 closed 检查, 无锁开销")
+            print("        utils.py: 新增 \`process_helper\` 包装, 调用点 grep 已确认")
+            print()
+            print("   Bypass: --quick (跳过整个 review gate, 保留 verify) 或")
+            print("           --no-verify (跳过 review + verify)")
+            print("<!-- vibe:commit_review_gate: missing_line_refs -->")
+            return 9
     print("🔒 Review 声明门禁 (Rule 53):")
     print("   Agent 必须确认已逐文件审查 diff 内容。")
     print("   加 --reviewed 标志声明审查完成，否则 commit 被阻止。")
