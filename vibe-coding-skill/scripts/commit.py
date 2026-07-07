@@ -126,6 +126,21 @@ def _run(argv: list[str], cwd: str) -> tuple[int, str, str]:
     return completed.returncode, completed.stdout, completed.stderr
 
 
+def _extract_changed_files_from_stat(stat: str) -> list[str]:
+    """Extract file paths from git diff --stat output."""
+    files = []
+    for line in stat.splitlines():
+        line = line.strip()
+        if not line or '|' not in line:
+            continue
+        parts = line.rsplit('|', 1)
+        if len(parts) == 2:
+            filepath = parts[0].strip()
+            if filepath:
+                files.append(filepath)
+    return files
+
+
 def _git_diff_full(project_root: str) -> str:
     """Return full `git diff` against HEAD so the Agent can review
     actual code changes, not just file names and line counts.
@@ -347,6 +362,36 @@ def commit(
             return 7
         snippet = summary[:60] + ("..." if len(summary) > 60 else "")
         print(f"<!-- vibe:commit_review_summary: {snippet} -->")
+
+        # Per-file review-summary validation (Rule 53 hard gate):
+        # The review-summary must reference every changed file from the
+        # diff. Without this, the Agent can write a generic summary
+        # like "confirmed no issues" without actually reading each
+        # file diff. This is the most common failure mode observed
+        # across multiple projects.
+        stat_text = _git_diff_stat(project_root)
+        if stat_text and stat_text != "(no tracked changes)":
+            changed_files = _extract_changed_files_from_stat(stat_text)
+            missing_files = []
+            for filepath in changed_files:
+                basename = os.path.basename(filepath)
+                if filepath not in summary and basename not in summary:
+                    missing_files.append(filepath)
+            if missing_files:
+                print()
+                print("\U0001f512 Review \u95e8\u7981\u5347\u7ea7 \u2014 review-summary \u7f3a\u5c11\u6587\u4ef6\u5ba1\u67e5\u7ed3\u8bba (Rule 53):")
+                print(f"   \u4ee5\u4e0b {len(missing_files)} \u4e2a\u6587\u4ef6 diff \u4e2d\u4f46\u672a review-summary \u4e2d\u63d0\u53ca:")
+                for mf in missing_files[:10]:
+                    print(f"     - {mf}")
+                if len(missing_files) > 10:
+                    print(f"     ... \u8fd8\u6709 {len(missing_files) - 10} \u4e2a")
+                print()
+                print("   review-summary \u5fc5\u987b\u5305\u542b\u5bf9\u6bcf\u4e2a\u53d8\u66f4\u6587\u4ef6\u7684\u5ba1\u67e5\u7ed3\u8bba\u3002")
+                print("   \u683c\u5f0f: <\u6587\u4ef6\u540d>: <\u5ba1\u67e5\u7ed3\u8bba>; <\u6587\u4ef6\u540d>: <\u5ba1\u67e5\u7ed3\u8bba>")
+                # Example with backtick for readability
+                print("   \u4f8b: app.py: \u52203\u884c+\u52a02\u884c, \u8bed\u4e49\u7b49\u4ef7; utils.py: \u65b0\u589ehelper, \u65e0\u526f\u4f5c\u7528")
+                print("<!-- vibe:commit_review_gate: missing_file_review -->")
+                return 8
     print("🔒 Review 声明门禁 (Rule 53):")
     print("   Agent 必须确认已逐文件审查 diff 内容。")
     print("   加 --reviewed 标志声明审查完成，否则 commit 被阻止。")

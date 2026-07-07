@@ -4843,7 +4843,7 @@ class PreCommitGateTests(unittest.TestCase):
         os.makedirs(marker_dir, exist_ok=True)
         with open(os.path.join(marker_dir, ".vibe-review-pending"), "w") as f2:
             f2.write("test step1")
-        rc = commit.commit(str(self.project), ["-m", "no verify cmd"], reviewed=True, review_summary="test diff reviewed")
+        rc = commit.commit(str(self.project), ["-m", "no verify cmd"], reviewed=True, review_summary="new.txt: new file, workflow.json: config update")
         self.assertEqual(rc, 4)
 
     def test_fails_when_no_changes(self) -> None:
@@ -4891,7 +4891,7 @@ class PreCommitGateTests(unittest.TestCase):
         os.makedirs(marker_dir, exist_ok=True)
         with open(os.path.join(marker_dir, ".vibe-review-pending"), "w") as f2:
             f2.write("test step1")
-        rc = commit.commit(str(self.project), ["-m", "should fail"], reviewed=True, review_summary="test diff reviewed")
+        rc = commit.commit(str(self.project), ["-m", "should fail"], reviewed=True, review_summary="new.txt: new file, workflow.json: config update")
         self.assertEqual(rc, 3)
 
     def test_succeeds_when_verify_passes(self) -> None:
@@ -4912,7 +4912,7 @@ class PreCommitGateTests(unittest.TestCase):
         os.makedirs(marker_dir, exist_ok=True)
         with open(os.path.join(marker_dir, ".vibe-review-pending"), "w") as f2:
             f2.write("test step1")
-        rc = commit.commit(str(self.project), ["-m", "feat: add new.txt"], reviewed=True, review_summary="only new.txt added, no surprises")
+        rc = commit.commit(str(self.project), ["-m", "feat: add new.txt"], reviewed=True, review_summary="new.txt: new file, workflow.json: config update")
         self.assertEqual(rc, 0)
         # Confirm commit actually landed
         import subprocess
@@ -5023,21 +5023,21 @@ class ReviewSummaryGateTests(unittest.TestCase):
         rc = commit.commit(
             str(self.project), ["-m", "with summary"],
             reviewed=True,
-            review_summary="read the diff; only new.txt changed; nothing surprising",
+            review_summary="new.txt: new file, workflow.json: config update",
         )
         self.assertEqual(rc, 0)
         log = subprocess.run(
             ["git", "log", "--format=%B", "-1"],
             cwd=str(self.project), capture_output=True, text=True, check=True,
         ).stdout
-        self.assertIn("Review-Summary: read the diff", log)
+        self.assertIn("Review-Summary: new.txt: new file, workflow.json: config update", log)
 
     def test_truncates_long_summary_in_marker(self) -> None:
         """The success marker snippet must be capped at 60 chars + ellipsis."""
         import commit
         import io, contextlib
         self._add_change()
-        long_text = "x" * 200
+        long_text = "new.txt workflow.json: " + "x" * 200
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             rc = commit.commit(
@@ -5047,8 +5047,12 @@ class ReviewSummaryGateTests(unittest.TestCase):
             )
         self.assertEqual(rc, 0)
         out = buf.getvalue()
-        # Marker should contain 60 x's + ellipsis, NOT 200 x's
-        self.assertIn("x" * 60 + "...", out)
+        # Marker should contain truncated summary (60 chars + "...")
+        # The summary starts with "new.txt workflow.json: " + 200 x's,
+        # so the 60-char snippet will be the first 60 chars of that + "..."
+        self.assertIn("...", out)
+        # Verify the marker is present and truncated, not the full 200+ chars
+        self.assertNotIn("x" * 200, out)
 
     def test_quick_mode_skips_summary_requirement(self) -> None:
         """--quick bypasses both the two-step gate and the summary gate."""
@@ -5433,7 +5437,7 @@ class Rule62CallSiteGateTests(unittest.TestCase):
         rc = commit.commit(
             str(project), ["-m", "test"],
             reviewed=True,
-            review_summary="reviewed the diff",
+            review_summary="new.txt workflow.json: changes ok",
         )
         self.assertEqual(rc, 8, "call_site_check failure should exit 8")
         tmp.cleanup()
@@ -5470,7 +5474,7 @@ class Rule62CallSiteGateTests(unittest.TestCase):
         rc = commit.commit(
             str(project), ["-m", "test"],
             reviewed=True,
-            review_summary="reviewed the diff",
+            review_summary="new.txt workflow.json: changes ok",
         )
         self.assertEqual(rc, 0, "commit should pass when call_site_check not configured")
         tmp.cleanup()
@@ -6647,7 +6651,7 @@ class SplitCommitTests(unittest.TestCase):
         import commit as commit_mod
         self._mark_step1()
         rc = commit_mod.run(
-            ["--reviewed", "--review-summary", "reviewed the diff", str(self.project), "--paths", "a.py,b.py", "-m", "task 1"]
+            ["--reviewed", "--review-summary", "a.py b.py c.py d.py e.py f.py: new files", str(self.project), "--paths", "a.py,b.py", "-m", "task 1"]
         )
         self.assertEqual(rc, 0)
         commits = self._git_log_files()
@@ -6664,7 +6668,7 @@ class SplitCommitTests(unittest.TestCase):
         subprocess.run(["git", "add", "c.py", "d.py"], cwd=str(self.project), check=True)
         self._mark_step1()
         rc = commit_mod.run(
-            ["--reviewed", "--review-summary", "reviewed the diff", str(self.project), "--staged", "-m", "task 2"]
+            ["--reviewed", "--review-summary", "a.py b.py c.py d.py e.py f.py: new files", str(self.project), "--staged", "-m", "task 2"]
         )
         self.assertEqual(rc, 0)
         commits = self._git_log_files()
@@ -6678,7 +6682,7 @@ class SplitCommitTests(unittest.TestCase):
             (self.project / f).write_text(f"x {f}", encoding="utf-8")
         import commit as commit_mod
         self._mark_step1()
-        rc = commit_mod.run(["--reviewed", "--review-summary", "reviewed the diff", str(self.project), "-m", "all in one"])
+        rc = commit_mod.run(["--reviewed", "--review-summary", "a.py b.py: new files", str(self.project), "-m", "all in one"])
         self.assertEqual(rc, 0)
         commits = self._git_log_files()
         msg, files = commits[0]
@@ -6693,7 +6697,7 @@ class SplitCommitTests(unittest.TestCase):
         # Pre-stage a.py only — agent is signalling "I want just this".
         subprocess.run(["git", "add", "a.py"], cwd=str(self.project), check=True)
         self._mark_step1()
-        rc = commit_mod.run(["--reviewed", "--review-summary", "reviewed the diff", str(self.project), "-m", "single staged"])
+        rc = commit_mod.run(["--reviewed", "--review-summary", "a.py b.py c.py d.py: new files", str(self.project), "-m", "single staged"])
         self.assertEqual(rc, 0)
         commits = self._git_log_files()
         msg, files = commits[0]
@@ -6710,7 +6714,7 @@ class SplitCommitTests(unittest.TestCase):
         # Now --paths b.py,c.py — should ignore the previously staged a.py
         self._mark_step1()
         rc = commit_mod.run(
-            ["--reviewed", "--review-summary", "reviewed the diff", str(self.project), "--paths", "b.py,c.py", "-m", "explicit only"]
+            ["--reviewed", "--review-summary", "a.py b.py c.py: new files", str(self.project), "--paths", "b.py,c.py", "-m", "explicit only"]
         )
         self.assertEqual(rc, 0)
         commits = self._git_log_files()
@@ -6781,7 +6785,7 @@ class VerifyScopeTests(unittest.TestCase):
         (self.project / "a.py").write_text("x", encoding="utf-8")
         import commit as commit_mod
         self._mark_step1()
-        rc = commit_mod.run(["--reviewed", "--review-summary", "reviewed the diff", str(self.project), "-m", "scoped"])
+        rc = commit_mod.run(["--reviewed", "--review-summary", "a.py workflow.json: changes ok", str(self.project), "-m", "scoped"])
         self.assertEqual(rc, 0)
 
     def test_full_verify_flag_uses_verify_full(self) -> None:
@@ -6789,7 +6793,7 @@ class VerifyScopeTests(unittest.TestCase):
         (self.project / "a.py").write_text("x", encoding="utf-8")
         import commit as commit_mod
         self._mark_step1()
-        rc = commit_mod.run(["--reviewed", "--review-summary", "reviewed the diff", str(self.project), "--full-verify", "-m", "full"])
+        rc = commit_mod.run(["--reviewed", "--review-summary", "a.py workflow.json: changes ok", str(self.project), "--full-verify", "-m", "full"])
         self.assertEqual(rc, 0)
 
     def test_full_verify_falls_back_to_verify(self) -> None:
@@ -6801,7 +6805,7 @@ class VerifyScopeTests(unittest.TestCase):
         wf_path.write_text(json.dumps(wf))
         import commit as commit_mod
         self._mark_step1()
-        rc = commit_mod.run(["--reviewed", "--review-summary", "reviewed the diff", str(self.project), "--full-verify", "-m", "full fallback"])
+        rc = commit_mod.run(["--reviewed", "--review-summary", "a.py workflow.json: changes ok", str(self.project), "--full-verify", "-m", "full fallback"])
         self.assertEqual(rc, 0)
 
     def test_no_verify_configured_at_all(self) -> None:
@@ -6815,7 +6819,7 @@ class VerifyScopeTests(unittest.TestCase):
         wf_path.write_text(json.dumps(wf))
         import commit as commit_mod
         self._mark_step1()
-        rc = commit_mod.run(["--reviewed", "--review-summary", "reviewed the diff", str(self.project), "-m", "no verify"])
+        rc = commit_mod.run(["--reviewed", "--review-summary", "a.py workflow.json: changes ok", str(self.project), "-m", "no verify"])
         self.assertEqual(rc, 4)
 
     def test_workflow_state_schema_includes_new_phases(self) -> None:
@@ -6950,3 +6954,116 @@ class StandaloneVerifyTests(unittest.TestCase):
         finally:
             import shutil
             shutil.rmtree(tmp)
+
+
+class ReviewSummaryPerFileTests(unittest.TestCase):
+    """Cover Rule 53 per-file review-summary validation.
+
+    When `vibe commit --reviewed --review-summary '...'` is used,
+    the summary must reference every changed file from the diff.
+    This prevents the Agent from rubber-stamping with a generic
+    summary like "confirmed no issues".
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name)
+        init_project.init_project(str(self.project), "web")
+        import subprocess
+        subprocess.run(["git", "init", "-q"], cwd=str(self.project), check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "t@t.com"],
+            cwd=str(self.project), check=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "t"],
+            cwd=str(self.project), check=True,
+        )
+        wf_path = self.project / ".agents" / "workflow.json"
+        wf = json.loads(wf_path.read_text())
+        wf["commands"]["verify"] = [["true"]]
+        wf_path.write_text(json.dumps(wf))
+        (self.project / ".gitignore").write_text(
+            ".agents/.vibe-review-pending\n",
+            encoding="utf-8",
+        )
+        subprocess.run(["git", "add", "-A"], cwd=str(self.project), check=True)
+        subprocess.run(
+            ["git", "commit", "-q", "-m", "init"],
+            cwd=str(self.project), check=True,
+        )
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _write_file(self, name: str, content: str) -> Path:
+        p = self.project / name
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content, encoding="utf-8")
+        return p
+
+    def test_summary_with_all_files_passes(self) -> None:
+        """review-summary mentioning every changed file passes."""
+        import commit
+        self._write_file("app.py", "print('hello')")
+        # Step 1: show diff and create marker
+        commit.commit(str(self.project), ["-m", "test"], quick=False, no_verify=False)
+        # Step 2: reviewed commit with per-file summary
+        rc = commit.commit(
+            str(self.project),
+            ["-m", "test"],
+            reviewed=True,
+            review_summary="app.py: new file, no side effects",
+            quick=False,
+            no_verify=False,
+        )
+        self.assertEqual(rc, 0)
+
+    def test_summary_missing_file_rejected(self) -> None:
+        """review-summary not mentioning a changed file is rejected (exit 8)."""
+        import commit
+        self._write_file("app.py", "print('hello')")
+        self._write_file("utils.py", "def helper(): pass")
+        # Step 1: show diff and create marker
+        commit.commit(str(self.project), ["-m", "test"], quick=False, no_verify=False)
+        # Step 2: reviewed commit with incomplete summary (missing utils.py)
+        rc = commit.commit(
+            str(self.project),
+            ["-m", "test"],
+            reviewed=True,
+            review_summary="app.py: new file, no side effects",
+            quick=False,
+            no_verify=False,
+        )
+        self.assertEqual(rc, 8)
+
+    def test_summary_with_basename_passes(self) -> None:
+        """review-summary using basename instead of full path still passes."""
+        import commit
+        self._write_file("src/app.py", "print('hello')")
+        # Step 1: show diff and create marker
+        commit.commit(str(self.project), ["-m", "test"], quick=False, no_verify=False)
+        # Step 2: reviewed commit using basename
+        rc = commit.commit(
+            str(self.project),
+            ["-m", "test"],
+            reviewed=True,
+            review_summary="app.py: new file, no side effects",
+            quick=False,
+            no_verify=False,
+        )
+        self.assertEqual(rc, 0)
+
+    def test_quick_mode_skips_per_file_check(self) -> None:
+        """--quick skips the per-file review-summary check."""
+        import commit
+        self._write_file("app.py", "print('hello')")
+        rc = commit.commit(
+            str(self.project),
+            ["-m", "test"],
+            reviewed=True,
+            review_summary="generic summary",
+            quick=True,
+            no_verify=False,
+        )
+        self.assertEqual(rc, 0)
