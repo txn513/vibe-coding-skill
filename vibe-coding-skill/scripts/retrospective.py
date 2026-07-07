@@ -26,9 +26,9 @@ def run_retrospective(project_root: str, spec_name: str = "") -> dict | None:
         if not spec_name:
             print("❌ 无法自动定位要复盘的 spec。请显式提供 spec_name。")
             return None
-        if auto_status != "done":
+        if auto_status not in {"released", "done"}:
             print(f"❌ 自动定位到 {spec_name}，但其状态为 {auto_status}，尚不能创建正式回顾。")
-            print("   请先完成该 spec，或显式指定一个已 done 的 spec。")
+            print("   请先完成该 spec，或显式指定一个已 released 或 done 的 spec。")
             return None
 
     retro_path = os.path.join(project_root, ".agents", "retros", f"{spec_name}.md")
@@ -79,7 +79,7 @@ def _auto_detect_spec(project_root: str) -> tuple[str, str, str]:
 
     Returns (spec_name, status, rationale).
     """
-    done = spec_scorer.rank_specs(project_root, status_filter={"done"})
+    done = spec_scorer.rank_specs(project_root, status_filter={"released", "done"})
     if done:
         top = done[0]
         rationale = spec_scorer.format_rationale(top, len(done))

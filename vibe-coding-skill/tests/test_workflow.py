@@ -7122,3 +7122,70 @@ class AmendDryRunTests(unittest.TestCase):
         path = self._write_spec("draftapply", status="draft")
         result = spec_amend.amend_spec(str(self.project), "draftapply", "test change", apply=True)
         self.assertIsNotNone(result, "--apply on draft must succeed")
+
+
+class RetroReleasedDraftTests(unittest.TestCase):
+    """Cover retro creation for released specs + changelog released inclusion."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name)
+        init_project.init_project(str(self.project), "web")
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _write_spec(self, name: str, status: str = "draft") -> Path:
+        path = self.project / ".agents" / "specs" / f"{name}.md"
+        path.write_text(
+            VALID_SPEC.format(status=status),
+            encoding="utf-8",
+        )
+        return path
+
+    def test_retro_released_spec_gets_draft_suffix(self) -> None:
+        """released spec retro should have [draft] in title."""
+        self._write_spec("released-feat", status="released")
+        import create_retro
+        retro_file = create_retro.create_retro(str(self.project), "released-feat")
+        self.assertTrue(Path(retro_file).exists())
+        content = Path(retro_file).read_text(encoding="utf-8")
+        self.assertIn("回顾 [draft]", content)
+
+    def test_retro_done_spec_no_draft_suffix(self) -> None:
+        """done spec retro should NOT have [draft] in title."""
+        self._write_spec("done-feat", status="done")
+        import create_retro
+        retro_file = create_retro.create_retro(str(self.project), "done-feat")
+        self.assertTrue(Path(retro_file).exists())
+        content = Path(retro_file).read_text(encoding="utf-8")
+        self.assertNotIn("[draft]", content)
+
+    def test_changelog_includes_released_spec(self) -> None:
+        """released spec should appear in changelog."""
+        self._write_spec("released-feat", status="released")
+        import generate_changelog
+        changelog = generate_changelog.generate_changelog(str(self.project), "v0.1.0")
+        self.assertIn("released-feat", changelog)
+
+    def test_changelog_includes_done_spec(self) -> None:
+        """done spec should still appear in changelog."""
+        self._write_spec("done-feat", status="done")
+        import generate_changelog
+        changelog = generate_changelog.generate_changelog(str(self.project), "v0.1.0")
+        self.assertIn("done-feat", changelog)
+
+
+class SpecStateEnumCommentTests(unittest.TestCase):
+    """Cover Rule that templates/spec.md carries the state machine enum hint."""
+
+    def test_spec_template_has_state_enum_comment(self) -> None:
+        import importlib.util
+        skill_dir = Path(__file__).resolve().parent.parent
+        template_path = skill_dir / "templates" / "spec.md"
+        content = template_path.read_text(encoding="utf-8")
+        # Comment line must enumerate legal status values (Rule 25 governance).
+        self.assertRegex(content, r"状态合法值:\s*draft")
+        for state in ("spec-ready", "in-progress", "review", "released",
+                      "done", "blocked", "cancelled", "superseded"):
+            self.assertIn(state, content, f"missing state {state} in spec template")

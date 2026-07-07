@@ -22,9 +22,11 @@ def create_retro(project_root: str, spec_name: str) -> str:
         with open(spec_file) as f:
             content = f.read()
             status = re.search(r">\s*状态:\s*(\S+)", content)
-            if not status or status.group(1) != "done":
-                print("❌ 只有状态为 done 的规格才能创建回顾")
+            current_status = status.group(1) if status else "draft"
+            if current_status not in {"released", "done"}:
+                print("❌ 只有状态为 released 或 done 的规格才能创建回顾")
                 return ""
+            is_draft_retro = current_status == "released"
             m = re.search(r"\*\*要解决什么问题.*?\*\*\s*\n+(.+)", content)
             if m:
                 spec_intent = m.group(1).strip()
@@ -80,6 +82,12 @@ def create_retro(project_root: str, spec_name: str) -> str:
         "ACTION_REVIEW_CL": "(是否需要调整 review checklist)", "ACTION_OTHER": "(其他行动项)",
     }
 
+    if is_draft_retro:
+        template = template.replace(
+            "# {{SPEC_NAME}} — 回顾",
+            "# {{SPEC_NAME}} — 回顾 [draft]",
+            1,
+        )
     content = template
     for k, v in fields.items():
         content = content.replace("{{" + k + "}}", v)

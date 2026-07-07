@@ -1,5 +1,6 @@
 # {{SPEC_NAME}}
 
+<!-- 状态合法值: draft / spec-ready / in-progress / review / released / done / blocked / cancelled / superseded -->
 > 状态: {{STATUS}} | 创建: {{CREATED_AT}} | 更新: {{UPDATED_AT}}
 > 类型: {{SPEC_TYPE}}
 > 风险: {{RISK_LEVEL}}

@@ -68,7 +68,7 @@ def generate_changelog(
 
         entry = f"- **{name}**: {intent}" if intent else f"- **{name}**"
 
-        if status in ("done", "complete", "🎉"):
+        if status in ("done", "complete", "released", "🎉"):
             if spec_type == "bug":
                 bug_fixes.append(entry)
             elif spec_type == "refactor":
