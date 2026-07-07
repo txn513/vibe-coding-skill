@@ -154,10 +154,13 @@ artifacts merely because a template exists.
       and returning the expected response), degraded (upstream unreachable
       and the forwarder returning a structured error the front-end can
       render), and recovered (upstream back online and retry succeeding).
-13. When behavior depends on time-sensitive or freshness-sensitive state such
-    as cache TTL, token expiry, propagation delay, or refresh windows, verify
-    at least three states: valid, expired or stale, and recovered after refresh
-    or re-resolution.
+13. **Time-sensitive state requires three-state verification**: When behavior
+    depends on time-sensitive or freshness-sensitive state such as cache TTL,
+    token expiry, propagation delay, or refresh windows, verify at least three
+    states: valid, expired or stale, and recovered after refresh or
+    re-resolution.
+14. *(Intentionally removed — merged into Rule 13 during re-organisation;
+    the three-state verification pattern covers the prior guidance.)*
 15. When a spec touches topics covered by Rule 12 (composed-path verification for
     fallback or cross-component flows) or Rule 13 (time-sensitive or
     freshness-sensitive state), the Agent must check whether the project's
@@ -207,17 +210,20 @@ artifacts merely because a template exists.
     and remaining gates (review / release / observe). The hint is read-only
     guidance, never an implicit advance — review and observation gates must
     still be triggered explicitly.
-23. Use one active writer per spec. Parallelize through separate specs or
-    worktrees instead of adding distributed locking to this Skill.
-24. On existing projects, inventory policy sources before proposing changes.
-    Existing project rules outrank Skill defaults. Do not infer semantic
-    conflicts from keywords; record conflicts explicitly with sources, scope,
-    severity, and resolution. Unresolved high-risk conflicts block affected
-    specs from becoming `spec-ready`.
-25. Retrospective writeups should name the dominant failure mode in a compact,
-    reusable way before listing fixes. Prefer the shared failure taxonomy when
-    it fits so that later `self_analyze` runs can aggregate patterns across
-    multiple retros.
+23. **One active writer per spec**: Use one active writer per spec.
+    Parallelize through separate specs or worktrees instead of adding
+    distributed locking to this Skill.
+24. **Inventory policy sources before proposing changes**: On existing
+    projects, inventory policy sources before proposing changes. Existing
+    project rules outrank Skill defaults. Do not infer semantic conflicts
+    from keywords; record conflicts explicitly with sources, scope, severity,
+    and resolution. Unresolved high-risk conflicts block affected specs from
+    becoming `spec-ready`.
+25. **Retrospectives must name the dominant failure mode**: Retrospective
+    writeups should name the dominant failure mode in a compact, reusable way
+    before listing fixes. Prefer the shared failure taxonomy when it fits so
+    that later `self_analyze` runs can aggregate patterns across multiple
+    retros.
     25.1 **Failure mode labels are advisory triggers, not recovery playbooks**:
         When a retro names a shared-failure-mode label from the taxonomy
         (single-point verified / composed-path missing, steady-state
@@ -354,6 +360,8 @@ artifacts merely because a template exists.
     code vendor model names. Concrete model mappings belong in project-local
     or user-local configuration and must remain advisory; they are cost and
     workflow guidance, not status gates.
+48. *(Intentionally removed — merged into Rule 39 during re-organisation.)*
+49. *(Intentionally removed — merged into Rule 39 during re-organisation.)*
 40. **External UI design tools are adapters, not acceptance sources**: When a
     UI spec uses output from a design tool, screenshot, generated prototype,
     or manual visual brief, the Agent must convert that source into a
