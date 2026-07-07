@@ -1,6 +1,12 @@
 # {{DESIGN_NAME}} — 设计说明
 
-> 状态: {{STATUS}} | 创建: {{CREATED_AT}} | 关联规格: {{LINKED_SPEC}}
+> 状态: {{STATUS}} | 创建: {{CREATED_AT}} | 当前版本: v1 | 历史版本: 无 | 关联规格: {{LINKED_SPEC}}
+
+<!-- vibe:design_version_pointer: current=v1 history=none -->
+
+## 版本历史
+
+{{VERSION_HISTORY}}
 
 ## 问题与目标
 

@@ -7189,3 +7189,123 @@ class SpecStateEnumCommentTests(unittest.TestCase):
         for state in ("spec-ready", "in-progress", "review", "released",
                       "done", "blocked", "cancelled", "superseded"):
             self.assertIn(state, content, f"missing state {state} in spec template")
+
+
+class DesignVersioningTests(unittest.TestCase):
+    """Cover Rule 42 (UI design iteration must be versioned, not overwritten).
+
+    The expected layout after first create:
+      .agents/designs/<name>.md              (current pointer, frontmatter 当前版本=v1)
+      .agents/designs/<name>.versions/v1.md   (history record, same content)
+
+    After iteration:
+      <name>.versions/v{N+1}.md created
+      <name>.md frontmatter 当前版本=v{N+1}, 历史版本 lists earlier versions
+
+    After rollback:
+      <name>.md rewritten from <name>.versions/v{N}.md
+      History retains all versions (rollback does not delete archives).
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name)
+        os.makedirs(self.project / ".agents" / "designs", exist_ok=True)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _create(self, name: str = "login-flow") -> Path:
+        return Path(create_design.create_design(str(self.project), name))
+
+    def test_first_create_writes_main_and_v1_history(self) -> None:
+        main_path = self._create()
+        self.assertTrue(main_path.exists())
+        versions_dir = self.project / ".agents" / "designs" / "login-flow.versions"
+        self.assertTrue(versions_dir.is_dir())
+        v1 = versions_dir / "v1.md"
+        self.assertTrue(v1.exists())
+        main_text = main_path.read_text(encoding="utf-8")
+        self.assertRegex(main_text, r"当前版本:\s*v1\b")
+        self.assertIn("vibe:design_version_pointer", main_text)
+
+    def test_second_create_call_does_not_overwrite(self) -> None:
+        """Calling create again on an existing design must NOT overwrite (Rule 42)."""
+        main_path = self._create()
+        original = main_path.read_text(encoding="utf-8")
+        # Inject a recognisable marker
+        main_path.write_text(original + "\n<!-- sentinel: do not overwrite -->\n",
+                             encoding="utf-8")
+        again = create_design.create_design(str(self.project), "login-flow")
+        again_text = Path(again).read_text(encoding="utf-8")
+        self.assertIn("sentinel: do not overwrite", again_text,
+                      "Rule 42 violation: create silently overwrote existing design")
+
+    def test_iteration_creates_v2_and_updates_pointer(self) -> None:
+        self._create()
+        new_version = Path(
+            create_design.design_iteration(str(self.project), "login-flow")
+        )
+        self.assertEqual(new_version.name, "v2.md")
+        main_path = self.project / ".agents" / "designs" / "login-flow.md"
+        main_text = main_path.read_text(encoding="utf-8")
+        self.assertRegex(main_text, r"当前版本:\s*v2\b")
+        self.assertRegex(main_text, r"历史版本:\s*v1\b")
+
+    def test_iteration_three_times_keeps_history_chain(self) -> None:
+        self._create()
+        create_design.design_iteration(str(self.project), "login-flow")
+        create_design.design_iteration(str(self.project), "login-flow")
+        versions_dir = self.project / ".agents" / "designs" / "login-flow.versions"
+        self.assertTrue((versions_dir / "v1.md").exists())
+        self.assertTrue((versions_dir / "v2.md").exists())
+        self.assertTrue((versions_dir / "v3.md").exists())
+        main_text = (self.project / ".agents" / "designs" / "login-flow.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertRegex(main_text, r"当前版本:\s*v3\b")
+        self.assertRegex(main_text, r"历史版本:\s*v1,v2\b")
+
+    def test_rollback_restores_target_and_keeps_history(self) -> None:
+        self._create()
+        create_design.design_iteration(str(self.project), "login-flow")
+        create_design.design_iteration(str(self.project), "login-flow")
+        main_path = self.project / ".agents" / "designs" / "login-flow.md"
+        v2_path = self.project / ".agents" / "designs" / "login-flow.versions" / "v2.md"
+        v2_content = v2_path.read_text(encoding="utf-8")
+        # Inject a unique marker in v2 so we can detect that v2 still exists
+        v2_path.write_text("<!-- v2-unique-marker -->\n" + v2_content, encoding="utf-8")
+        # Rollback to v1
+        create_design.design_rollback(str(self.project), "login-flow", 1)
+        main_text = main_path.read_text(encoding="utf-8")
+        self.assertRegex(main_text, r"当前版本:\s*v1\b")
+        # History must list v2 and v3 as archived (not deleted)
+        self.assertRegex(main_text, r"历史版本:\s*v2,v3\b")
+        # All version files still on disk
+        versions_dir = self.project / ".agents" / "designs" / "login-flow.versions"
+        for v in (1, 2, 3):
+            self.assertTrue((versions_dir / f"v{v}.md").exists(),
+                            f"v{v}.md should be retained after rollback")
+        # v2 marker survives rollback
+        self.assertIn("v2-unique-marker", v2_path.read_text(encoding="utf-8"))
+
+    def test_legacy_flat_layout_is_migrated_on_iteration(self) -> None:
+        """An existing `<name>.md` without `当前版本:` is treated as v1."""
+        legacy = self.project / ".agents" / "designs" / "old-design.md"
+        legacy.write_text(
+            "# old-design — 设计说明\n\n> 状态: draft | 创建: 2026-01-01 | "
+            "关联规格: foo\n\n## legacy body\n",
+            encoding="utf-8",
+        )
+        new_version = Path(
+            create_design.design_iteration(str(self.project), "old-design")
+        )
+        self.assertEqual(new_version.name, "v2.md")
+        # Original legacy body should now live under versions/v1.md
+        v1 = (self.project / ".agents" / "designs" / "old-design.versions" / "v1.md")
+        self.assertTrue(v1.exists())
+        self.assertIn("legacy body", v1.read_text(encoding="utf-8"))
+        # Main file is a fresh v2 pointer
+        main_text = legacy.read_text(encoding="utf-8")
+        self.assertRegex(main_text, r"当前版本:\s*v2\b")
+        self.assertRegex(main_text, r"历史版本:\s*v1\b")

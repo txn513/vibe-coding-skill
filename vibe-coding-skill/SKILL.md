@@ -407,6 +407,20 @@ artifacts merely because a template exists.
     change affects a spec that is already planned, in progress, under review,
     or released, the Agent must use the normal requirement amendment or
     follow-up spec flow rather than silently changing design guidance.
+
+    Implementation: `scripts/create_design.py` lays down a two-track layout
+    for every design. The current pointer lives at
+    `.agents/designs/<name>.md` and carries frontmatter
+    `当前版本: vN | 历史版本: v1,v2,...,v{N-1}` plus a
+    `<!-- vibe:design_version_pointer: current=vN history=... -->` marker.
+    Each iteration writes a new `.agents/designs/<name>.versions/v{N+1}.md`,
+    archives the prior pointer content as `vN`, and refreshes the pointer
+    frontmatter. Rollback copies `<name>.versions/vN.md` over the pointer
+    and rewrites the version fields; archives are kept. Legacy flat
+    `<name>.md` files (no `当前版本:` line) are auto-migrated to v1 on the
+    first iteration. The Agent must never `git rm` or overwrite a version
+    file without writing a follow-up retro; the same Rule 53 commit-review
+    discipline applies to design-version commits.
 43. **Plan checkbox sync is advisory on spec advance**: When a spec reaches
     `review`, `released`, or `done` while its linked plan checkbox progress
     appears stale, the Agent must surface a warning and prompt to sync the plan
