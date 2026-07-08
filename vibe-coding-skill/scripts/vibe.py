@@ -376,6 +376,10 @@ def main() -> None:
             sys.argv = saved_argv
         return
 
+    # version-bump is self-maintenance; doesn't need a project_root.
+    if args.operation == "version-bump":
+        raise SystemExit(version_bump.bump())
+
     root = os.path.abspath(args.project_root)
     if args.operation == "status":
         project_status.project_status(root)
