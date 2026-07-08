@@ -4315,6 +4315,99 @@ class SingleActorBypassDiscoveryTests(unittest.TestCase):
         self.assertIn("--reason", result.stdout)
 
 
+class SingleActorStatusSurfaceTests(unittest.TestCase):
+    """Cover 2026-07-08d: project_status.py alternative-action parity.
+
+    After 53b2afc surfaced the override_approver escape hatch on the
+    advance gate and --help epilog, the status recommendation must
+    point at the SAME escape hatch instead of pushing users back to
+    mutating workflow.json.review_separation.required_for. This is a
+    surface-consistency test, not a logic test.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name)
+        init_project.init_project(str(self.project), "web")
+        subprocess.run(
+            ["git", "init", "-q", str(self.project)],
+            check=False, capture_output=True,
+        )
+        wf = json.loads(
+            (self.project / ".agents" / "workflow.json").read_text()
+        )
+        wf["roles"] = {
+            "owner": "", "builder": "lance", "reviewer": "lance",
+            "releaser": "lance", "observer": "lance",
+            "override_approver": "lance",
+        }
+        wf["review_separation"] = {"required_for": ["high", "medium"]}
+        (self.project / ".agents" / "workflow.json").write_text(
+            json.dumps(wf)
+        )
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _write_review_medium_spec(self, name: str) -> Path:
+        # Spec status must be 'review' for the separation gate branch to
+        # fire inside recommend_next (draft / in-progress are routed
+        # through other code paths first).
+        path = self.project / ".agents" / "specs" / f"{name}.md"
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        path.write_text(
+            "# " + name + "\n\n"
+            "> 状态: review | 创建: " + now
+            + " | 更新: " + now + "\n"
+            "> 风险: medium\n"
+            "> 风险确认: confirmed\n\n"
+            "## 意图 (Intent)\n\ntext\n\n"
+            "## 涉及范围\n\n"
+            "- **新增文件**: none\n"
+            "- **修改文件**: none\n"
+            "- **不动文件**: none\n"
+            "- **受影响的读路径**: 无读路径影响 (no read path affected)\n\n"
+            "### 正常路径\n\n1. concrete acceptance item\n\n"
+            "## 验收标准\n\n- [ ] AC1 body\n\n"
+            "## 验证方式\n\n- [ ] 相关回归测试已新增或更新\n",
+            encoding="utf-8",
+        )
+        return path
+
+    def test_status_alternative_action_points_at_override_approver(self) -> None:
+        """When single-actor + medium-risk separation blocks advance,
+        recommend_next's alternative.action must cite the override_approver
+        escape hatch (not the legacy workflow.json workaround).
+        """
+        self._write_review_medium_spec("m-feat")
+        # Builder in-progress entry so _last_actor picks it up
+        activity = self.project / ".agents" / "activity.md"
+        activity.write_text(
+            "- 2026-07-08T00:00:00Z `m-feat`: `in-progress` → `review`"
+            " | Actor: lance | Role: builder\n",
+            encoding="utf-8",
+        )
+        # Self-approved review forces the separation branch
+        generate_review.generate_review(str(self.project), "m-feat")
+        record_review.record_review(
+            str(self.project), "m-feat", "approved",
+            "scope reviewed", "verify evidence", "lance",
+        )
+        import project_status
+        rec = project_status.recommend_next(str(self.project))
+        # The alt-action block must reference the bypass command
+        alt = rec.get("alternative", {})
+        self.assertIn("override_approver", alt.get("action", ""))
+        self.assertIn("vibe advance", alt.get("action", ""))
+        # Must NOT carry the legacy "mutate workflow.json" alt-action
+        # for separation-triggered recommendations
+        self.assertNotIn(
+            "调整 workflow.json.review_separation",
+            alt.get("action", ""),
+        )
+
+
+
 class BilingualHeadingTests(unittest.TestCase):
     """Cover the bilingual heading recognition in validate_spec.
 

@@ -943,6 +943,24 @@ def recommend_next(project_root: str, specs: list[dict] | None = None) -> dict:
             )
             if not _r_ok:
                 if _r_reason:
+                    # 2026-07-08d: 53b2afc 已在 vibe advance --help epilog 与
+                    # runtime error block 暴露 override_approver escape hatch。
+                    # status 推荐必须 surface 一致, 否则推荐与
+                    # "实际入口"反向, 多 actor 项目也会被旧文案误导去改 workflow.json。
+                    if "审查身份与构建者身份相同" in _r_reason:
+                        alt_action = (
+                            "运行 vibe advance {spec} released "
+                            "--role override_approver --reason \"...\""
+                        )
+                        alt_reason = (
+                            "单 actor 项目可走 escape hatch(无需改 workflow.json)；"
+                            "三件套见 vibe advance --help epilog。"
+                        )
+                    else:
+                        alt_action = "调整 workflow.json.review_separation.required_for"
+                        alt_reason = (
+                            "如确需同身份自审，把当前 risk 等级从该列表中移除。"
+                        )
                     return _recommendation(
                         "使用不同身份生成审查并重新提交",
                         _r_reason,
@@ -951,8 +969,8 @@ def recommend_next(project_root: str, specs: list[dict] | None = None) -> dict:
                         why_not="当前 risk 等级要求独立审查者；review 与 build 身份必须不同。",
                         action_command=_review_decision_command(name),
                         alternative={
-                            "action": "调整 workflow.json.review_separation.required_for",
-                            "reason": "如确需同身份自审，把当前 risk 等级从该列表中移除。",
+                            "action": alt_action,
+                            "reason": alt_reason,
                             "spec": name,
                         },
                     )
