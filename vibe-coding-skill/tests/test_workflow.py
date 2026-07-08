@@ -7629,6 +7629,131 @@ class ReviewSummaryLineRefGateTests(unittest.TestCase):
 
 
 
+class ReviewSummarySemicolonInDescriptionTests(unittest.TestCase):
+    """Cover 2026-07-08: line-ref gate must not be fooled by ";" inside
+    a single file entry's description.
+
+    Original splitter used "summary.split(\';\')" as the file-entry
+    separator. Agents writing Chinese descriptions routinely include
+    ";" inside one file entry (eg "app.py: L789 area; L1130 area").
+    Splitting on ";" turned one valid entry into two — a colon-less
+    prefix and a colon-less tail — and the tail was flagged as a
+    missing line reference, hard-blocking the commit.
+
+    New splitter accepts either newline OR ";" so descriptions can
+    include ";" freely. Old "app.py: x; utils.py: y" still works.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name)
+        subprocess.run(["git", "init", "-q"], cwd=str(self.project), check=True)
+        subprocess.run(["git", "config", "user.email", "t@t.com"],
+                       cwd=str(self.project), check=True)
+        subprocess.run(["git", "config", "user.name", "t"],
+                       cwd=str(self.project), check=True)
+        agents_dir = self.project / ".agents"
+        agents_dir.mkdir(exist_ok=True)
+        wf = {
+            "roles": {"builder": "b", "reviewer": "r",
+                      "releaser": "l", "observer": "o"},
+            "risk_profiles": {"low": {}, "medium": {}, "high": {}},
+            "commands": {"verify": [["true"]]},
+        }
+        (agents_dir / "workflow.json").write_text(
+            json.dumps(wf), encoding="utf-8"
+        )
+        (self.project / ".gitignore").write_text(
+            ".agents/.vibe-review-pending\n", encoding="utf-8"
+        )
+        subprocess.run(["git", "add", "-A"], cwd=str(self.project), check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "init"],
+                       cwd=str(self.project), check=True)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _capture(self, fn, *args, **kwargs):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            try:
+                rc = fn(*args, **kwargs)
+            except SystemExit as e:
+                rc = e.code
+        return buf.getvalue(), rc
+
+    def test_semicolon_inside_single_entry_is_not_split(self) -> None:
+        """One file entry containing ";" must NOT be split into two parts.
+
+        Regression for the 2026-07-08 Lance feedback where
+        "app.py: L789 area; L1130 area" was hard-blocked because the
+        post-";" tail "L1130 area" had no ":" → triggered missing_line_refs.
+        """
+        import commit
+        (self.project / "app.py").write_text("print('hello')\n",
+                                            encoding="utf-8")
+        # Step 1 — show diff
+        self._capture(commit.commit, str(self.project), ["-m", "test"],
+                      quick=False, no_verify=False)
+        # Step 2 — reviewed, with ";" inside the single entry's description
+        out, rc = self._capture(
+            commit.commit, str(self.project), ["-m", "test"],
+            reviewed=True,
+            review_summary="app.py: L789 area; L1130 area both touched",
+            quick=False, no_verify=False,
+        )
+        self.assertEqual(rc, 0, msg=f"semicolon in description must not block; out={out}")
+        self.assertNotIn("missing_line_refs", out)
+
+    def test_mixed_newline_and_semicolon_separators(self) -> None:
+        """Multi-line review-summary with ";" inside an entry must pass.
+
+        Modern agent output emits newline-separated entries (the
+        preferred form per 2026-07-08 fix). A ";" inside any entry's
+        description is harmless — only valid separators split.
+        """
+        import commit
+        (self.project / "app.py").write_text("print('v3')\n",
+                                            encoding="utf-8")
+        (self.project / "utils.py").write_text("def h2(): pass\n",
+                                              encoding="utf-8")
+        self._capture(commit.commit, str(self.project), ["-m", "x"],
+                      quick=False, no_verify=False)
+        summary = (
+            "app.py: L1 print updated\n"
+            "utils.py: helper `h2` added at L1"
+        )
+        out, rc = self._capture(
+            commit.commit, str(self.project), ["-m", "x"],
+            reviewed=True,
+            review_summary=summary,
+            quick=False, no_verify=False,
+        )
+        self.assertEqual(rc, 0, msg=f"newline-separated summary must pass; out={out}")
+        self.assertNotIn("missing_line_refs", out)
+
+    def test_semicolon_separator_legacy_still_works(self) -> None:
+        """Backward compat: the legacy ";" separator must still parse
+        correctly when each entry carries a line ref.
+        """
+        import commit
+        (self.project / "app.py").write_text("print('v3')\n",
+                                            encoding="utf-8")
+        (self.project / "utils.py").write_text("def h2(): pass\n",
+                                              encoding="utf-8")
+        self._capture(commit.commit, str(self.project), ["-m", "x"],
+                      quick=False, no_verify=False)
+        out, rc = self._capture(
+            commit.commit, str(self.project), ["-m", "x"],
+            reviewed=True,
+            review_summary="app.py: L1 `print` updated; utils.py: L1 `h2` added",
+            quick=False, no_verify=False,
+        )
+        self.assertEqual(rc, 0, msg=f"legacy ; separator must pass; out={out}")
+        self.assertNotIn("missing_line_refs", out)
+
+
+
 class AmendDryRunTests(unittest.TestCase):
     """Cover vibe amend dry-run vs --apply behavior."""
 

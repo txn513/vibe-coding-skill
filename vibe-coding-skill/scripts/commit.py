@@ -418,7 +418,18 @@ def commit(
         line_ref_pattern = re.compile(
             r"(?:L[0-9]+|line\s+[0-9]+|:[0-9]+|`[^`]+`)", re.IGNORECASE
         )
-        file_parts = [p.strip() for p in summary.split(";") if p.strip()]
+        # 2026-07-08: accept either newline OR ";" as file-entry separator.
+        # The original ";" separator collided with descriptions that contain
+        # ";" (eg "L789 area; L1130 area"), causing false missing-line-ref
+        # hits when the post-split tail lacked a colon. Newline is preferred
+        # because review-summary templates now routinely emit multi-line
+        # forms, but ";" remains as a compatibility fallback so existing
+        # agent output still parses.
+        file_parts = [
+            part.strip()
+            for part in re.split(r"[\n;]+", summary)
+            if part.strip()
+        ]
         no_line_ref_parts = []
         for part in file_parts:
             # 跳过纯文件名前缀 (eg "app.py:" 无结论部分) — 这些在 missing
