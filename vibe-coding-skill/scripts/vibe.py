@@ -43,6 +43,36 @@ import retrospective
 import update_agents
 
 
+_ADVANCE_EPILOG = """\
+Review-separation escape hatch (single-actor projects):
+
+  When workflow.json.review_separation.required_for contains the spec's
+  risk level (defaults to ["high"]; add "medium" to opt in) and the
+  project genuinely has no second human identity available, advance to
+  released/done can declare the override inline:
+
+      vibe advance <spec> released \\
+        --actor <identity> \\
+        --role override_approver \\
+        --reason "<why>"
+
+  All three conditions are enforced by the advance gate:
+    (a) role must be exactly "override_approver";
+    (b) --reason must be non-empty (audit trail);
+    (c) --actor must equal workflow.json roles.override_approver,
+        so a forged override is rejected by the identity check.
+
+  This is narrower than --force, which skips every gate. Other review
+  checks (review file exists, approved, has basis, has evidence,
+  context/snapshot digest, reviewer identity, decision validity,
+  clean worktree) still run under the override.
+
+  Helper Skills 'vibe-coding-reviewer' / 'vibe-coding-debugger' in a
+  fresh session are preferred whenever a second identity is reachable.
+  Reserve the override for solo work where no second session is
+  feasible; reserve --force for emergencies and log --reason.
+"""
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Unified Vibe Coding workflow dispatcher")
     sub = parser.add_subparsers(dest="operation", required=True)
@@ -147,7 +177,11 @@ def main() -> None:
     self_analyze_cmd.add_argument("project_root")
     self_analyze_cmd.add_argument("--output", default="")
 
-    advance = sub.add_parser("advance")
+    advance = sub.add_parser(
+        "advance",
+        epilog=_ADVANCE_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     advance.add_argument("project_root")
     advance.add_argument("spec_name")
     advance.add_argument("status", choices=set_status.VALID_STATUSES)

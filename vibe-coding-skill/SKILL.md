@@ -114,12 +114,20 @@ artifacts merely because a template exists.
    override cannot be forged by any identity that is not the configured
    approver. The other review-quality checks (verify evidence, snapshot,
    clean worktree, plan digest) still run — this is a narrower escape than
-   `--force`, which skips every gate. Prefer the helper Skills
-   (`vibe-coding-reviewer` / `vibe-coding-debugger` in a fresh session)
-   whenever a second identity is reachable; reserve the override for solo
-   work where no second session is feasible. `--force` remains the last
-   resort for emergencies and is logged with `actor` + `role =
-   override_approver` + `--reason`.
+   `--force`, which skips every gate.
+
+   **Discovery surfaces** so users do not have to read this rule first:
+   (i) `vibe advance --help` epilog prints the bypass template with all
+   three conditions; (ii) when the advance gate rejects a transition for
+   same-identity separation, the error block lists the escape-hatch
+   command with copy-paste-ready `--actor` / `--role` / `--reason`
+   placeholders and the three preconditions. This mirrors the e6d40ed
+   "discovery-by-help-epilog" pattern so the upgrade is visible without a
+   rule lookup. Prefer the helper Skills (`vibe-coding-reviewer` /
+   `vibe-coding-debugger` in a fresh session) whenever a second identity
+   is reachable; reserve the override for solo work where no second
+   session is feasible. `--force` remains the last resort for emergencies
+   and is logged with `actor` + `role = override_approver` + `--reason`.
 6. Require actor, `override_approver` role, and reason for every forced
    transition.
 7. Archive replaced or superseded evidence and downstream artifacts. Stale

@@ -209,6 +209,19 @@ def set_status(
                     print("   调整 workflow.json.review_separation.required_for 或使用不同身份重审")
                     if "digest" in review_reason.lower() or "摘要" in review_reason:
                         print("   💡 Spec frontmatter 变更会导致 digest 不匹配，需重跑 review-decision")
+                    # 主动暴露 override_approver bypass 样板（避免用户撞墙再回头查 SKILL.md）
+                    # 当 reason 包含「审查身份与构建者身份相同」时启用
+                    if "审查身份与构建者身份相同" in review_reason:
+                        print()
+                        print("   🛟 Single-actor escape hatch (no --force needed):")
+                        print('      vibe advance <spec> released ' + chr(92))
+                        print('        --actor <your-identity> ' + chr(92))
+                        print('        --role override_approver ' + chr(92))
+                        print('        --reason "single-actor self-review acknowledged"')
+                        print()
+                        print("   三条必备：(a) role 必须是 override_approver；")
+                        print("              (b) --reason 非空；")
+                        print("              (c) --actor 等于 workflow.json roles.override_approver。")
                 else:
                     print("❌ 标记 done 前需要一份结论为 approved 的关联审查记录")
                     print("   先运行 generate_review.py，并由独立审查者填写结论")
@@ -485,6 +498,10 @@ def _has_approved_review(
                         "  单 actor 项目可走 `vibe advance --role override_approver --reason '...'`"
                         " 承认 self-review (无需 --force, 其他 review 检查仍生效)。"
                     )
+                    # Discovery hint: 让上层 vibe.py advance 输出 bypass 模板样板
+                    # (与 e6d40ed 帮助 epilog 同类做法：把新 gate 主动暴露在错误信息里)
+                    print("<!-- vibe:review_separation_bypass_hint: "
+                          "reason=self-review; try --role override_approver --reason ... -->")
             clean_ok = not profile["require_clean_worktree"] or git["worktree"] == "clean"
             if (
                 f"规格: {spec_name}" in review
