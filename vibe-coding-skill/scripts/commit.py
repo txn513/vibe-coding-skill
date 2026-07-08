@@ -36,6 +36,19 @@ from workflow_state import (
     ensure_workflow,
 )
 
+# Shared review-summary template. Surfaced via:
+#   - `vibe commit --help` (argparse epilog, see scripts/vibe.py commit
+#     subparser)
+#   - line-ref hard-gate failure message in this module
+# Centralised so the dispatcher and the gate stay in sync.
+REVIEW_SUMMARY_TEMPLATE = """--review-summary 模板 (per-file + 行号 + 业务结论三件套):
+  app.py: L25-L30 fast-path 加 closed 检查, 无锁开销; 业务逻辑等价
+  utils.py: 新增 `process_helper` 包装, 调用点 grep 已确认
+  test_x.py: L100-L120 新增 fixture, 不影响旧测试
+
+接受的行号信号: L25 / line 25 / :25 / `code_fragment`
+无行号 → exit 9 (硬门禁, --quick 或 --no-verify 可绕过)"""
+
 
 def _review_marker_path(project_root: str) -> str:
     """Path to the marker file that records "step 1 (diff shown) was run".
@@ -664,17 +677,17 @@ def run(argv: list[str]) -> int:
         i += 1
     argv = cleaned
     if not argv:
+        # Note: review-summary template used to live here, but this
+        # branch is unreachable through `vibe commit` because argparse
+        # in scripts/vibe.py requires `project_root`. The template now
+        # lives in `commit.REVIEW_SUMMARY_TEMPLATE` and is surfaced
+        # via the commit subparser epilog (`vibe commit --help`) and
+        # via the line-ref hard-gate failure message.
         print("Usage: vibe commit <project_root> [--staged | --paths p1,p2] "
               "[--no-verify] [--full-verify] [--reviewed --review-summary '<text>'] "
               "[--quick] [git commit args...]")
         print()
-        print("--review-summary 模板 (per-file + 行号 + 业务结论三件套):")
-        print("  app.py: L25-L30 fast-path 加 closed 检查, 无锁开销; 业务逻辑等价")
-        print("  utils.py: 新增 `process_helper` 包装, 调用点 grep 已确认")
-        print("  test_x.py: L100-L120 新增 fixture, 不影响旧测试")
-        print()
-        print("接受的行号信号: L25 / line 25 / :25 / `code_fragment`")
-        print("无行号 → exit 9 (硬门禁, --quick 或 --no-verify 可绕过)")
+        print("提示: review-summary 模板见 `vibe commit --help` (epilog 段)")
         return 2
     project_root = argv[0]
     git_args = argv[1:]

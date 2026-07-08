@@ -659,9 +659,11 @@ artifacts merely because a template exists.
 
     Suggested format: `<file>: L<line> <observation>; <file>: L<line> <observation>`
 
-    Help-text template: `vibe commit` with no args (or `vibe commit --help`)
-    prints a worked template (per-file + L<n> + backtick code fragment) so
-    Agents do not have to guess. Doctor and project_status output the
+    Help-text template: the worked template (per-file + L<n> + backtick
+    code fragment) lives in `commit.REVIEW_SUMMARY_TEMPLATE` and is
+    surfaced via the commit subparser epilog, so `vibe commit --help`
+    prints it at the end of the usage block (argparse
+    RawDescriptionHelpFormatter). Doctor and project_status output the
     recovery steps when a commit is missing Vibe-Commit trailer:
     `git reset --soft HEAD~N` then redo the two-step `vibe commit`.
     Amending the message to add a trailer is forbidden — the SHA changes,

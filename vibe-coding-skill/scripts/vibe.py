@@ -219,7 +219,11 @@ def main() -> None:
         help="Run verify_full (includes integration/e2e) instead of default verify",
     )
 
-    commit_cmd = sub.add_parser("commit")
+    commit_cmd = sub.add_parser(
+        "commit",
+        epilog=getattr(commit, "REVIEW_SUMMARY_TEMPLATE", ""),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     commit_cmd.add_argument("project_root")
     commit_cmd.add_argument(
         "git_args", nargs=argparse.REMAINDER,

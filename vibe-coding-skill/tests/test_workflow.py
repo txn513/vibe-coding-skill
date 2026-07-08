@@ -7456,31 +7456,39 @@ class CommitHelpAndDoctorTrailerRecoveryTests(unittest.TestCase):
     """
 
     def test_commit_help_prints_review_summary_template(self) -> None:
-        """Empty argv shows the template with L<n> examples + bypass note."""
+        """`vibe commit --help` (via dispatcher) shows the template.
+
+        2026-07-08b 候选 1b: the template was previously in commit.run\'s
+        empty-argv branch, but argparse in scripts/vibe.py requires
+        `project_root` so that branch was unreachable. The template now
+        lives in commit.REVIEW_SUMMARY_TEMPLATE and is surfaced via
+        the commit subparser epilog (argparse RawDescriptionHelpFormatter).
+        """
         import io, contextlib
-        import commit
-        # Project root must exist (git repo) so we reach the "if not argv"
-        # branch that prints the help block. We pass a non-existent path
-        # because the empty-argv guard fires before any git check.
-        import tempfile, os
-        from pathlib import Path
-        # run() (the CLI entry point) with empty argv prints the help
-        # block and returns 2.
+        import sys
+        import vibe
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             try:
-                rc = commit.run([])
-            except SystemExit as e:
-                rc = e.code
+                sys.argv = ["vibe.py", "commit", "--help"]
+                vibe.main()
+            except SystemExit:
+                pass
         out = buf.getvalue()
-        self.assertEqual(rc, 2, "empty argv must exit 2")
         self.assertIn("--review-summary 模板", out)
         self.assertIn("per-file + 行号 + 业务结论", out)
-        # At least one concrete line-ref example
         self.assertRegex(out, r"L\d+")
-        # Bypass note for --quick / --no-verify
         self.assertIn("--quick", out)
         self.assertIn("--no-verify", out)
+
+    def test_review_summary_template_constant_exists(self) -> None:
+        """The template lives in a module constant for reuse + tests."""
+        import commit
+        self.assertTrue(hasattr(commit, "REVIEW_SUMMARY_TEMPLATE"))
+        tmpl = commit.REVIEW_SUMMARY_TEMPLATE
+        self.assertIn("L25-L30", tmpl)
+        self.assertIn("`process_helper`", tmpl)
+        self.assertIn("exit 9", tmpl)
 
     def test_doctor_trailer_recovery_guidance(self) -> None:
         """Missing Vibe-Commit trailer warning includes recovery steps."""
