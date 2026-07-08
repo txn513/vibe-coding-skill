@@ -200,7 +200,8 @@ def set_status(
     if new_status in {"released", "done"} and not force:
         if profile["require_review"]:
             review_ok, review_reason = _has_approved_review(
-                project_root, spec_name, content, profile, workflow
+                project_root, spec_name, content, profile, workflow,
+                actor=actor, role=role, force_reason=force_reason or "",
             )
             if not review_ok:
                 if review_reason:
@@ -410,6 +411,9 @@ def _has_approved_review(
     spec_content: str,
     profile: dict,
     workflow: dict,
+    actor: str = "",
+    role: str = "",
+    force_reason: str = "",
 ) -> tuple[bool, str | None]:
     """Return (ok, reason). reason is non-None only when ok is False and the
     caller may want to surface a specific blocker to the user (currently the
@@ -450,10 +454,36 @@ def _has_approved_review(
             if spec_risk in required_for:
                 builder = _last_actor(project_root, spec_name, "in-progress")
                 separated = bool(reviewer and builder and reviewer != builder)
+                # Single-actor bypass (2026-07-08c, 提案 1b 方案 B):
+                # When the project is single-actor (builder == reviewer),
+                # the agent can satisfy review-separation by explicitly
+                # declaring `override_approver` role with a non-empty
+                # reason. This is the same as `--force --role
+                # override_approver --reason "..."` semantically, but
+                # preserves the review file gate (all OTHER review checks
+                # still run: review file exists, approved, has basis,
+                # has evidence, etc.). Without this bypass, every
+                # medium-risk bug spec in a single-actor project hits
+                # this gate and the agent resorts to `--force`, which
+                # ALSO skips all other review checks — a strictly
+                # weaker guard. Bypass requires:
+                #   1. role == "override_approver" (explicit intent)
+                #   2. force_reason non-empty (audit trail preserved)
+                #   3. actor matches the workflow's override_approver
+                #      identity (forged override rejected by
+                #      _identity_matches below)
+                if not separated and role == "override_approver" and force_reason.strip():
+                    override_approver = (
+                        workflow.get("roles", {}).get("override_approver", "")
+                    )
+                    if actor and override_approver and actor == override_approver:
+                        separated = True
                 if not separated:
                     separation_reason = (
                         f"审查身份与构建者身份相同；当前 risk 等级 ({spec_risk}) 在 "
                         "workflow.json.review_separation.required_for 中要求独立审查者。"
+                        "  单 actor 项目可走 `vibe advance --role override_approver --reason '...'`"
+                        " 承认 self-review (无需 --force, 其他 review 检查仍生效)。"
                     )
             clean_ok = not profile["require_clean_worktree"] or git["worktree"] == "clean"
             if (

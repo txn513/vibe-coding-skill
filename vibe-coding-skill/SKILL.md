@@ -104,6 +104,22 @@ artifacts merely because a template exists.
    — the project / Agent runtime picks whatever works in its environment;
    what matters is that the recorded identities are different. The advance
    gate refuses a transition when separation is required and not present.
+
+   **Single-actor escape hatch (`--role override_approver --reason "..."`)**
+   applies only when the project genuinely has no second human identity
+   available. All three conditions must hold: (a) the role is exactly
+   `override_approver` (explicit intent, not a typo for builder/reviewer);
+   (b) the supplied `--reason` is non-empty so the audit trail survives;
+   (c) the supplied actor equals `workflow.roles.override_approver` so the
+   override cannot be forged by any identity that is not the configured
+   approver. The other review-quality checks (verify evidence, snapshot,
+   clean worktree, plan digest) still run — this is a narrower escape than
+   `--force`, which skips every gate. Prefer the helper Skills
+   (`vibe-coding-reviewer` / `vibe-coding-debugger` in a fresh session)
+   whenever a second identity is reachable; reserve the override for solo
+   work where no second session is feasible. `--force` remains the last
+   resort for emergencies and is logged with `actor` + `role =
+   override_approver` + `--reason`.
 6. Require actor, `override_approver` role, and reason for every forced
    transition.
 7. Archive replaced or superseded evidence and downstream artifacts. Stale

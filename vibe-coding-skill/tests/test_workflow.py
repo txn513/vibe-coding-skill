@@ -3980,6 +3980,228 @@ class ReviewSeparationTests(unittest.TestCase):
         self.assertIn("审查身份与构建者身份相同", combined)
 
 
+class SingleActorOverrideApproverBypassTests(unittest.TestCase):
+    """Cover 2026-07-08c 候选 1b 方案 B.
+
+    Single-actor projects (builder == reviewer == override_approver)
+    can satisfy review-separation by passing `--role override_approver`
+    with a non-empty `--reason`. This avoids the `--force` escape
+    hatch (which skips ALL review checks) while still letting the
+    agent advance the spec when there is no second human identity.
+
+    Bypass requires:
+      1. role == "override_approver" (explicit intent)
+      2. force_reason non-empty (audit trail)
+      3. actor matches workflow.roles.override_approver (no forged override)
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name)
+        init_project.init_project(str(self.project), "web")
+        subprocess.run(
+            ["git", "init", "-q", str(self.project)],
+            check=False, capture_output=True,
+        )
+        # Configure single-actor: builder == reviewer == override_approver
+        wf = json.loads(
+            (self.project / ".agents" / "workflow.json").read_text(encoding="utf-8")
+        )
+        wf["roles"] = {
+            "builder": "lance",
+            "reviewer": "lance",
+            "releaser": "lance",
+            "observer": "lance",
+            "override_approver": "lance",
+        }
+        # Opt into medium separation (the actual configuration that triggers
+        # the bypass path)
+        wf["review_separation"] = {"required_for": ["high", "medium"]}
+        (self.project / ".agents" / "workflow.json").write_text(
+            json.dumps(wf), encoding="utf-8"
+        )
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _cli(self, *args: str) -> subprocess.CompletedProcess:
+        argv = [sys.executable, str(SKILL_DIR / "scripts" / "vibe.py"), *args]
+        if args and args[0] in {"advance", "plan", "evidence", "retrospective", "status"}:
+            argv.insert(3, str(self.project))
+        return subprocess.run(
+            argv, cwd=str(self.project),
+            capture_output=True, text=True, check=False,
+        )
+
+    def _write_medium_spec(self, name: str) -> Path:
+        path = self.project / ".agents" / "specs" / f"{name}.md"
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        path.write_text(
+            "# " + name + "\n\n"
+            "> 状态: draft | 创建: " + now + " | 更新: " + now + "\n"
+            "> 风险: medium\n"
+            "> 风险确认: confirmed\n\n"
+            "## 意图 (Intent)\n\ntext\n\n"
+            "## 涉及范围\n\n"
+            "- **新增文件**: none\n- **修改文件**: none\n- **不动文件**: none\n"
+            "- **受影响的读路径**: 无读路径影响 (no read path affected)\n\n"
+            "### 正常路径\n\n1. concrete acceptance item\n\n"
+            "## 验收标准\n\n- [ ] AC1 body\n\n"
+            "## 验证方式\n\n- [ ] 相关回归测试已新增或更新\n",
+            encoding="utf-8",
+        )
+        return path
+
+    # setUp pins roles.builder=roles.reviewer=roles.override_approver="lance"
+    # so advance/review tooling demands a matching --actor/--role pair on every
+    # transition. _drive_to_review threads the identity explicitly; otherwise
+    # advance fails the identity gate at the in-progress step.
+    def _drive_to_review(self, name: str) -> None:
+        actor_args = ("--actor", "lance", "--role", "builder")
+        self._cli("advance", name, "spec-ready", *actor_args)
+        self._cli("plan", name)
+        self._cli("advance", name, "in-progress", *actor_args)
+        self._cli(
+            "evidence", name, "verify", "passed",
+            f"checks passed {VALID_SPEC_AC_ALL}",
+            *actor_args,
+        )
+        self._cli("advance", name, "review", *actor_args)
+        # release evidence must declare role=releaser (per _identity_matches),
+        # not role=builder, otherwise the released transition's evidence gate
+        # rejects it on the actor/role mismatch.
+        release_args = ("--actor", "lance", "--role", "releaser")
+        self._cli(
+            "evidence", name, "release", "not-applicable",
+            "no separate release step",
+            *release_args,
+        )
+
+    # Belt-and-suspenders: when --actor is omitted (defensive), still repair
+    # any "Actor: 未记录" rows that pre-date the explicit identity declaration.
+    def _inject_builder_actor(self, name: str = "lance") -> None:
+        activity = self.project / ".agents" / "activity.md"
+        content = activity.read_text(encoding="utf-8")
+        content = content.replace("| Actor: 未记录 |", f"| Actor: {name} |")
+        activity.write_text(content, encoding="utf-8")
+
+    def _write_review(self, name: str, reviewer: str = "lance") -> None:
+        generate_review.generate_review(str(self.project), name)
+        record_review.record_review(
+            str(self.project), name, "approved",
+            "scope reviewed", "verify evidence", reviewer,
+        )
+
+    def test_single_actor_override_approver_with_reason_passes(self) -> None:
+        """--role override_approver --reason bypasses review-separation."""
+        self._write_medium_spec("m-feat")
+        self._drive_to_review("m-feat")
+        self._write_review("m-feat", reviewer="lance")
+        result = self._cli(
+            "advance", "m-feat", "released",
+            "--actor", "lance", "--role", "override_approver",
+            "--reason", "single-actor self-review acknowledged",
+        )
+        self.assertEqual(
+            result.returncode, 0,
+            msg=f"single-actor bypass must pass; stdout={result.stdout} stderr={result.stderr}"
+        )
+
+    def test_single_actor_override_approver_without_reason_blocked(self) -> None:
+        """Without --reason, override_approver bypass does NOT trigger."""
+        self._write_medium_spec("m-feat")
+        self._drive_to_review("m-feat")
+        self._inject_builder_actor("lance")
+        self._write_review("m-feat", reviewer="lance")
+        result = self._cli(
+            "advance", "m-feat", "released",
+            "--actor", "lance", "--role", "override_approver",
+        )
+        self.assertNotEqual(
+            result.returncode, 0,
+            msg="without --reason the bypass must NOT trigger; "
+                f"stdout={result.stdout} stderr={result.stderr}"
+        )
+        combined = result.stdout + result.stderr
+        self.assertIn("审查身份与构建者身份相同", combined)
+
+    def test_single_actor_override_approver_wrong_actor_blocked(self) -> None:
+        """Forged override_approver identity is rejected."""
+        self._write_medium_spec("m-feat")
+        self._drive_to_review("m-feat")
+        self._inject_builder_actor("lance")
+        self._write_review("m-feat", reviewer="lance")
+        result = self._cli(
+            "advance", "m-feat", "released",
+            "--actor", "attacker", "--role", "override_approver",
+            "--reason", "forged override",
+        )
+        self.assertNotEqual(result.returncode, 0,
+                            msg=result.stdout + result.stderr)
+
+    def test_multi_actor_unchanged_by_bypass(self) -> None:
+        """Multi-actor projects (builder != reviewer) bypass path is irrelevant.
+
+        Switch the project to multi-actor and confirm the existing
+        self-review rejection still works.
+        """
+        wf = json.loads(
+            (self.project / ".agents" / "workflow.json").read_text(encoding="utf-8")
+        )
+        wf["roles"] = {
+            "builder": "lance",
+            "reviewer": "alice",       # different from builder
+            "releaser": "lance",
+            "observer": "lance",
+            "override_approver": "bob",
+        }
+        (self.project / ".agents" / "workflow.json").write_text(
+            json.dumps(wf), encoding="utf-8"
+        )
+        self._write_medium_spec("m-feat")
+        self._drive_to_review("m-feat")
+        self._inject_builder_actor("lance")
+        # Self-review (lance) — should fail (builder=lance, reviewer=lance)
+        self._write_review("m-feat", reviewer="lance")
+        result = self._cli(
+            "advance", "m-feat", "released",
+            "--actor", "lance", "--role", "override_approver",
+            "--reason", "should not bypass because multi-actor",
+        )
+        self.assertNotEqual(
+            result.returncode, 0,
+            msg="multi-actor self-review must still be rejected; "
+                f"stdout={result.stdout} stderr={result.stderr}"
+        )
+        combined = result.stdout + result.stderr
+        self.assertIn("审查身份与构建者身份相同", combined)
+
+    def test_other_review_checks_still_run_with_bypass(self) -> None:
+        """Bypass only skips review-separation, not all review checks.
+
+        With no approved review file, the spec must still fail
+        (other gates fire).
+        """
+        self._write_medium_spec("m-feat")
+        self._drive_to_review("m-feat")
+        self._inject_builder_actor("lance")
+        # Intentionally skip writing a review file
+        result = self._cli(
+            "advance", "m-feat", "released",
+            "--actor", "lance", "--role", "override_approver",
+            "--reason", "single-actor self-review",
+        )
+        self.assertNotEqual(
+            result.returncode, 0,
+            msg="without an approved review the spec must still fail"
+        )
+        combined = result.stdout + result.stderr
+        # Must mention the missing review, not the separation reason
+        self.assertIn("审查", combined)
+
+
+
+
 class BilingualHeadingTests(unittest.TestCase):
     """Cover the bilingual heading recognition in validate_spec.
 
