@@ -592,7 +592,23 @@ artifacts merely because a template exists.
     `VERSION`, causing every downstream `vibe doctor` to falsely
     report "version is up to date".
 
-53. **Pre-commit verification gate**: Every `git commit` must be wrapped
+"version is up to date".
+
+    **Rule 52.2 — `vibe version-bump` Skill self-maintenance command**:
+    Maintainers MUST run `python3 scripts/vibe.py version-bump` (or
+    `vibe version-bump` from the Skill repo root) instead of hand-typing
+    `chore(skill): bump VERSION to <hash>-<slug>` commits. The command
+    computes `<7-char-head-hash>` from `git rev-parse --short HEAD` and
+    the slug from the most recent non-bump commit's subject, eliminating
+    the recurring failure mode where maintainers wrote the **previous**
+    feat commit's hash into VERSION. The command is idempotent: it
+    no-ops when HEAD is already a `chore(skill): bump VERSION` commit
+    and the tree is clean (the "ran bump twice in a row" case). It
+    always lands a single commit with subject `chore(skill): bump VERSION`
+    (no hash in the subject — subject ↔ SHA is a chicken-and-egg loop
+    better left unsolved; VERSION content is the drift source of truth).
+
+    53. **Pre-commit verification gate**: Every `git commit` must be wrapped
     in the `vibe commit` wrapper, not invoked as raw `git commit`.
     The wrapper enforces three discipline steps that agents otherwise
     skip:

@@ -28,6 +28,7 @@ import migrate_project
 import archive_status
 import commit
 import upgrade
+import version_bump
 import verify_only
 import policy_sources
 import project_status
@@ -254,6 +255,13 @@ def main() -> None:
 
     upgrade_cmd = sub.add_parser("upgrade")
     upgrade_cmd.add_argument("project_root", help="Project root to upgrade")
+
+    version_bump_cmd = sub.add_parser(
+        "version-bump",
+        help="Skill self-maintenance: write VERSION = <HEAD>-<feat-slug> and land a chore commit. "
+             "Run from inside the Skill repo. Idempotent: no-op if HEAD is already a bump commit "
+             "and the tree is clean, or if VERSION content already matches what would be written.",
+    )
 
     verify_cmd = sub.add_parser("verify")
     verify_cmd.add_argument("project_root")
@@ -542,6 +550,8 @@ def main() -> None:
         confirm_risk.confirm_risk(root, args.spec_name, args.risk, args.reason)
     elif args.operation == "upgrade":
         raise SystemExit(upgrade.upgrade(args.project_root))
+    elif args.operation == "version-bump":
+        raise SystemExit(version_bump.bump())
     elif args.operation == "verify":
         tier = "verify_full" if getattr(args, "full", False) else ("verify_scope" if getattr(args, "scope", False) else "verify")
         raise SystemExit(verify_only.verify(root, tier))
