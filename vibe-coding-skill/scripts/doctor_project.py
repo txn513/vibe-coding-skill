@@ -401,15 +401,27 @@ def doctor(project_root: str) -> dict:
                 spec_digest_value = spec_digest(content)
                 context_digest_value = project_context_digest(project_root)
                 if f"规格摘要: {spec_digest_value}" not in plan_content:
+                    # 2026-07-09 (Lance retro on social-bookmarking-tool):
+                    # the old advisory said "--force" which would re-render
+                    # the entire plan from template and clobber Agent-entered
+                    # phase/task body. The Agent had to manually compute a
+                    # 16-char sha256 to patch the header, a real friction
+                    # surface. Surface the cheap one-line fix:
+                    #   vibe plan ... --refresh-digest-only
+                    # which patches only the digest header lines and works
+                    # even when spec status is done/released.
                     issues.append(
                         f"{name}: stale plan (spec digest mismatch); "
-                        "regenerate or run "
-                        "`vibe plan <project_root> <spec> --force`"
+                        "run `vibe plan <project_root> <spec> --refresh-digest-only` "
+                        f"(patch header; spec digest should be {spec_digest_value}, "
+                        f"context digest should be {context_digest_value})"
                     )
                 if f"上下文摘要: {context_digest_value}" not in plan_content:
                     warnings.append(
                         f"{name}: plan uses stale project guidance; "
-                        "run `vibe plan <project_root> <spec> --refresh-context`"
+                        "run `vibe plan <project_root> <spec> --refresh-context` "
+                        "(re-renders plan; requires spec-ready/in-progress) "
+                        "or --refresh-digest-only (header-only patch, any status)"
                     )
 
     rules_dir = os.path.join(project_root, ".agents", "rules")

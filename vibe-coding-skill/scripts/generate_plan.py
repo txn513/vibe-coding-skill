@@ -118,9 +118,25 @@ if __name__ == "__main__":
             "same plan file and archives the previous version."
         ),
     )
+    p.add_argument(
+        "--refresh-digest-only",
+        action="store_true",
+        help=(
+            "Patch only the spec and context digest header lines on an "
+            "existing plan; preserves the Agent-entered plan body. Works "
+            "regardless of spec status (unlike --refresh-context which "
+            "requires spec-ready or in-progress because it re-renders the "
+            "full plan from template). Use after a small spec edit only "
+            "changed the digest, not the scope."
+        ),
+    )
     args = p.parse_args()
     result = generate_plan(os.path.abspath(args.project_root), args.spec_name, args.force)
-    if getattr(args, "refresh_context", False):
+    if getattr(args, "refresh_digest_only", False):
+        result = refresh_plan_digests_only(
+            os.path.abspath(args.project_root), args.spec_name
+        )
+    elif getattr(args, "refresh_context", False):
         result = refresh_plan_context(
             os.path.abspath(args.project_root), args.spec_name
         )
@@ -140,3 +156,65 @@ def refresh_plan_context(project_root: str, spec_name: str) -> str | None:
         print(f"❌ 实施计划不存在，请先运行 plan 生成: {plan_file}")
         return None
     return generate_plan(project_root, spec_name, force=True)
+
+
+def refresh_plan_digests_only(project_root: str, spec_name: str) -> str | None:
+    """Patch ONLY the digest header lines of an existing plan file.
+
+    2026-07-09 (Lance retro on social-bookmarking-tool):
+    refresh_plan_context refuses to operate when spec.status is done, because
+    generate_plan() intentionally guards re-rendering on spec-ready/in-progress
+    only — re-running the template would overwrite Agent-entered phase/task
+    body with placeholder text. But what the Agent actually needs at done
+    state is the cheap operation: re-compute the 16-char spec digest and the
+    16-char project-context digest, then patch the two header lines in the
+    existing plan file. Body is untouched.
+
+    This new path bypasses the status check on purpose because digest headers
+    are derived from spec content (re-computed every time) and project
+    guidance (re-computed every time), so they are valid to refresh
+    regardless of the spec lifecycle phase.
+    """
+    spec_name = validate_artifact_name(spec_name, "规格名称")
+    plan_file = os.path.join(project_root, ".agents", "plans", f"{spec_name}.md")
+    if not os.path.exists(plan_file):
+        print(f"❌ 实施计划不存在，请先运行 plan 生成: {plan_file}")
+        return None
+    spec_file = os.path.join(project_root, ".agents", "specs", f"{spec_name}.md")
+    with open(spec_file, encoding="utf-8") as handle:
+        spec_content = handle.read()
+    new_spec_digest = spec_digest(spec_content)
+    new_context_digest = project_context_digest(project_root)
+    with open(plan_file, encoding="utf-8") as handle:
+        plan_content = handle.read()
+    backup_file(
+        plan_file,
+        os.path.join(project_root, ".agents", "archive", spec_name, "plans"),
+    )
+    # 2026-07-09: the template packs both digests on a single header
+    # line ("> 基于规格: X | 规格摘要: HEX | 上下文摘要: HEX | ..."),
+    # so the regex anchors on "规格摘要:" / "上下文摘要:" within a line
+    # that begins with ">" rather than requiring the line to start with
+    # the digest label.
+    plan_content_new = re.sub(
+        r"(^>.*?)规格摘要:\s*[0-9a-f]{16}",
+        rf"\1规格摘要: {new_spec_digest}",
+        plan_content,
+        count=1,
+        flags=re.MULTILINE,
+    )
+    plan_content_new = re.sub(
+        r"(^>.*?)上下文摘要:\s*[0-9a-f]{16}",
+        rf"\1上下文摘要: {new_context_digest}",
+        plan_content_new,
+        count=1,
+        flags=re.MULTILINE,
+    )
+    if plan_content_new == plan_content:
+        print("⚠️  plan header 不含可识别的 digest 行 (老格式 plan); 未修改")
+        return plan_file
+    atomic_write(plan_file, plan_content_new)
+    print(f"✅ plan header digest 已刷新: 规格={new_spec_digest} 上下文={new_context_digest}")
+    print(f"   {plan_file}")
+    print("   body 未动 (仅修改 规格摘要 / 上下文摘要 两行 header)")
+    return plan_file

@@ -137,6 +137,19 @@ def main() -> None:
                     "project guidance change; archives the previous plan."
                 ),
             )
+            command.add_argument(
+                "--refresh-digest-only",
+                action="store_true",
+                help=(
+                    "Patch only the spec + context digest header lines on "
+                    "an existing plan, leaving the plan body untouched. "
+                    "Use this when a small spec edit only changed the "
+                    "digest (eg added/removed a Risk 确认), not the scope. "
+                    "Unlike --refresh-context, this works regardless of "
+                    "spec status (done/released are valid) because it does "
+                    "not re-render the plan from template."
+                ),
+            )
 
     for name in ("ui-contract", "ui-redesign-contract"):
         command = sub.add_parser(name)
@@ -399,7 +412,11 @@ def main() -> None:
             args.regression_from,
         )
     elif args.operation == "plan":
-        if getattr(args, "refresh_context", False):
+        if getattr(args, "refresh_digest_only", False):
+            result = generate_plan.refresh_plan_digests_only(
+                root, args.spec_name
+            )
+        elif getattr(args, "refresh_context", False):
             result = generate_plan.refresh_plan_context(root, args.spec_name)
         else:
             result = generate_plan.generate_plan(
