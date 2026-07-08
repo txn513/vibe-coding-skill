@@ -430,6 +430,46 @@ def commit(
             for part in re.split(r"[\n;]+", summary)
             if part.strip()
         ]
+        # 2026-07-08g: substantive-review soft advisory.
+        # Lance retro: passing line-ref gate with content like
+        # "app.py: L25 重命名变量，语义等价"
+        # still means "I typed L25 but did not actually verify each call-site
+        # keeps compiling". Pure placeholder language satisfies the form
+        # gate but evades the substance. As an advisory (NOT a block), we
+        # flag conclusions that lean on these soft claims so the agent
+        # gets a second-look signal before commit lands. The commit
+        # proceeds regardless to avoid the gate becoming a ritual
+        # checkbox (同样的 R53 形式合规倒转问题).
+        soft_claim_pattern = re.compile(
+            r"(语义等价|无副作用|无回归|类似"
+            r"|no\s+side\s+effects?|no\s+regression|equivalent|no-op"
+            r"|safe|trivial|minor|cleanup|polish|refactor\s+only|\bnothing\s+changed\b"
+            r"|难看出区别|差不多|几乎一样)",
+            re.IGNORECASE,
+        )
+        soft_claim_parts = [
+            part for part in file_parts
+            if ":" in part and soft_claim_pattern.search(
+                part.partition(":")[2]
+            )
+        ]
+        if soft_claim_parts:
+            print()
+            print("⚠️  Substantive-review advisory (不阻塞, Rule 53 补强):")
+            print(f"   以下 {len(soft_claim_parts)} 个 review-summary 出现柔性结论词（如")
+            print("   “语义等价”/“无副作用”/“无回归”/“equivalent”/...")
+            print("   。这些词正常使用场景也可能是 placeholder —")
+            print("   建议重新看一遍 diff 后补上 call-site 验证、表面探索")
+            print("   检查等具体证据。")
+            for p in soft_claim_parts[:5]:
+                print(f"     - {p[:80]}{'...' if len(p) > 80 else ''}")
+            if len(soft_claim_parts) > 5:
+                print(f"     ... 还有 {len(soft_claim_parts) - 5} 个")
+            print()
+            print("   补强例: app.py: L25 重命名 handle 变量，你可以述")
+            print("                “call-site grep 验证无未引用老 handle”")
+            print("   Bypass: 指定 --quick 跳过整个 review gate (保留 verify)")
+            print("<!-- vibe:commit_review_gate: soft_claims -->")
         no_line_ref_parts = []
         for part in file_parts:
             # 跳过纯文件名前缀 (eg "app.py:" 无结论部分) — 这些在 missing
@@ -458,6 +498,7 @@ def commit(
             print("           --no-verify (跳过 review + verify)")
             print("<!-- vibe:commit_review_gate: missing_line_refs -->")
             return 9
+
     print("🔒 Review 声明门禁 (Rule 53):")
     print("   Agent 必须确认已逐文件审查 diff 内容。")
     print("   加 --reviewed 标志声明审查完成，否则 commit 被阻止。")

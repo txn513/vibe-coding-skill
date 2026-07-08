@@ -545,7 +545,9 @@ class WorkflowTests(unittest.TestCase):
         generate_review.generate_review(str(self.project), "example")
         record_review.record_review(
             str(self.project), "example", "approved",
-            "scope and behavior reviewed", "project checks passed", "reviewer-a",
+            "scope and behavior reviewed at api.py:343 (final-fix path, see .agents/reviews/review.md)",
+            "project checks passed",
+            "reviewer-a",
         )
         record_evidence.record_evidence(
             str(self.project), "example", "release", "not-applicable",
@@ -582,7 +584,7 @@ class WorkflowTests(unittest.TestCase):
         generate_review.generate_review(str(self.project), "example")
         record_review.record_review(
             str(self.project), "example", "approved",
-            "review complete", "checks reviewed", "reviewer-a",
+            "reviewed at api.py:343 (final-fix path)", "checks at api.py:42", "reviewer-a",
         )
         spec_path.write_text(
             spec_path.read_text(encoding="utf-8") + "\nlate edit\n",
@@ -1048,7 +1050,7 @@ class WorkflowTests(unittest.TestCase):
         generate_review.generate_review(str(self.project), "example", "alice")
         record_review.record_review(
             str(self.project), "example", "approved",
-            "reviewed", "checks", "alice",
+            "reviewed at api.py:42", "checks at api.py:42", "alice",
         )
         record_evidence.record_evidence(
             str(self.project), "example", "release", "passed", "released",
@@ -1059,7 +1061,7 @@ class WorkflowTests(unittest.TestCase):
         generate_review.generate_review(str(self.project), "example", "bob")
         record_review.record_review(
             str(self.project), "example", "approved",
-            "independent review", "checks", "bob",
+            "independent review at api.py:42", "checks at api.py:42", "bob",
         )
         self.assertEqual(
             set_status.set_status(str(self.project), "example", "released"),
@@ -1452,12 +1454,12 @@ class WorkflowTests(unittest.TestCase):
         review_path = Path(
             record_review.record_review(
                 str(self.project), "example", "approved",
-                "reviewed scope", "verified checks", "reviewer-a",
+                "reviewed at api.py:42 (per .agents/reviews/review.md)", "verified at api.py:42", "reviewer-a",
             )
         )
         content = review_path.read_text(encoding="utf-8")
         review_path.write_text(
-            content.replace("reviewed scope", "changed after decision"),
+            content.replace("reviewed at api.py:42 (per .agents/reviews/review.md)", "changed after decision"),
             encoding="utf-8",
         )
         record_evidence.record_evidence(
@@ -1475,7 +1477,7 @@ class WorkflowTests(unittest.TestCase):
                 str(self.project),
                 "example",
                 "approved",
-                r"reviewed regex \d+ path",
+                r"reviewed regex \d+ at api.py:42",
                 r"C:\Users\test\document.txt",
                 "reviewer-a",
             )
@@ -1483,7 +1485,7 @@ class WorkflowTests(unittest.TestCase):
 
         content = review_path.read_text(encoding="utf-8")
         self.assertIn(r"C:\Users\test\document.txt", content)
-        self.assertIn(r"reviewed regex \d+ path", content)
+        self.assertIn(r"reviewed regex \d+ at api.py:42", content)
 
     def test_prompt_rejects_stale_plan(self) -> None:
         spec = self.write_spec(status="spec-ready")
@@ -2797,7 +2799,7 @@ class IntegrationTests(unittest.TestCase):
     def _approve_review(self, spec: str) -> None:
         r = self._vibe(
             "review-decision", str(self.project), spec,
-            "approved", "代码符合规格", "spec,evidence",
+            "approved", "代码符合规格 at api.py:42", "spec,evidence",
             "--reviewer", "test-reviewer",
         )
         self.assertEqual(r.returncode, 0, msg=_combined(r))
@@ -3914,7 +3916,7 @@ class ReviewSeparationTests(unittest.TestCase):
         generate_review.generate_review(str(self.project), "m-feat")
         record_review.record_review(
             str(self.project), "m-feat", "approved",
-            "scope reviewed", "verify evidence", "self",
+            "reviewed scope at api.py:42", "verify evidence", "self",
         )
         # Same identity (self) must be allowed for medium under the default config.
         result = self._cli("advance", "m-feat", "released")
@@ -3932,7 +3934,7 @@ class ReviewSeparationTests(unittest.TestCase):
         generate_review.generate_review(str(self.project), "m-feat")
         record_review.record_review(
             str(self.project), "m-feat", "approved",
-            "scope reviewed", "verify evidence", "self",
+            "reviewed scope at api.py:42", "verify evidence", "self",
         )
         result = self._cli("advance", "m-feat", "released")
         self.assertNotEqual(result.returncode, 0, msg=result.stdout + result.stderr)
@@ -3955,7 +3957,7 @@ class ReviewSeparationTests(unittest.TestCase):
         generate_review.generate_review(str(self.project), "m-feat")
         record_review.record_review(
             str(self.project), "m-feat", "approved",
-            "scope reviewed", "verify evidence", "reviewer-alice",
+            "reviewed scope at api.py:42", "verify evidence", "reviewer-alice",
         )
         result = self._cli("advance", "m-feat", "released")
         self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
@@ -3972,7 +3974,7 @@ class ReviewSeparationTests(unittest.TestCase):
         generate_review.generate_review(str(self.project), "h-feat")
         record_review.record_review(
             str(self.project), "h-feat", "approved",
-            "scope reviewed", "verify evidence", "self",
+            "reviewed scope at api.py:42", "verify evidence", "self",
         )
         result = self._cli("advance", "h-feat", "released")
         self.assertNotEqual(result.returncode, 0, msg=result.stdout + result.stderr)
@@ -4089,7 +4091,7 @@ class SingleActorOverrideApproverBypassTests(unittest.TestCase):
         generate_review.generate_review(str(self.project), name)
         record_review.record_review(
             str(self.project), name, "approved",
-            "scope reviewed", "verify evidence", reviewer,
+            "reviewed scope at api.py:42", "verify evidence", reviewer,
         )
 
     def test_single_actor_override_approver_with_reason_passes(self) -> None:
@@ -4297,7 +4299,7 @@ class SingleActorBypassDiscoveryTests(unittest.TestCase):
         generate_review.generate_review(str(proj), "m-feat")
         record_review.record_review(
             str(proj), "m-feat", "approved",
-            "scope reviewed", "verify evidence", "lance",
+            "reviewed scope at api.py:42", "verify evidence", "lance",
         )
         result = cli(
             "m-feat", "released",
@@ -4391,7 +4393,7 @@ class SingleActorStatusSurfaceTests(unittest.TestCase):
         generate_review.generate_review(str(self.project), "m-feat")
         record_review.record_review(
             str(self.project), "m-feat", "approved",
-            "scope reviewed", "verify evidence", "lance",
+            "reviewed scope at api.py:42", "verify evidence", "lance",
         )
         import project_status
         rec = project_status.recommend_next(str(self.project))
@@ -4491,6 +4493,159 @@ class MissingChangelogSoftPromptTests(unittest.TestCase):
             )
         out = self._capture_project_next()
         self.assertNotIn("vibe:missing_changelogs:", out)
+
+
+
+
+class SubstantiveReviewGateTests(unittest.TestCase):
+    """Cover 2026-07-08g: R53 substantive-review gap.
+
+    Two complementary gates close the gap where review form-passed but
+    substance-thin: (1) commit-summary's soft-claim advisory (2) record
+    review's substantive-signal gate. Combined aim: stop placeholder
+    review-summary wording AND post-hoc basis reasoning from bypassing
+    the form-only gates.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name)
+        subprocess.run(["git", "init", "-q"], cwd=str(self.project), check=True)
+        subprocess.run(["git", "config", "user.email", "t@t.com"],
+                       cwd=str(self.project), check=True)
+        subprocess.run(
+            ["git", "config", "user.name", "t"], cwd=str(self.project), check=True,
+        )
+        agents_dir = self.project / ".agents"
+        agents_dir.mkdir(exist_ok=True)
+        (agents_dir / "workflow.json").write_text(json.dumps({
+            "roles": {"builder": "b", "reviewer": "r",
+                      "releaser": "l", "observer": "o"},
+            "risk_profiles": {"low": {}, "medium": {}, "high": {}},
+            "commands": {"verify": [["true"]]},
+        }))
+        (self.project / ".gitignore").write_text(
+            ".agents/.vibe-review-pending\n", encoding="utf-8",
+        )
+        subprocess.run(["git", "add", "-A"], cwd=str(self.project), check=True)
+        subprocess.run(
+            ["git", "commit", "-q", "-m", "init"], cwd=str(self.project), check=True,
+        )
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _capture(self, fn, *args, **kwargs):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            try:
+                rc = fn(*args, **kwargs)
+            except SystemExit as e:
+                rc = e.code
+        return buf.getvalue(), rc
+
+    # ---- commit-summary soft-claim advisory ----
+
+    def _commit_summary_two_stage(self, summary: str):
+        """Helper: drive commit step 1 + step 2 with a given review summary."""
+        import commit
+        (self.project / "app.py").write_text("print('v3')\n",
+                                            encoding="utf-8")
+        self._capture(commit.commit, str(self.project),
+                      ["-m", "x"], quick=False, no_verify=False)
+        return self._capture(
+            commit.commit, str(self.project), ["-m", "x"],
+            reviewed=True, review_summary=summary,
+            quick=False, no_verify=False,
+        )
+
+    def test_commit_soft_claim_advisory_fires(self) -> None:
+        """review-summary with placeholder Chinese phrasing triggers
+        advisory. Returns rc=0 (commit proceeds) so the gate does NOT
+        become a ritual checkbox, but the agent sees a second-look prompt.
+        """
+        out, rc = self._commit_summary_two_stage(
+            "app.py: L25 \u91cd\u547d\u540d handle \u53d8\u91cf\uff0c\u8bed\u4e49\u7b49\u4ef7"
+        )
+        self.assertEqual(rc, 0, msg=out)
+        self.assertIn("Substantive-review advisory", out)
+        self.assertIn("soft_claims", out)
+
+    def test_commit_soft_claim_advisory_quiet(self) -> None:
+        """review-summary with concrete observation does NOT fire the
+        advisory — the gate must not produce noise for honest work.
+        """
+        out, rc = self._commit_summary_two_stage(
+            "app.py: L25 `print('v3')` updated, call-site grep verified "
+            "no unscoped callers"
+        )
+        self.assertEqual(rc, 0, msg=out)
+        self.assertNotIn("Substantive-review advisory", out)
+        self.assertNotIn("soft_claims", out)
+
+    # ---- record_review substantive-signal gate ----
+
+    def _setup_review(self, basis: str, evidence: str = "checks verified"):
+        """Helper: spec + review generation + record_review attempt."""
+        import commit, generate_review, record_review
+        spec_path = self.project / ".agents" / "specs" / "x.md"
+        spec_path.parent.mkdir(parents=True, exist_ok=True)
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        spec_path.write_text(
+            "# x\n\n"
+            f"> \u72b6\u6001: review | \u521b\u5efa: {now} | \u66f4\u65b0: {now}\n"
+            "> \u98ce\u9669: low\n\n"
+            "## \u610f\u56fe (Intent)\n\ntext\n\n"
+            "## \u6d89\u53ca\u8303\u56f4\n\n- **\u65b0\u589e\u6587\u4ef6**: none\n\n"
+            "## \u9a8c\u6536\u6807\u51c6\n\n- [ ] AC1\n",
+            encoding="utf-8",
+        )
+        generate_review.generate_review(str(self.project), "x", "reviewer-a")
+        try:
+            record_review.record_review(
+                str(self.project), "x", "approved",
+                basis, evidence, "reviewer-a",
+            )
+            return True, None
+        except ValueError as exc:
+            return False, str(exc)
+
+    def test_record_review_baseline_must_have_signal(self) -> None:
+        """Bare 'reviewed' basis without any signal must be rejected."""
+        ok, err = self._setup_review("reviewed")
+        self.assertFalse(ok)
+        self.assertIn("\u7ed3\u8bba\u4f9d\u636e\u5f62\u5f0f\u5408\u89c4\u4f46\u7f3a\u5177\u4f53\u4fe1\u53f7", err)
+
+    def test_record_review_accepts_line_ref(self) -> None:
+        """basis with a 'L<n>' line ref passes."""
+        ok, _ = self._setup_review("reviewed AC1 at L42")
+        self.assertTrue(ok)
+
+    def test_record_review_accepts_path(self) -> None:
+        """basis referencing .agents/reviews/... passes."""
+        ok, _ = self._setup_review(
+            "reviewed per .agents/reviews/review-20260708-153923.md"
+        )
+        self.assertTrue(ok)
+
+    def test_record_review_accepts_code_file_path(self) -> None:
+        """basis referencing a tracked code file passes."""
+        ok, _ = self._setup_review("reviewed backend/api.py:343")
+        self.assertTrue(ok)
+
+    def test_record_review_accepts_code_fragment(self) -> None:
+        """basis with backtick-wrapped code fragment passes."""
+        ok, _ = self._setup_review("reviewed handle scope at `print('v3')`")
+        self.assertTrue(ok)
+
+    def test_record_review_legacy_vague_list_still_blocks(self) -> None:
+        """The pre-existing vague_basis blocklist (looks good / LGTM / OK)
+        is preserved verbatim — the new substantive signal gate adds a
+        second layer of defense, doesn't replace the first.
+        """
+        ok, err = self._setup_review("lgtm")
+        self.assertFalse(ok)
+        self.assertIn("Rule 55", err)
 
 
 
