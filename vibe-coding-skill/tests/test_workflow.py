@@ -4408,6 +4408,93 @@ class SingleActorStatusSurfaceTests(unittest.TestCase):
 
 
 
+class MissingChangelogSoftPromptTests(unittest.TestCase):
+    """Cover 2026-07-08 (妙藏 retro): CHANGELOG-missing hint must be
+    a soft prompt, not framed as a hard blocker.
+
+    Before the fix, the hint read "📦 N 个... Rule 54: 应补齐" which
+    the Agent (and human) read as "must fix this next", making it
+    backfill CHANGELOGs for the just-stamped release window before
+    the user even decided the release cadence.
+
+    After the fix:
+    - leading marker is "[可选]" not "应补齐";
+    - the prose says missing CHANGELOGs do NOT block the workflow;
+    - the machine marker `<!-- vibe:missing_changelogs: N -->` is
+      still emitted so vibe doctor / dashboards can detect drift.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name)
+        init_project.init_project(str(self.project), "web")
+        subprocess.run(["git", "init", "-q"], cwd=str(self.project),
+                       check=False, capture_output=True)
+        os.makedirs(self.project / ".agents" / "changelogs",
+                    exist_ok=True)
+        # Two done specs, no CHANGELOG entries
+        for name, status in [("m-feat", "released"), ("m-bug", "done")]:
+            now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+            (self.project / ".agents" / "specs" / f"{name}.md").write_text(
+                f"# {name}\n\n"
+                f"> 状态: {status} | 创建: {now} | 更新: {now}\n"
+                f"> 风险: low\n\n"
+                f"## 意图 (Intent)\n\ntext\n\n"
+                f"## 涉及范围\n\n- **新增文件**: none\n\n"
+                f"## 验收标准\n\n- [ ] AC1\n",
+                encoding="utf-8",
+            )
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _capture_project_next(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            try:
+                import project_status
+                project_status.project_next(str(self.project))
+            except SystemExit:
+                pass
+        return buf.getvalue()
+
+    def test_hint_is_soft_prompt(self) -> None:
+        """Missing-CHANGELOG hint must use the soft framing, not
+        the old "Rule 54: 应补齐" hard-blocker wording.
+        """
+        out = self._capture_project_next()
+        # New soft marker
+        self.assertIn("可选", out)
+        # The hint explicitly says missing CHANGELOG does NOT block
+        self.assertIn("不阻塞", out)
+        # The old hard-blocker phrase must not appear
+        self.assertNotIn("应补齐", out)
+        # Machine marker preserved for doctor / dashboards
+        self.assertIn("vibe:missing_changelogs:", out)
+        # Command still discoverable
+        self.assertIn("vibe changelog", out)
+
+    def test_hint_emitted_under_done_and_released(self) -> None:
+        """Both done and released specs without CHANGELOG are listed."""
+        out = self._capture_project_next()
+        self.assertIn("m-feat", out)
+        self.assertIn("m-bug", out)
+
+    def test_no_hint_when_changelogs_present(self) -> None:
+        """When both specs have CHANGELOG entries, the soft hint must
+        not fire (sanity baseline that we did not regress to always-on).
+        """
+        # Drop a CHANGELOG entry under each spec
+        for name in ("m-feat", "m-bug"):
+            (self.project / ".agents" / "changelogs" / f"{name}.md").write_text(
+                f"# {name}\n\nrelease notes\n", encoding="utf-8"
+            )
+        out = self._capture_project_next()
+        self.assertNotIn("vibe:missing_changelogs:", out)
+
+
+
+
 class BilingualHeadingTests(unittest.TestCase):
     """Cover the bilingual heading recognition in validate_spec.
 

@@ -395,11 +395,28 @@ def _print_missing_retro_hint(project_root: str) -> None:
 
 
 def _print_missing_changelog_hint(project_root: str) -> None:
-    """Low-priority advisory: spec is released/done but no CHANGELOG entry.
+    """Soft advisory: spec is released/done but no CHANGELOG row yet.
 
     Release hygiene: a spec that ships without a CHANGELOG row leaves
-    no trace for users / release notes. The hint surfaces such specs
-    so the agent can generate the changelog entry.
+    no trace for users / release notes. The hint surfaces such specs.
+
+    2026-07-08 (妙藏 Gemkeep retro): the previous wording read
+    "Rule 54: 应补齐", which framed CHANGELOG as a hard
+    blocker the moment a spec reached done/released. Agents and
+    humans interpreted this as "must fix this 下一步",
+    pushing them to backfill CHANGELOGs for the same release window
+    they had not yet finalised. CHANGELOGs are user-facing release
+    notes that only make sense after the release window is decided;
+    surfacing a soft prompt every time a spec done-stamps is noise,
+    not actionable. Retro prompts (in _print_missing_retro_hint) stay
+    hard because missing retros block self_analyze's failure-mode
+    signal; CHANGELOGs do not. The 7-day staleness threshold the
+    project uses is correctly kept in the project's own rules, not
+    baked into the Skill core.
+
+    The hint remains visible so vibe doctor (diagnostic mode) still
+    reports the gap; the wording simply no longer pretends it is a
+    priority action.
     """
     specs_dir = os.path.join(project_root, ".agents", "specs")
     changelogs_dir = os.path.join(project_root, ".agents", "changelogs")
@@ -427,14 +444,19 @@ def _print_missing_changelog_hint(project_root: str) -> None:
     if not missing:
         return
     print()
+    # 2026-07-08: 软提示语气 ("[可选]" / "某些项目可能定义了一个悬空门槛
+    # 如 7 天")。快看不再看起来像“必须上东”。
     print(
-        f"📦 {len(missing)} 个已 done/released 的 spec 缺 CHANGELOG (Rule 54: 应补齐):"
+        f"📝 [可选] {len(missing)} 个已 done/released 的 spec 尚未补 CHANGELOG 行。"
+        "未补 CHANGELOG 不阻塞 workflow；"
+        "仅作为发布门面的软提示，你可能在决定 release 节奏后一并补。"
     )
     for name, status in missing[:10]:
         print(f"   - {name} ({status})")
     if len(missing) > 10:
         print(f"   ... 还有 {len(missing) - 10} 个")
-    print("   命令: `vibe changelog <project> <spec-name>` 生成 CHANGELOG")
+    print("   如需现在补: `vibe changelog <project> <spec-name>`")
+    print("   如需调整项目自定缺失门槛: 项目级 rules 表达（如 7 天）。")
     print(f"<!-- vibe:missing_changelogs: {len(missing)} -->")
 
 
