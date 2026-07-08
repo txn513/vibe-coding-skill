@@ -32,7 +32,7 @@ Why VERSION content lags HEAD by one commit: the convention is
 `<7-char-hash>-<slug>` and the hash is captured **before** the commit
 that introduces it. After the commit lands, HEAD's 7-char prefix no
 longer matches what's in VERSION. This is an inherent property of the
-convention, not a bug. `_check_skill_version_drift()` (Rule 52.1)
+convention, not a bug. `check_skill_version_drift()` (Rule 52.1)
 treats "the last commit that touched VERSION == HEAD" as no-drift,
 which holds immediately after `vibe version-bump` lands. The drift
 warning only fires when a **feat** commit lands without a follow-up
