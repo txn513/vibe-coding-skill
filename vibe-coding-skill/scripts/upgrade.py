@@ -31,7 +31,7 @@ import os
 import sys
 
 import workflow_state
-from common import atomic_write
+from common import atomic_write, check_skill_version_drift
 
 
 def _read_current_version() -> str:
@@ -48,57 +48,7 @@ def _read_current_version() -> str:
         return "unknown"
 
 
-def _check_version_drift(skill_dir: str) -> str | None:
-    """Detect if the installed Skill's VERSION is behind its git HEAD.
 
-    Same check as in doctor_project, kept here so `vibe upgrade` can
-    surface the warning before the user starts believing the version
-    comparison below.
-    """
-    import subprocess
-    # The Skill may be a sub-directory of a larger git repo. Walk up
-    # to find the git root.
-    git_root = skill_dir
-    while git_root != "/":
-        if os.path.isdir(os.path.join(git_root, ".git")):
-            break
-        git_root = os.path.dirname(git_root)
-    else:
-        return None
-    version_path = os.path.join(skill_dir, "VERSION")
-    if not os.path.exists(version_path):
-        return None
-    try:
-        with open(version_path, encoding="utf-8") as fp:
-            version_value = fp.read().strip()
-    except OSError:
-        return None
-    if not version_value:
-        return None
-    try:
-        head_result = subprocess.run(
-            ["git", "log", "-1", "--format=%H"],
-            cwd=git_root, capture_output=True, text=True, timeout=5,
-        )
-        if head_result.returncode != 0:
-            return None
-        head_sha = head_result.stdout.strip()
-        if not head_sha:
-            return None
-        # VERSION convention: starts with a 7-char commit hash + '-'.
-        # Match by the 7-char prefix to be robust to 7 vs 8 char hashes.
-        head_prefix7 = head_sha[:7]
-        if version_value.startswith(head_prefix7 + "-") or version_value == head_prefix7:
-            return None
-        return (
-            f"VERSION drift detected: VERSION reads '{version_value}' but "
-            f"Skill HEAD is {head_sha[:8]}. The Skill maintainer likely "
-            f"forgot to bump VERSION in the last commit. Doctor and "
-            f"`vibe upgrade` will report a false 'up to date' until the "
-            f"next Skill commit bumps VERSION to start with '{head_prefix7}-'."
-        )
-    except (OSError, subprocess.SubprocessError, subprocess.TimeoutExpired):
-        return None
 
 
 def upgrade(project_root: str) -> int:
@@ -111,7 +61,7 @@ def upgrade(project_root: str) -> int:
 
     # Pre-step: detect VERSION drift before any version comparison
     skill_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    drift_warning = _check_version_drift(skill_dir)
+    drift_warning = check_skill_version_drift(skill_dir)
     if drift_warning:
         print(f"⚠️  {drift_warning}")
         print()

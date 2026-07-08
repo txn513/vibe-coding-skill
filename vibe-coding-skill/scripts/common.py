@@ -253,3 +253,99 @@ def atomic_write(path: str | Path, content: str) -> None:
         except FileNotFoundError:
             pass
         raise
+
+
+def _walk_up_to_git_root(start: str) -> str | None:
+    """Walk up from `start` until we find a directory containing .git.
+
+    Returns the git root path, or None if no .git was found before
+    hitting the filesystem root.
+    """
+    cur = start
+    while cur != "/":
+        if os.path.isdir(os.path.join(cur, ".git")):
+            return cur
+        cur = os.path.dirname(cur)
+    return None
+
+
+def check_skill_version_drift(skill_dir: str) -> str | None:
+    """Detect if the Skill's VERSION is behind its git HEAD.
+
+    Shared by `vibe doctor` and `vibe upgrade` so both paths report the
+    same verdict on the same VERSION file. The check compares the git
+    commit that last touched `VERSION` against the current Skill HEAD:
+
+    - If they match, no drift (VERSION was bumped in HEAD itself).
+    - If the working-tree VERSION already starts with HEAD's 7- or
+      8-char short hash (e.g. the maintainer is mid-bump and hasn't
+      committed yet), no drift (hybrid amend-safe shortcut).
+    - Otherwise, return a warning string explaining how many commits
+      have landed since the last VERSION bump.
+
+    The check is amend-safe: `git log VERSION` always points to the
+    most recent commit (including amends) that changed the file. So
+    as long as the maintainer amends VERSION together with the rule
+    change, no false positive fires.
+
+    Returns None when no drift is detected, or when the input is
+    malformed (missing VERSION file, no git history, etc.) — never
+    false-positives.
+    """
+    version_path = os.path.join(skill_dir, "VERSION")
+    if not os.path.exists(version_path):
+        return None
+
+    git_root = _walk_up_to_git_root(skill_dir)
+    if not git_root:
+        return None
+
+    version_relpath = os.path.relpath(version_path, git_root)
+
+    try:
+        # Last commit that touched VERSION (in git history, not working tree).
+        version_commit_result = subprocess.run(
+            ["git", "log", "-1", "--format=%H", "--", version_relpath],
+            cwd=git_root, capture_output=True, text=True, timeout=5,
+        )
+        head_result = subprocess.run(
+            ["git", "log", "-1", "--format=%H"],
+            cwd=git_root, capture_output=True, text=True, timeout=5,
+        )
+        if (version_commit_result.returncode != 0 or
+                head_result.returncode != 0):
+            return None
+        version_sha = version_commit_result.stdout.strip()
+        head_sha = head_result.stdout.strip()
+        if not version_sha or not head_sha:
+            return None
+        if version_sha == head_sha:
+            return None  # VERSION was bumped in HEAD itself.
+        # Hybrid amend-safe shortcut: working-tree VERSION already
+        # begins with HEAD short hash means the maintainer is staging
+        # the next bump commit right now.
+        try:
+            head_short7 = head_sha[:7]
+            head_short8 = head_sha[:8]
+            with open(version_path, encoding="utf-8") as fp:
+                wt_version = fp.read().strip()
+            if (wt_version.startswith(head_short7 + "-") or wt_version == head_short7 or
+                    wt_version.startswith(head_short8 + "-") or wt_version == head_short8):
+                return None
+        except OSError:
+            pass
+        count_result = subprocess.run(
+            ["git", "rev-list", "--count", f"{version_sha}..{head_sha}"],
+            cwd=git_root, capture_output=True, text=True, timeout=5,
+        )
+        commit_count = count_result.stdout.strip() or "?"
+        return (
+            f"Skill VERSION drift: {commit_count} commit(s) have landed "
+            f"since the last VERSION bump (last bump in {version_sha[:8]}, "
+            f"HEAD is {head_sha[:8]}). The Skill maintainer likely forgot to "
+            f"bump VERSION in the last commit — `vibe upgrade` and "
+            f"version drift checks will report false 'up to date' "
+            f"until VERSION is bumped."
+        )
+    except (OSError, subprocess.SubprocessError, subprocess.TimeoutExpired):
+        return None

@@ -13,6 +13,7 @@ from common import (
     project_context_digest,
     project_rule_status,
     spec_digest,
+    check_skill_version_drift,
 )
 from policy_sources import (
     confirmation_draft_file,
@@ -80,89 +81,7 @@ def _read_current_skill_version() -> str:
         return "unknown"
 
 
-def _check_skill_version_drift() -> str | None:
-    """Detect if the installed Skill's VERSION is behind its git HEAD.
 
-    Compares the git commit that last touched `VERSION` against the
-    current Skill HEAD. If N commits have landed since the last
-    VERSION bump, the maintainer likely forgot to bump VERSION, and
-    downstream `vibe doctor` / `vibe upgrade` will falsely report
-    "version is up to date".
-
-    The check is amend-safe: `git log VERSION` always points to the
-    most recent commit (including amends) that changed the file. So
-    as long as the maintainer amends VERSION together with the rule
-    change, no false positive fires.
-    """
-
-    version_path = os.path.join(SKILL_DIR, "VERSION")
-    if not os.path.exists(version_path):
-        # Dev install without a VERSION file — stay silent, never false-positive.
-        return None
-    import subprocess
-    # Walk up to find the git root (handles the dev checkout where
-    # .git is one level above vibe-coding-skill/).
-    git_root = SKILL_DIR
-    while git_root != "/":
-        if os.path.isdir(os.path.join(git_root, ".git")):
-            break
-        git_root = os.path.dirname(git_root)
-    else:
-        return None
-    version_relpath = os.path.relpath(
-        os.path.join(SKILL_DIR, "VERSION"), git_root,
-    )
-    try:
-        # Last commit that touched VERSION (in git history, not working tree)
-        version_commit_result = subprocess.run(
-            ["git", "log", "-1", "--format=%H", "--", version_relpath],
-            cwd=git_root, capture_output=True, text=True, timeout=5,
-        )
-        head_result = subprocess.run(
-            ["git", "log", "-1", "--format=%H"],
-            cwd=git_root, capture_output=True, text=True, timeout=5,
-        )
-        if (version_commit_result.returncode != 0 or
-                head_result.returncode != 0):
-            return None
-        version_sha = version_commit_result.stdout.strip()
-        head_sha = head_result.stdout.strip()
-        if not version_sha or not head_sha:
-            return None
-        if version_sha == head_sha:
-            return None  # VERSION was bumped in HEAD itself
-        # Hybrid amend-safe shortcut: if the maintainer already edited the
-        # working-tree VERSION to begin with the current HEAD short hash
-        # (e.g. "<7char>-fix-xxx"), treat that as a fresh bump even before
-        # the next commit lands. Prevents transient false positives while
-        # the maintainer is staging the new commit that bumps VERSION.
-        try:
-            # Accept either 7- or 8-char short hash prefixes to align with
-            # common commit-hash shorthand used in VERSION placeholders.
-            head_short7 = head_sha[:7]
-            head_short8 = head_sha[:8]
-            with open(os.path.join(SKILL_DIR, "VERSION"), encoding="utf-8") as fp:
-                wt_version = fp.read().strip()
-            if (wt_version.startswith(head_short7 + "-") or wt_version == head_short7 or
-                    wt_version.startswith(head_short8 + "-") or wt_version == head_short8):
-                return None
-        except OSError:
-            pass
-        count_result = subprocess.run(
-            ["git", "rev-list", "--count", f"{version_sha}..{head_sha}"],
-            cwd=git_root, capture_output=True, text=True, timeout=5,
-        )
-        commit_count = count_result.stdout.strip() or "?"
-        return (
-            f"Skill VERSION drift: {commit_count} commit(s) have landed "
-            f"since the last VERSION bump (last bump in {version_sha[:8]}, "
-            f"HEAD is {head_sha[:8]}). The maintainer likely forgot to "
-            f"bump VERSION in the last commit — `vibe upgrade` and "
-            f"version drift checks will report false 'up to date' "
-            f"until VERSION is bumped."
-        )
-    except (OSError, subprocess.SubprocessError, subprocess.TimeoutExpired):
-        return None
 
 
 def _missing_auxiliaries() -> list[str]:
@@ -317,7 +236,7 @@ def doctor(project_root: str) -> dict:
         )
     # Maintainer-side: detect if Skill's own VERSION is behind its git HEAD.
     # Without this check, downstream projects would silently miss new rules.
-    skill_drift = _check_skill_version_drift()
+    skill_drift = check_skill_version_drift(SKILL_DIR)
     if skill_drift:
         warnings.append(skill_drift)
 

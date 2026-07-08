@@ -6575,27 +6575,62 @@ class SkillUpgradeCommandTests(unittest.TestCase):
         self.assertIn("pytest -x", out)
 
     def test_version_drift_warning_when_version_stale(self) -> None:
-        """`_check_version_drift` must return a warning when VERSION is stale.
+        """`check_skill_version_drift` must return a warning when a
+        feat commit landed without a follow-up VERSION bump.
 
-        Simulates the bug where the Skill maintainer forgot to bump
-        VERSION after adding new rules: working-tree VERSION still
-        references an old commit, but Skill HEAD has moved on.
+        The previous string-prefix detection caught uncommitted
+        working-tree edits; the new git-history detection (shared
+        between doctor and upgrade per 2026-07-09b feedback) requires
+        a stale commit on disk. We simulate by staging a stale VERSION,
+        committing it, then making a subsequent unrelated feat commit
+        that does NOT touch VERSION — which is the actual failure mode.
         """
         import upgrade
         import os
+        import subprocess
         skill_dir = os.path.dirname(os.path.dirname(os.path.abspath(upgrade.__file__)))
         version_path = os.path.join(skill_dir, "VERSION")
-        original = open(version_path, encoding="utf-8").read()
-        try:
-            with open(version_path, "w", encoding="utf-8") as f:
-                f.write("stale00-old-bump\n")
-            warning = upgrade._check_version_drift(skill_dir)
+        git_root = skill_dir
+        while git_root != "/" and not os.path.isdir(os.path.join(git_root, ".git")):
+            git_root = os.path.dirname(git_root)
+        # Use a throwaway git repo to avoid mutating the Skill\'s own history.
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = os.path.join(tmp, "repo")
+            os.makedirs(repo)
+            for cmd in [
+                ["git", "init", "-q", "-b", "master", repo],
+                ["git", "-C", repo, "config", "user.email", "t@v.l"],
+                ["git", "-C", repo, "config", "user.name", "T"],
+            ]:
+                subprocess.run(cmd, check=False, capture_output=True)
+            # Initial commit with a non-chore subject so VERSION bumps
+            # can\'t be confused with chore commits.
+            subprocess.run(
+                ["git", "-C", repo, "commit", "--allow-empty",
+                 "-q", "-m", "feat: real feature"],
+                check=False, capture_output=True,
+            )
+            # Write a real VERSION file and commit it.
+            real_version = os.path.join(repo, "VERSION")
+            with open(real_version, "w", encoding="utf-8") as f:
+                f.write("aaaaaaa-stale-bump\n")
+            subprocess.run(["git", "-C", repo, "add", "VERSION"], check=False, capture_output=True)
+            subprocess.run(
+                ["git", "-C", repo, "commit", "-q", "-m",
+                 "chore: stale VERSION"],
+                check=False, capture_output=True,
+            )
+            # Now make a feat commit that does NOT touch VERSION.
+            subprocess.run(
+                ["git", "-C", repo, "commit", "--allow-empty",
+                 "-q", "-m", "feat: forgot to bump VERSION"],
+                check=False, capture_output=True,
+            )
+            warning = upgrade.check_skill_version_drift(repo)
             self.assertIsNotNone(warning)
             self.assertIn("VERSION drift", warning)
-            self.assertIn("stale00", warning)
-        finally:
-            with open(version_path, "w", encoding="utf-8") as f:
-                f.write(original)
+            self.assertIn("forgot to bump VERSION", warning)
 
     def test_version_drift_silent_when_version_aligned(self) -> None:
         """`_check_version_drift` must return None when VERSION matches HEAD."""
@@ -6616,7 +6651,7 @@ class SkillUpgradeCommandTests(unittest.TestCase):
             head_short7 = head_result.stdout.strip()[:7]
             with open(version_path, "w", encoding="utf-8") as f:
                 f.write(f"{head_short7}-aligned-test\n")
-            self.assertIsNone(upgrade._check_version_drift(skill_dir))
+            self.assertIsNone(upgrade.check_skill_version_drift(skill_dir))
         finally:
             with open(version_path, "w", encoding="utf-8") as f:
                 f.write(original)
