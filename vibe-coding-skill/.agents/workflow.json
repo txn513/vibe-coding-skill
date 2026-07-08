@@ -1,0 +1,80 @@
+{
+  "schema_version": 10,
+  "project_id": "2026-06-12-vibe-coding-10-vibe-coding-agent-2",
+  "roles": {
+    "owner": "",
+    "builder": "",
+    "reviewer": "",
+    "releaser": "",
+    "observer": "",
+    "override_approver": ""
+  },
+  "risk_profiles": {
+    "low": {
+      "require_plan": false,
+      "require_verify": true,
+      "require_review": true,
+      "require_release": false,
+      "require_observe": false,
+      "require_role_separation": false,
+      "require_clean_worktree": false
+    },
+    "medium": {
+      "require_plan": true,
+      "require_verify": true,
+      "require_review": true,
+      "require_release": true,
+      "require_observe": false,
+      "require_role_separation": false,
+      "require_clean_worktree": false
+    },
+    "high": {
+      "require_plan": true,
+      "require_verify": true,
+      "require_review": true,
+      "require_release": true,
+      "require_observe": true,
+      "require_role_separation": true,
+      "require_clean_worktree": true
+    }
+  },
+  "commands": {
+    "verify": [["python3", "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py", "-t", "."]],
+    "release": [],
+    "observe": [],
+    "verify_scope": [["python3", "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py", "-t", "."]],
+    "verify_full": [["python3", "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py", "-t", "."]]
+  },
+  "repositories": [],
+  "model_tiers": {},
+  "archive": {
+    "thresholds_days": {
+      "evidence": 90,
+      "rule_unreferenced": 180,
+      "spec_untouched": 365
+    },
+    "scan_paths": [
+      ".agents/specs",
+      ".agents/evidence",
+      ".agents/rules"
+    ],
+    "exclude_paths": [
+      ".agents/archive"
+    ]
+  },
+  "stage_stall_sla": {
+    "low_hours": 72,
+    "medium_hours": 24,
+    "high_hours": 8
+  },
+  "risk_required_rules": {
+    "high": [],
+    "medium": [],
+    "low": []
+  },
+  "review_separation": {
+    "required_for": [
+      "high"
+    ]
+  }
+}

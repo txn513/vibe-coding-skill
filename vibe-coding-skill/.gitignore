@@ -1,9 +1,17 @@
-# Test artefacts (created by tests that init_project into the Skill dir)
-.agents/
+# Test artefacts (created by tests that init_project into the Skill dir).
+# We DO want to track .agents/workflow.json so vibe commit verify gate
+# can find the Skill own verify command (see Rule 53). Only the bits
+# that init_project would create from scratch are ignored.
+.agents/rules/
+.agents/specs/
+.agents/plans/
+.agents/reviews/
+.agents/backups/
+.agents/.vibe-review-pending
+AGENTS.md
 
 # Python
 __pycache__/
 *.pyc
 *.pyo
 .pytest_cache/
-.agents/.vibe-review-pending
