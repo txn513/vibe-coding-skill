@@ -730,6 +730,55 @@ def commit(
     return completed.returncode
 
 
+
+def _audit_paths_logical_unit(paths):
+    """2026-07-10 advisory #5: commit --paths 含多个独立逻辑单元文件时 WARN.
+
+    motive: Rule 53 要求"每批改动应该是一个逻辑单元", 但 --paths
+    接受任意路径列表, agent 容易把 spec fix + 无关 candidate 文档
+    混在同一 commit。
+
+    识别规则: 路径含 ≥2 个 `.agents/specs/<spec>.md` 或 ≥2 个
+    `.agents/skill-upgrade-candidate*.md` 文件 → WARN。混合 spec +
+    candidate 也 WARN。
+    """
+    import re as _re
+    spec_re = _re.compile(r"\.agents/specs/[^/]+\.md$")
+    cand_re = _re.compile(r"\.agents/skill-upgrade-candidate[^/]*\.md$")
+    specs = [p for p in paths if spec_re.search(p)]
+    cands = [p for p in paths if cand_re.search(p)]
+    warnings = []
+    if len(specs) >= 2:
+        warnings.append(
+            f"--paths 含 {len(specs)} 个 spec 文件: 这是 {len(specs)} 个独立逻辑单元, "
+            "建议按 spec 拆分 commit (vibe commit --paths <spec 相关路径>): "
+            + ", ".join(specs)
+        )
+    if len(cands) >= 2:
+        warnings.append(
+            f"--paths 含 {len(cands)} 个 skill 升级候选文档: 这是 {len(cands)} 个独立逻辑单元, "
+            "建议按候选文档拆分 commit: " + ", ".join(cands)
+        )
+    elif specs and cands:
+        warnings.append(
+            f"--paths 含 spec 改动与 candidate 文档 ({len(cands)}), 可能是两个逻辑单元: "
+            "spec 相关: " + ", ".join(specs) +
+            "; candidate: " + ", ".join(cands)
+        )
+    return warnings
+
+
+def _print_paths_logical_unit_warnings(paths):
+    warnings = _audit_paths_logical_unit(paths)
+    if not warnings:
+        return
+    print()
+    print("⚠️  --paths 逻辑单元 advisory (Rule 53 + 2026-07-10 #5 commit-logical-unit):")
+    for w in warnings:
+        print(f"   - {w}")
+    print("<!-- vibe:commit_logical_unit_advisory: surfaced -->")
+
+
 def run(argv: list[str]) -> int:
     """Entry point used by both the CLI and the vibe.py dispatcher.
 
@@ -809,6 +858,8 @@ def run(argv: list[str]) -> int:
         print()
         print("提示: review-summary 模板见 `vibe commit --help` (epilog 段)")
         return 2
+    if paths:
+        _print_paths_logical_unit_warnings(paths)
     project_root = argv[0]
     git_args = argv[1:]
 

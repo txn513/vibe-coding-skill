@@ -9763,3 +9763,66 @@ class ReproductionRuntimeTraceDoctorTests(unittest.TestCase):
             with open(os.path.join(ed, "verify.md"), "w") as f:
                 f.write("$ grep foo\nnothing\n")
             self.assertEqual(self._call(tmp), [])
+
+
+class CommitPathsLogicalUnitAdvisoryTests(unittest.TestCase):
+    """Cover 2026-07-10 advisory #5: commit --paths logical-unit.
+
+    When `--paths` lists ≥2 .agents/specs/*.md files, ≥2 candidate
+    documents, or a mix of spec + candidate, surface an advisory so
+    the agent considers splitting into separate logical-unit commits.
+    Advisory only — never blocks.
+    """
+
+    def test_single_spec_no_warning(self) -> None:
+        from commit import _audit_paths_logical_unit
+        paths = ["backend/app/tasks.py", ".agents/specs/fix-x.md",
+                 ".agents/evidence/fix-x/verify.md"]
+        self.assertEqual(_audit_paths_logical_unit(paths), [])
+
+    def test_two_specs_warns(self) -> None:
+        from commit import _audit_paths_logical_unit
+        paths = ["backend/a.py", ".agents/specs/fix-x.md",
+                 ".agents/specs/fix-y.md"]
+        w = _audit_paths_logical_unit(paths)
+        self.assertEqual(len(w), 1)
+        self.assertIn("2 个 spec 文件", w[0])
+        self.assertIn("fix-x.md", w[0])
+        self.assertIn("fix-y.md", w[0])
+
+    def test_two_candidates_warns(self) -> None:
+        from commit import _audit_paths_logical_unit
+        paths = ["backend/a.py",
+                 ".agents/skill-upgrade-candidate-rule54.md",
+                 ".agents/skill-upgrade-candidate-rule55.md"]
+        w = _audit_paths_logical_unit(paths)
+        self.assertEqual(len(w), 1)
+        self.assertIn("2 个 skill 升级候选文档", w[0])
+
+    def test_spec_and_candidate_warns(self) -> None:
+        from commit import _audit_paths_logical_unit
+        paths = ["backend/a.py",
+                 ".agents/specs/fix-x.md",
+                 ".agents/evidence/fix-x/verify.md",
+                 ".agents/skill-upgrade-candidate-rule54.md"]
+        w = _audit_paths_logical_unit(paths)
+        # Both mixed-case + single spec + single candidate: only the
+        # "可能是两个逻辑单元" branch fires.
+        self.assertEqual(len(w), 1)
+        self.assertIn("可能是两个逻辑单元", w[0])
+        self.assertIn("fix-x.md", w[0])
+        self.assertIn("rule54", w[0])
+
+    def test_discovery_path_ignored(self) -> None:
+        """Other locations for candidate docs (e.g., discovery/) are
+        not flagged — keep the heuristic narrow and predictable."""
+        from commit import _audit_paths_logical_unit
+        paths = ["backend/a.py",
+                 ".agents/discovery/some-proposal.md",
+                 ".agents/discovery/another-proposal.md"]
+        self.assertEqual(_audit_paths_logical_unit(paths), [])
+
+    def test_no_spec_or_candidate_no_warning(self) -> None:
+        from commit import _audit_paths_logical_unit
+        paths = ["backend/a.py", "frontend/b.js", "tests/test_x.py"]
+        self.assertEqual(_audit_paths_logical_unit(paths), [])
