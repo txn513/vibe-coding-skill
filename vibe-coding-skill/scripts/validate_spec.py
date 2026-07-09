@@ -44,6 +44,23 @@ PLACEHOLDER_PATTERNS = [
 # A heading like "## 意图 (Intent)" or "## Intent" both match the first entry.
 # The Skill prefers the canonical Chinese key, but accepts English aliases
 # to keep older specs (pre-bilingual-template) valid without forcing a rewrite.
+# Each entry: (canonical Chinese key, list of accepted heading aliases).
+# A heading like "## 意图 (Intent)" or "## Intent" both match the first entry.
+# The Skill prefers the canonical Chinese key, but accepts English aliases
+# to keep older specs (pre-bilingual-template) valid without forcing a rewrite.
+#
+# 2026-07-10 (09f candidate 1): expanded 3 → 7 to match templates/spec.md
+# actual h2 headings. Previously validate_spec only enforced 意图/验收/涉及
+# — leaving 成功标准/约束/NFR/验证方式 silently optional — so a stub spec
+# could pass validate and only fail at advance time. The four new entries
+# are unconditional error severity: missing them means the spec template
+# was not actually filled in, which is exactly what Rule 9 (project-local
+# learning) and Rule 18 (no project-specific knowledge in Skill) expect to
+# catch before code lands.
+#
+# Note: NFR 段允许 "(无)" / "(不适用)" / "(N/A)" 占位（某些轻量 spec
+# e.g. typo 修复确实没 NFR）. validate 在 section 缺失时直接 error;
+# section 存在但 body 是 placeholder 则由 placeholder scan 抓。
 CRITICAL_SECTIONS = [
     ("意图", ["意图", "Intent", "Purpose"]),
     ("验收标准", ["验收标准", "Acceptance Criteria", "Acceptance"]),
@@ -127,6 +144,35 @@ def validate_spec(spec_path: str) -> dict:
     # 5. Check status
     status_m = re.search(r">\s*状态:\s*(\S+)", content)
     current_status = status_m.group(1) if status_m else "draft"
+
+    # 5b. Section-name uniqueness (Rule 18 follow-up). Two h2 headings
+    #     with the same canonical text means the agent either:
+    #     (a) accidentally pasted a section twice (retro 反思 5 实证), or
+    #     (b) duplicated a template reminder block.
+    #     Either way it is a defect: the spec body is ambiguous, and
+    #     downstream readers (reviewer, future agents) cannot tell which
+    #     copy is authoritative. h3 sub-sections (e.g. 正常路径 under
+    #     验收标准) are intentionally allowed to repeat — they live
+    #     under different AC scenarios, not at the section-of-record level.
+    h2_matches = re.findall(r"^##\s+(.+)$", content, re.MULTILINE)
+    # Normalise by stripping optional parenthetical subtitles so
+    # "## 验收标准 (Acceptance Criteria)" and "## 验收标准" dedupe.
+    def _normalise_h2(raw: str) -> str:
+        return re.sub(r"\s*\([^)]*\)\s*$", "", raw).strip()
+    seen_h2: dict[str, int] = {}
+    duplicates: list[str] = []
+    for raw in h2_matches:
+        norm = _normalise_h2(raw)
+        seen_h2[norm] = seen_h2.get(norm, 0) + 1
+    for norm, count in seen_h2.items():
+        if count > 1:
+            duplicates.append(f"{norm} (x{count})")
+    if duplicates:
+        issues.append({
+            "severity": "error",
+            "msg": f"发现 {len(duplicates)} 个重复 h2 段名: {', '.join(duplicates)}",
+            "detail": ["合并或删除重复段后再 advance — 重复段让 spec body 失去唯一权威"],
+        })
     risk_confirmation = re.search(r"^>\s*风险确认:\s*(\S+)", content, re.MULTILINE)
     if risk_confirmation and risk_confirmation.group(1) != "confirmed":
         issues.append({

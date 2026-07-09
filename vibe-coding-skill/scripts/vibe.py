@@ -35,6 +35,38 @@ import project_status
 import shlex
 import record_evidence
 import record_review
+
+# 2026-07-10 (09f candidate 2): surfaced in `vibe evidence --help` so
+# agents that DO read help get the correct --command invocation
+# pattern. R36 misplaced_vibe_options catches the wrong case (vibe
+# flag inside --command value); this epilog catches the right case
+# (multi-shell-command pipe / quote). Real bug retro: 反思 2 — agent
+# passed --command twice and bash ate the second flag as an argument.
+EVIDENCE_EPILOG = """\
+examples:
+  # OK — single shell command:
+  vibe evidence . spec-name verify passed --command "pytest tests/ -v"
+
+  # OK — multi-command via bash -c (avoids bash eating --command twice):
+  vibe evidence . spec-name verify passed \
+    --command "bash -c 'git show HEAD~1:frontend/app.js | grep -n hardcode'"
+
+  # OK — multi-command via pipe:
+  vibe evidence . spec-name verify passed \
+    --command "git show HEAD~1:frontend/app.js | grep -n hardcode"
+
+  # WRONG (R36 misplaced_vibe_options fail-fast):
+  vibe evidence . spec-name verify passed --command pytest --configured
+
+  # WRONG (bash eats second --command):
+  vibe evidence . spec-name verify passed --command "git log" --command "pytest -v"
+
+troubleshooting:
+  Bash 把 --command 解释成第一个命令的参数 → 用 bash -c 包住整段 shell
+  pipe | 在 --command value 里被 quote escape 弄坏 → 用 bash -c 或 shlex 拆分
+  vibe flag (--configured / --actor / --role) 出现在 --command 之后 → R36 报错
+"""
+
 import refresh_context
 import rule_status
 import set_status
@@ -228,6 +260,8 @@ def main() -> None:
     evidence.add_argument("--command", dest="exec_command", nargs=argparse.REMAINDER)
     evidence.add_argument("--configured", action="store_true")
     evidence.add_argument("--purpose", choices=sorted(record_evidence.PURPOSES), default="standard")
+    evidence.epilog = EVIDENCE_EPILOG
+    evidence.formatter_class = argparse.RawDescriptionHelpFormatter
 
     decision = sub.add_parser("review-decision")
     decision.add_argument("project_root")

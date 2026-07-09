@@ -5404,7 +5404,7 @@ class TwelveFactorMarkerTests(unittest.TestCase):
             # Gate refused → no success marker; that's correct.
             self.assertNotIn("vibe:gate_verdict", out)
         else:
-            self.assertRegex(out, r"<!--\s*vibe:gate_verdict:[^>]+-->")
+            self.assertRegex(out, r"<!--\s*vibe:gate_verdict:.*?-->")
 
 
 
@@ -8851,3 +8851,187 @@ class CodePatternGateAsyncSessionTests(unittest.TestCase):
             )
         self.assertEqual(n, 0)
         self.assertEqual(buf.getvalue(), "")
+
+
+class ValidateSpecSectionUniquenessTests(unittest.TestCase):
+    """Cover 09f candidate 1 — section-name uniqueness hard gate.
+
+    Retro 反思 5 实证: agent accidentally pasted `## 调用点 (Call Sites)`
+    twice when filling the spec template, and validate_spec silently
+    passed the duplicate. The reviewer caught it; the spec gate did
+    not. Two h2 headings with the same canonical text always indicate
+    a defect: the spec body is ambiguous, and downstream readers
+    (reviewer, future agents) cannot tell which copy is authoritative.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = Path(self.tmp.name) / "spec.md"
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _write(self, body: str) -> None:
+        self.path.write_text(body, encoding="utf-8")
+
+    def _errors(self) -> list[str]:
+        import validate_spec
+        result = validate_spec.validate_spec(str(self.path))
+        return [issue["msg"] for issue in result["issues"] if issue["severity"] == "error"]
+
+    def test_no_duplicates_passes(self) -> None:
+        """A clean spec with unique h2 sections passes uniqueness check."""
+        self._write(
+            "# sample\n\n> 状态: draft\n\n"
+            "## 意图 (Intent)\n\ntext body here\n\n"
+            "## 涉及范围\n\n- **新增文件**: none\n\n"
+            "## 验收标准 (Acceptance Criteria)\n\n- [ ] AC1\n"
+        )
+        errors = self._errors()
+        # No duplicate-related errors. Other errors (placeholder, AC
+        # body length) may exist but not duplicates.
+        duplicate_errors = [e for e in errors if "重复 h2 段名" in e]
+        self.assertEqual(duplicate_errors, [])
+
+    def test_duplicate_h2_section_errors(self) -> None:
+        """Two identical h2 headings → uniqueness error."""
+        self._write(
+            "# sample\n\n> 状态: draft\n\n"
+            "## 意图 (Intent)\n\ntext\n\n"
+            "## 涉及范围\n\n- **新增文件**: none\n\n"
+            "## 验收标准 (Acceptance Criteria)\n\n- [ ] AC1\n\n"
+            "## 调用点 (Call Sites)\n\nfirst copy\n\n"
+            "## 调用点 (Call Sites)\n\nsecond copy\n"
+        )
+        errors = self._errors()
+        dup_errors = [e for e in errors if "重复 h2 段名" in e]
+        self.assertEqual(len(dup_errors), 1)
+        self.assertIn("调用点", dup_errors[0])
+        # x2 because two copies
+        self.assertIn("x2", dup_errors[0])
+
+    def test_duplicate_with_different_alias_parens_dedupes(self) -> None:
+        """`## 验收标准` and `## 验收标准 (Acceptance Criteria)` count as
+        the same canonical section — the parenthetical subtitle is
+        stripped before counting. This prevents agents from bypassing
+        the check by adding or removing parens."""
+        self._write(
+            "# sample\n\n> 状态: draft\n\n"
+            "## 意图\n\ntext\n\n"
+            "## 涉及范围\n\n- **新增文件**: none\n\n"
+            "## 验收标准\n\n- [ ] AC1\n\n"
+            "## 验收标准 (Acceptance Criteria)\n\n- [ ] AC2\n"
+        )
+        errors = self._errors()
+        dup_errors = [e for e in errors if "重复 h2 段名" in e]
+        self.assertEqual(len(dup_errors), 1)
+        self.assertIn("验收标准", dup_errors[0])
+
+    def test_h3_subsections_allowed_to_repeat(self) -> None:
+        """h3 sub-sections (e.g. `### 正常路径` under different AC
+        scenarios) are intentionally NOT counted — they live at a
+        different heading level and are not section-of-record duplicates.
+        Retro 反思 5 only flagged true h2 collisions, not h3 case-by-case
+        structure."""
+        self._write(
+            "# sample\n\n> 状态: draft\n\n"
+            "## 意图 (Intent)\n\ntext\n\n"
+            "## 涉及范围\n\n- **新增文件**: none\n\n"
+            "## 验收标准 (Acceptance Criteria)\n\n"
+            "### 正常路径\n\n1. AC1\n\n"
+            "### 边界情况\n\n- AC4\n\n"
+            "### 错误处理\n\n- AC6\n"
+        )
+        errors = self._errors()
+        dup_errors = [e for e in errors if "重复 h2 段名" in e]
+        self.assertEqual(dup_errors, [])
+
+
+class EvidenceHelpEpilogTests(unittest.TestCase):
+    """Cover 09f candidate 2 — `vibe evidence --help` epilog with
+    pipe / bash -c invocation patterns. R36 misplaced_vibe_options
+    catches vibe-flag-after-`--command` mistakes; this epilog catches
+    the multi-shell-command pattern that bites agents who try to fit a
+    pipe into `--command`'s REMAINDER value.
+
+    Retro 反思 2 实证: agent passed `--command` twice and bash ate the
+    second flag as an argument. The epilog shows the correct bash -c
+    pattern so agents that DO read help can avoid the trap.
+    """
+
+    def test_evidence_subparser_has_pipe_epilog(self) -> None:
+        """vibe evidence --help should surface pipe / bash -c guidance."""
+        import io
+        import contextlib
+        # Import lazily to avoid polluting other tests
+        proc = subprocess.run(
+            [sys.executable, str(SCRIPTS_DIR / "vibe.py"),
+             "evidence", "--help"],
+            capture_output=True, text=True, timeout=10,
+        )
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+        out = proc.stdout
+        # Epilog contains the canonical examples
+        self.assertIn("bash -c", out)
+        self.assertIn("examples:", out)
+        self.assertIn("troubleshooting:", out)
+        # And the failure patterns agents fall into
+        self.assertIn("WRONG", out)
+
+
+class SetStatusBugEvidenceHintTests(unittest.TestCase):
+    """Cover 09f candidate 3 — set_status bug-evidence error message
+    gains a `--configured` hint so agents don't have to debug the
+    hard gate by trial-and-error.
+
+    Retro 反思 3 实证: advance reported "Bug 进入审查前需要 reproduction
+    与 fix-regression 双向证据" without telling the agent to re-record
+    with `--configured`, costing one full retry cycle.
+    """
+
+    def test_bug_evidence_error_includes_configured_hint(self) -> None:
+        """The bug-evidence hard gate message now points the agent at
+        `vibe evidence ... --configured` instead of leaving them to
+        discover the flag on their own."""
+        import io
+        import contextlib
+        # Minimal project + bug spec that is missing fix-regression evidence.
+        tmp = tempfile.TemporaryDirectory()
+        project = Path(tmp.name)
+        init_project.init_project(str(project), "web")
+        # Git init for clean-worktree checks
+        subprocess.run(["git", "init"], cwd=str(project), capture_output=True)
+        subprocess.run(
+            ["git", "config", "user.email", "t@t"], cwd=str(project), capture_output=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "T"], cwd=str(project), capture_output=True,
+        )
+        subprocess.run(["git", "add", "-A"], cwd=str(project), capture_output=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=str(project), capture_output=True)
+        # Write a bug spec so the bug-evidence gate actually fires
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        spec_path = project / ".agents" / "specs" / "crash.md"
+        spec_path.write_text(
+            f"# crash\n\n> 状态: in-progress | 创建: {now} | 更新: {now}\n"
+            f"> 类型: bug\n> 风险: medium\n> 风险确认: confirmed\n\n"
+            f"## 意图 (Intent)\n\nfix the crash\n\n"
+            f"## 修复范围 (Fix Scope)\n\n- 已修复位置: src/main.py\n\n"
+            f"## 涉及范围\n\n- **新增文件**: none\n\n"
+            f"## 验收标准 (Acceptance Criteria)\n\n- [ ] AC1\n\n"
+            f"## 验证方式\n\n- [ ] 单元测试通过\n",
+            encoding="utf-8",
+        )
+
+        import set_status
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            result = set_status.set_status(str(project), "crash", "review")
+        # Gate should refuse (no reproduction + fix-regression evidence)
+        self.assertIsNone(result)
+        out = buf.getvalue()
+        # Hint must reference the --configured escape hatch
+        self.assertIn("--configured", out)
+        # And quote the full evidence command so agents can copy-paste
+        self.assertIn("vibe evidence", out)
+        tmp.cleanup()

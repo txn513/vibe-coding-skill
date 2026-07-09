@@ -192,6 +192,9 @@ def set_status(
                 ):
                     print("❌ Bug 进入审查前需要 reproduction 与 fix-regression 双向证据")
                     print("   💡 标准顺序: in-progress → review → released → done")
+                    print("   💡 修复: 用 `vibe evidence . <spec-name> verify passed --configured` 重新记录")
+                    print("           (--configured 让 evidence 抓 workflow.json verify 命令 digest)")
+                    print("           若只想先记录不抓 digest: 去掉 --configured 即可,但 advance 仍会被挡")
                     return None
                 _emit_fix_state_advisory(project_root, spec_name)
             elif not _has_current_evidence(
