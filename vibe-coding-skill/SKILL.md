@@ -836,6 +836,31 @@ artifacts merely because a template exists.
 
 63. **AGENTS.md phase-gates template is versioned and merge-safe**: The Skill ships a `templates/agents-phase-gates.md` template containing the `## 阶段强制规范（Phase Gates）` section with 9-phase hard gates (Discover → Done), per-phase mandatory checkpoints, allowed-skip conditions, and prohibited-skip conditions. When a project is initialised (`vibe init`) or onboarded (`vibe onboard`), the project's AGENTS.md is generated from this template. When the Skill updates the template, `vibe update-agents <project_root>` replaces the phase-gates section in the project's AGENTS.md while preserving all project-specific content (tech stack, architecture constraints, etc.). The section is versioned with a `<!-- vibe:phase-gates-version: <hash> -->` marker; `vibe context-refresh` checks this marker and auto-updates when drift is detected. Projects MAY declare overrides in a `## 阶段覆盖声明（Phase Gates Override）` section; during merge, project overrides take precedence over Skill defaults and the merged section annotates the override. The template must never contain project-specific knowledge; it is a governance skeleton only.
 
+64. **`asyncio.create_task` MUST NOT call `.commit()` on a shared AsyncSession**:
+    When a spec, plan, or fix introduces a `db.commit()` / `session.commit()` /
+    `AsyncSession.commit()` call inside the body of `asyncio.create_task(<callable>)`,
+    and the parent coroutine shares the same session / `AsyncSessionLocal` /
+    `session_factory` instance, the commit races with the parent and crashes
+    with `IllegalStateChangeError: Method 'commit()' can't be called here;
+    method 'commit()' is already in progress`. The fire-and-forget task's
+    exception handler silently swallows the error, so the parent transaction
+    rolls back without the agent noticing. `vibe commit` runs an advisory AST
+    scan over the staged `.py` files (Rule 64-style — see
+    `scripts/code_pattern_gate.py`) and emits warnings before commit. The
+    scan is **advisory, not blocking**: the fix is `asyncio.Lock`, a fresh
+    `AsyncSession` inside the task, or moving the commit to the parent
+    coroutine. Escape hatch: `vibe commit --no-async-gate` for actor-model
+    projects with independent session factories, one-shot background writes
+    via `async_sessionmaker()`, or any other pattern that has already been
+    audited. The scan uses `ast` (not regex) so docstrings, comments, and
+    string literals are not falsely matched; it walks every
+    `asyncio.create_task(...)` call whose first positional argument is a
+    Lambda / FunctionDef / AsyncFunctionDef and whose body references
+    `session` / `db` / `AsyncSession` / `Session` / `_session` / `_db` /
+    `conn` / `connection`. Pure signature changes (renaming, parameter
+    ordering, return-type widening) are NOT covered — type checkers catch
+    those.
+
 ## State Model
 
 Normal states are:

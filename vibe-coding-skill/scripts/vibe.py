@@ -291,6 +291,14 @@ def main() -> None:
         help="Skip Rule 53 verify gate (escape hatch)",
     )
     commit_cmd.add_argument(
+        "--no-async-gate", action="store_true",
+        help="Skip Rule 64 advisory scan (asyncio.create_task + shared "
+             "AsyncSession commit pattern). The scan is advisory only; "
+             "this escape hatch is for actor-model projects with independent "
+             "session factories or one-shot background writes that have "
+             "already been audited.",
+    )
+    commit_cmd.add_argument(
         "--staged", action="store_true",
         help="Commit only what is already staged (no auto `git add -A`). "
         "Use with `git add <paths>` to split a dirty tree into multiple "
@@ -571,6 +579,7 @@ def main() -> None:
         # that could be eaten by argparse.REMAINDER (because they
         # appear inside `git_args`) are pulled out of sys.argv.
         no_verify = "--no-verify" in sys.argv
+        no_async_gate = "--no-async-gate" in sys.argv
         full_verify = "--full-verify" in sys.argv
         reviewed = "--reviewed" in sys.argv
         quick = "--quick" in sys.argv
@@ -590,6 +599,8 @@ def main() -> None:
             run_argv = ["--quick", *run_argv]
         if no_verify:
             run_argv = ["--no-verify", *run_argv]
+        if no_async_gate:
+            run_argv = ["--no-async-gate", *run_argv]
         if review_summary:
             run_argv = ["--review-summary", review_summary, *run_argv]
         raise SystemExit(commit.run(run_argv))

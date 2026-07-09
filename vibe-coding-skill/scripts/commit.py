@@ -29,6 +29,7 @@ import os
 import re
 import subprocess
 import sys
+import code_pattern_gate
 
 from workflow_state import (
     SCHEMA_VERSION,
@@ -167,7 +168,12 @@ def _git_diff_full(project_root: str) -> str:
         ["git", "diff", "HEAD"], project_root
     )
     if rc != 0:
-        # No commits yet — diff against the empty tree
+        # No commits yet — root-commit case. Fall back to diff of
+        # the index so staged content is visible to review (Rule 53)
+        # and to the Rule 64 async-session gate.
+        rc, out, err = _run(["git", "diff", "--cached"], project_root)
+    if rc != 0:
+        # Last resort: working tree diff (will miss staged content).
         rc, out, err = _run(["git", "diff"], project_root)
     if rc != 0:
         return f"(git diff failed: {err.strip()})"
@@ -251,6 +257,7 @@ def commit(
     no_verify: bool = False,
     quick: bool = False,
     review_summary: str = "",
+    no_async_gate: bool = False,
 ) -> int:
     """Run Rule 53 gate, then hand off to `git commit` if all clear.
 
@@ -527,6 +534,18 @@ def commit(
             print(f"     ... 还有 {len(untracked) - 10} 个")
     print()
 
+    # 1b. Rule 64 advisory — asyncio.create_task + shared AsyncSession commit.
+    # Advisory only; the hard gate below is still the source of truth.
+    # Reads the same diff that the user is about to commit, so it costs
+    # nothing extra to run, and gives the agent a chance to fix the
+    # pattern before the race crashes a different spec.
+    if not no_async_gate:
+        diff_for_scan = _git_diff_full(project_root)
+        hints = code_pattern_gate.scan_changed_python_files(
+            project_root, diff_text=diff_for_scan,
+        )
+        code_pattern_gate.print_code_pattern_hints(hints, suppress=no_async_gate)
+
     # 2. Verify — select verify tier based on flags and config.
     #
     # Three tiers (fastest → slowest):
@@ -675,6 +694,7 @@ def run(argv: list[str]) -> int:
     to --staged and --paths.
     """
     no_verify = False
+    no_async_gate = False
     staged_only = False
     full_verify = False
     reviewed = False
@@ -687,6 +707,10 @@ def run(argv: list[str]) -> int:
         a = argv[i]
         if a == "--no-verify":
             no_verify = True
+            i += 1
+            continue
+        if a == "--no-async-gate":
+            no_async_gate = True
             i += 1
             continue
         if a == "--staged":
@@ -736,8 +760,8 @@ def run(argv: list[str]) -> int:
         # via the commit subparser epilog (`vibe commit --help`) and
         # via the line-ref hard-gate failure message.
         print("Usage: vibe commit <project_root> [--staged | --paths p1,p2] "
-              "[--no-verify] [--full-verify] [--reviewed --review-summary '<text>'] "
-              "[--quick] [git commit args...]")
+              "[--no-verify] [--no-async-gate] [--full-verify] "
+              "[--reviewed --review-summary '<text>'] [--quick] [git commit args...]")
         print()
         print("提示: review-summary 模板见 `vibe commit --help` (epilog 段)")
         return 2
@@ -781,6 +805,7 @@ def run(argv: list[str]) -> int:
         no_verify=no_verify,
         quick=quick,
         review_summary=review_summary,
+        no_async_gate=no_async_gate,
     )
 
 

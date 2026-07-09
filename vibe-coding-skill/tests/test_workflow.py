@@ -8747,3 +8747,107 @@ class AdvanceChecklistTests(unittest.TestCase):
         # require_verify=False for draft transition (it's not relevant yet)
         self.assertNotIn("证据缺失", out)
         self.assertNotIn("<!-- vibe:advance_checklist:", out)
+
+
+class CodePatternGateAsyncSessionTests(unittest.TestCase):
+    """Cover the Rule 64 advisory gate: `asyncio.create_task` + shared
+    AsyncSession commit is a deterministic race. The gate is advisory
+    only — the parent commit gate never hard-blocks on it.
+
+    Why AST not regex: comments, docstrings, and string literals that
+    mention `session.commit` in prose must not produce false positives.
+    """
+
+    def _hints(self, source: str, label: str = "fixture.py") -> list[str]:
+        import code_pattern_gate
+        return code_pattern_gate.scan_python_source(source, file_label=label)
+
+    def test_lambda_with_session_commit_hits(self) -> None:
+        """asyncio.create_task(lambda: session.commit()) — must hit."""
+        src = (
+            "import asyncio\n"
+            "async def main():\n"
+            "    session = AsyncSession()\n"
+            "    asyncio.create_task(lambda: session.commit())\n"
+        )
+        hints = self._hints(src)
+        self.assertEqual(len(hints), 1)
+        self.assertIn("Rule 64 advisory", hints[0])
+        self.assertIn("session.commit()", hints[0])
+
+    def test_pure_async_function_without_commit_does_not_hit(self) -> None:
+        """No commit() inside the fire-and-forget body → no hint."""
+        src = (
+            "import asyncio\n"
+            "async def update_progress():\n"
+            "    state['x'] = 1\n"
+            "async def main():\n"
+            "    asyncio.create_task(update_progress())\n"
+        )
+        self.assertEqual(self._hints(src), [])
+
+    def test_independent_session_name_does_not_hit(self) -> None:
+        """A session-like receiver named outside the heuristic set is
+        treated as independent and does not trip the gate. This is the
+        conservative case: agents with a fresh AsyncSession inside
+        the task body are not warned."""
+        src = (
+            "import asyncio\n"
+            "async def background_write(independent_session):\n"
+            "    await independent_session.commit()\n"
+            "async def main():\n"
+            "    independent_session = AsyncSession()\n"
+            "    asyncio.create_task(background_write(independent_session))\n"
+        )
+        self.assertEqual(self._hints(src), [])
+
+    def test_docstring_or_comment_mentioning_commit_does_not_hit(self) -> None:
+        """A docstring that mentions `session.commit()` in prose must
+        not produce a false positive — AST treats string-literal content
+        as Expr/Constant, not Call nodes."""
+        src = (
+            'import asyncio\n'
+            'async def main():\n'
+            '    """\n'
+            '    Don\'t call session.commit() inside a fire-and-forget\n'
+            '    task — it will race the parent commit.\n'
+            '    """\n'
+            '    asyncio.create_task(lambda: None)\n'
+        )
+        self.assertEqual(self._hints(src), [])
+
+    def test_indirect_factory_call_does_not_hit(self) -> None:
+        """`asyncio.create_task(make_worker(session))` — we cannot know
+        what `make_worker` does statically, so the gate stays silent.
+        This is the same conservative posture as Name references."""
+        src = (
+            "import asyncio\n"
+            "async def main():\n"
+            "    asyncio.create_task(make_worker(session))\n"
+        )
+        self.assertEqual(self._hints(src), [])
+
+    def test_print_hints_emits_advisory_marker(self) -> None:
+        """print_code_pattern_hints prints advisory + <!-- vibe:code_pattern_gate -->."""
+        import code_pattern_gate
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            n = code_pattern_gate.print_code_pattern_hints(
+                ["Rule 64 advisory: foo.py:L1 `asyncio.create_task(lambda)` ..."],
+            )
+        self.assertEqual(n, 1)
+        out = buf.getvalue()
+        self.assertIn("Rule 64 advisory", out)
+        self.assertIn("<!-- vibe:code_pattern_gate: count=1", out)
+        self.assertIn("--no-async-gate", out)
+
+    def test_print_hints_suppress_returns_zero(self) -> None:
+        """suppress=True (the --no-async-gate escape hatch) emits nothing."""
+        import code_pattern_gate
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            n = code_pattern_gate.print_code_pattern_hints(
+                ["ignored"], suppress=True,
+            )
+        self.assertEqual(n, 0)
+        self.assertEqual(buf.getvalue(), "")
