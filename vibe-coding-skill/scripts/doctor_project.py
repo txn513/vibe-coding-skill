@@ -255,6 +255,7 @@ def doctor(project_root: str) -> dict:
     _audit_context_freshness(Path(project_root), warnings)
     _audit_retro_gap_candidates(project_root, warnings)
     _audit_evidence_commit_freshness(project_root, warnings)
+    _audit_reproduction_runtime_present(project_root, warnings)
     # Rule 56: accumulate adjacent-location protection stats across specs
     adjacent_stats = {"total": 0, "protected": 0, "skipped": 0}
 
@@ -769,6 +770,77 @@ def _audit_evidence_commit_freshness(project_root: str, warnings: list[str]) -> 
             f"evidence 记录时 HEAD 已过期 {len(stale)} 份 (advisory #1 worktree-clean): "
             f"{sample}{more}. evidence 描述的状态可能已不反映当前代码。"
             "重跑 verify 或在 commit message 引用 evidence 文件路径补 commit。"
+        )
+
+
+
+def _audit_reproduction_runtime_present(project_root: str, warnings: list[str]) -> None:
+    """2026-07-10 advisory #2: reproduction evidence should contain
+    real runtime traces, not just static inspection output.
+
+    motive: Skill Rule 10/R11 require type=bug specs to record two
+    pieces of evidence (reproduction + fix-regression) that PROVE the
+    fix changes runtime behaviour. In practice agents record reproduction
+    evidence by running `grep` / `ls` / `cat` and pasting the output, which
+    passes the "evidence file exists" gate but does not actually prove the
+    bug existed in unfixed code. Same shape as Rule 25 ("evidence exists,
+    but does not prove the claimed behavior").
+
+    Strategy: scan .agents/evidence/<spec>/verify-reproduction.md. If the
+    file does NOT contain any obvious runtime-trace signal — exit code
+    keyword (`exit N`, `returncode`), pytest outcome (`PASSED` / `FAILED`
+    / `AssertionError`), runtime language keyword (`RuntimeError`,
+    `Traceback`, `Error:`), or HTTP status (`HTTP/1.X NNN` /
+    `200 OK` / `404`) — surface a WARN.
+
+    Test boundary: this is a heuristic. Agents that hand-author outputs
+    without running anything can still satisfy the gate by writing a
+    line like `Exit: 1` or `AssertionError`. That is acceptable for an
+    advisory — the value is letting the user/agent catch the most
+    common failure mode (no runtime trace at all), not blocking it.
+    """
+    import re
+    evidence_root = os.path.join(project_root, ".agents", "evidence")
+    if not os.path.isdir(evidence_root):
+        return
+    # Heuristic patterns that strongly suggest runtime evidence.
+    runtime_signals = re.compile(
+        r"(?:"
+        r"\bexit\s*(?:code)?\s*\d+\b"
+        r"|returncode\s*[=:]?\s*\d+"
+        r"|\bPASSED\b|\bFAILED\b|\bAssertionError\b"
+        r"|\bRuntimeError\b|\bTraceback\b"
+        r"|\bError:\s|\bError\s-\s"
+        r"|HTTP/[0-9.]+\s+\d{3}"
+        r"|\b200\s+OK\b|\b(?:404|500|502|503)\b"
+        r")",
+        re.IGNORECASE,
+    )
+    suspect = []
+    for spec_dir in sorted(os.listdir(evidence_root)):
+        spec_path = os.path.join(evidence_root, spec_dir)
+        if not os.path.isdir(spec_path):
+            continue
+        repro = os.path.join(spec_path, "verify-reproduction.md")
+        if not os.path.isfile(repro):
+            continue
+        try:
+            with open(repro, encoding="utf-8") as handle:
+                content = handle.read()
+        except OSError:
+            continue
+        if not content.strip():
+            suspect.append((spec_dir, "empty file"))
+            continue
+        if not runtime_signals.search(content):
+            suspect.append((spec_dir, "no runtime trace signal"))
+    if suspect:
+        sample = ", ".join(f"{s} ({reason})" for s, reason in suspect[:3])
+        more = f" (+{len(suspect)-3} more)" if len(suspect) > 3 else ""
+        warnings.append(
+            f"reproduction evidence 缺运行时痕迹 {len(suspect)} 份 (advisory #2 reproduction-runtime-required): "
+            f"{sample}{more}. verify-reproduction.md 应含 exit code / 异常 / HTTP 状态等 "
+            "运行时输出，不能仅含 grep / ls / cat 静态检查结果。重跑 verify 或补实际命令。"
         )
 
 

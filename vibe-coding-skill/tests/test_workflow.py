@@ -9619,3 +9619,147 @@ class EvidenceCommitFreshnessDoctorTests(unittest.TestCase):
 
             warnings = self._call_advisory(tmp, fake_run)
             self.assertEqual(warnings, [])
+
+
+class ReproductionRuntimeTraceDoctorTests(unittest.TestCase):
+    """Cover 2026-07-10 advisory #2: reproduction-runtime-required.
+
+    The advisory surfaces when verify-reproduction.md exists but
+    contains no obvious runtime-trace signal — agents may otherwise
+    write static-only evidence (grep / ls / cat output) and bypass
+    the bug-validation gate. Advisory only.
+    """
+
+    def _call(self, project_root):
+        from doctor_project import _audit_reproduction_runtime_present
+        warnings = []
+        _audit_reproduction_runtime_present(project_root, warnings)
+        return warnings
+
+    def test_no_evidence_dir_no_warning(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(self._call(tmp), [])
+
+    def test_static_only_evidence_warns(self) -> None:
+        """Reproduction evidence with only `grep` / `ls` static output → WARN."""
+        import os
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ed = os.path.join(tmp, ".agents", "evidence", "bug-x")
+            os.makedirs(ed)
+            with open(os.path.join(ed, "verify-reproduction.md"), "w") as f:
+                f.write(
+                    "# bug-x - verify-reproduction\n"
+                    "## 证据\n"
+                    "```text\n"
+                    "$ grep -n 'TODO' backend/app/tasks.py\n"
+                    "12:    # TODO handle empty\n"
+                    "```\n"
+                )
+            warnings = self._call(tmp)
+            self.assertEqual(len(warnings), 1)
+            self.assertIn("bug-x", warnings[0])
+            self.assertIn("verify-reproduction", warnings[0])
+            self.assertIn("advisory #2 reproduction-runtime-required", warnings[0])
+
+    def test_pytest_failure_trace_passes(self) -> None:
+        """Reproduction with pytest AssertionError → no WARN (runtime signal)."""
+        import os
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ed = os.path.join(tmp, ".agents", "evidence", "bug-y")
+            os.makedirs(ed)
+            with open(os.path.join(ed, "verify-reproduction.md"), "w") as f:
+                f.write(
+                    "## 证据\n"
+                    "```text\n"
+                    "$ python3 -m pytest tests/test_bug.py -v\n"
+                    "FAILED test_bug.py::test_x - AssertionError: ...\n"
+                    "1 failed in 0.3s\n"
+                    "```\n"
+                )
+            self.assertEqual(self._call(tmp), [])
+
+    def test_exit_code_signal_passes(self) -> None:
+        """Reproduction with explicit `Exit: 1` keyword → no WARN."""
+        import os
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ed = os.path.join(tmp, ".agents", "evidence", "bug-z")
+            os.makedirs(ed)
+            with open(os.path.join(ed, "verify-reproduction.md"), "w") as f:
+                f.write(
+                    "## 证据\n"
+                    "```text\n"
+                    "$ ./run.sh\n"
+                    "Exit: 1 (returncode=1)\n"
+                    "```\n"
+                )
+            self.assertEqual(self._call(tmp), [])
+
+    def test_http_status_signal_passes(self) -> None:
+        """Reproduction with HTTP/1.1 500 status → no WARN."""
+        import os
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ed = os.path.join(tmp, ".agents", "evidence", "bug-h")
+            os.makedirs(ed)
+            with open(os.path.join(ed, "verify-reproduction.md"), "w") as f:
+                f.write(
+                    "## 证据\n"
+                    "```text\n"
+                    "$ curl -i http://localhost:8000/api/x\n"
+                    "HTTP/1.1 500 Internal Server Error\n"
+                    "```\n"
+                )
+            self.assertEqual(self._call(tmp), [])
+
+    def test_empty_file_warns(self) -> None:
+        """Empty reproduction file → WARN (treat as worst-case form-pass)."""
+        import os
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ed = os.path.join(tmp, ".agents", "evidence", "bug-empty")
+            os.makedirs(ed)
+            with open(os.path.join(ed, "verify-reproduction.md"), "w") as f:
+                pass  # zero bytes
+            warnings = self._call(tmp)
+            self.assertEqual(len(warnings), 1)
+            self.assertIn("bug-empty", warnings[0])
+
+    def test_truncates_to_three(self) -> None:
+        """When ≥4 suspect files, advisory shows first 3 +N more."""
+        import os
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            for spec in ("a", "b", "c", "d", "e"):
+                ed = os.path.join(tmp, ".agents", "evidence", spec)
+                os.makedirs(ed)
+                with open(os.path.join(ed, "verify-reproduction.md"), "w") as f:
+                    f.write("$ grep foo\nno match\n")  # static-only
+            warnings = self._call(tmp)
+            self.assertEqual(len(warnings), 1)
+            self.assertIn("5 份", warnings[0])
+            self.assertIn("+2 more", warnings[0])
+
+    def test_other_evidence_files_ignored(self) -> None:
+        """The advisory targets verify-reproduction.md specifically, not
+        verify.md or fix-regression.md — those are tested by other gates.
+        """
+        import os
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ed = os.path.join(tmp, ".agents", "evidence", "spec-w")
+            os.makedirs(ed)
+            with open(os.path.join(ed, "verify.md"), "w") as f:
+                f.write("$ grep foo\nnothing\n")
+            self.assertEqual(self._call(tmp), [])
