@@ -220,7 +220,7 @@ def main() -> None:
     evidence.add_argument("spec_name")
     evidence.add_argument("phase", choices=sorted(record_evidence.PHASES))
     evidence.add_argument("result", choices=sorted(record_evidence.RESULTS))
-    evidence.add_argument("description", nargs="?", default="")
+    evidence.add_argument("description", nargs="*", default=[])  # 0+ tokens; shlex.join when dispatching
     evidence.add_argument("--actor", default="")
     evidence.add_argument("--role", default="")
     evidence.add_argument("--command", dest="exec_command", nargs=argparse.REMAINDER)
@@ -523,8 +523,12 @@ def main() -> None:
         exec_command = None
         if args.exec_command:
             exec_command = shlex.split(" ".join(args.exec_command))
+        # description is now nargs="*" (list of tokens); shlex.join to restore the
+        # user-typed free-form string. Empty list joins to "" (record_evidence
+        # raises ValueError when both evidence and command are empty).
+        description_text = shlex.join(args.description) if args.description else ""
         result = record_evidence.record_evidence(
-            root, args.spec_name, args.phase, args.result, args.description,
+            root, args.spec_name, args.phase, args.result, description_text,
             args.actor, args.role, exec_command,
             args.configured, args.purpose,
         )

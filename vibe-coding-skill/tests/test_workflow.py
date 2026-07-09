@@ -8557,3 +8557,72 @@ class CommitHelpAndDoctorTrailerRecoveryTests(unittest.TestCase):
         self.assertIn("git reset --soft", out)
         self.assertIn("--amend", out)
         tmp.cleanup()
+
+
+class EvidenceDescriptionMultiWordTests(unittest.TestCase):
+    """Cover `vibe evidence` description as a free-form multi-word string.
+
+    Regression: the CLI used to declare `description` as `nargs="?"`,
+    which made argparse reject any agent-supplied free-form text that
+    contained more than one shell word. Agents retried the command
+    2-3 times before realising they had to wrap the description in
+    quotes. The fix changes `nargs` to `"*"` and shlex.joins the
+    token list back into a single string in the dispatcher.
+    """
+
+    def setUp(self) -> None:
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.project = Path(self.tempdir.name)
+        init_project.init_project(str(self.project), "web")
+        subprocess.run(
+            ["git", "init", "-q", str(self.project)],
+            check=False,
+            capture_output=True,
+        )
+        spec = self.project / ".agents" / "specs" / "demo.md"
+        spec.write_text(VALID_SPEC.format(status="in-progress"), encoding="utf-8")
+
+    def tearDown(self) -> None:
+        self.tempdir.cleanup()
+
+    def _run_vibe(self, *args: str) -> str:
+        """Invoke scripts/vibe.py with the given argv (no `vibe` prefix)."""
+        completed = subprocess.run(
+            [sys.executable, str(SKILL_DIR / "scripts" / "vibe.py"),
+             args[0], str(self.project), *args[1:]],
+            capture_output=True, text=True,
+        )
+        return completed.stdout + completed.stderr
+
+    def test_multi_word_description_recorded_verbatim(self) -> None:
+        """Multi-word free-form description must reach the evidence file intact."""
+        output = self._run_vibe("evidence", "demo", "verify", "passed",
+                                "ran", "the", "full", "pytest", "suite")
+        self.assertIn("已记录 verify 证据", output)
+        evidence = (self.project / ".agents" / "evidence" / "demo" / "verify.md").read_text(encoding="utf-8")
+        self.assertIn("ran the full pytest suite", evidence)
+
+    def test_single_word_description_still_works(self) -> None:
+        """Backward compat: single-word description records unchanged."""
+        self._run_vibe("evidence", "demo", "verify", "passed", "ok")
+        evidence = (self.project / ".agents" / "evidence" / "demo" / "verify.md").read_text(encoding="utf-8")
+        self.assertIn("ok", evidence)
+
+    def test_multi_word_description_does_not_pollute_command_argv(self) -> None:
+        """Multi-word description must NOT be mis-parsed into --command argv."""
+        # Create a workflow with a real verify command and use --command flag
+        # after the description. If the description is wrongly concatenated
+        # into the command argv, the executed argv will include the description
+        # words and the digest will be wrong.
+        wf_path = self.project / ".agents" / "workflow.json"
+        wf = json.loads(wf_path.read_text(encoding="utf-8"))
+        wf["commands"]["verify"] = [["true"]]
+        wf_path.write_text(json.dumps(wf), encoding="utf-8")
+        self._run_vibe("evidence", "demo", "verify", "passed",
+                       "ran", "the", "full", "pytest", "suite",
+                       "--command", "true")
+        evidence = (self.project / ".agents" / "evidence" / "demo" / "verify.md").read_text(encoding="utf-8")
+        # description is in `## 证据` section
+        self.assertIn("ran the full pytest suite", evidence)
+        # Command-Digests must reflect only the `true` argv, not the description
+        self.assertIn("Command-Digests: 8894cdad26ef749f", evidence)  # command_digest(["true"])
