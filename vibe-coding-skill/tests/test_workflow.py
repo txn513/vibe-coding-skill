@@ -9035,3 +9035,164 @@ class SetStatusBugEvidenceHintTests(unittest.TestCase):
         # And quote the full evidence command so agents can copy-paste
         self.assertIn("vibe evidence", out)
         tmp.cleanup()
+
+
+class UncommittedFilesClassificationTests(unittest.TestCase):
+    """Cover rule54-spec-vs-code 候选 — `_classify_uncommitted_files`
+    splits `git status --porcelain` output into draft-spec / ready-spec
+    / code buckets so the Rule 54 advisory and next-action recommendation
+    can give a tailored suggestion instead of a misleading generic
+    "先 commit 当前改动" prefix when the only dirty file is a draft
+    spec.
+
+    Real bug retro: agent created a draft spec, ran `vibe next`, and got
+    told to commit the uncommitted spec. Committing a not-yet-validated
+    spec forces an amend cycle on the next spec update — wasted churn.
+    The fix: draft specs surface an "amend first" suggestion; ready
+    specs and code still trigger the commit advice.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name)
+        # Init git so `git status --porcelain` works
+        subprocess.run(["git", "init"], cwd=str(self.project), capture_output=True)
+        subprocess.run(
+            ["git", "config", "user.email", "t@t"], cwd=str(self.project),
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "T"], cwd=str(self.project),
+            capture_output=True,
+        )
+        (self.project / ".agents").mkdir()
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _make_dirty(self, *paths: str) -> None:
+        """Create files (without git add) so `git status --porcelain`
+        surfaces them as untracked changes."""
+        for p in paths:
+            full = self.project / p
+            full.parent.mkdir(parents=True, exist_ok=True)
+            full.write_text("", encoding="utf-8")
+
+    def _classify(self) -> dict:
+        from project_status import _classify_uncommitted_files
+        return _classify_uncommitted_files(str(self.project))
+
+    def test_draft_spec_only_classified_as_draft(self) -> None:
+        """A draft spec (Status: draft) goes into the draft_spec bucket."""
+        self._make_dirty(".agents/specs/fix-x.md")
+        (self.project / ".agents/specs/fix-x.md").write_text(
+            "# fix-x\n\n> 状态: draft\n\n## 意图\n\nbody\n",
+            encoding="utf-8",
+        )
+        classified = self._classify()
+        self.assertEqual(classified["draft_spec"], [".agents/specs/fix-x.md"])
+        self.assertEqual(classified["ready_spec"], [])
+        self.assertEqual(classified["code"], [])
+
+    def test_ready_spec_classified_as_ready(self) -> None:
+        """A spec with Status: spec-ready or later goes into ready_spec."""
+        self._make_dirty(".agents/specs/fix-y.md")
+        (self.project / ".agents/specs/fix-y.md").write_text(
+            "# fix-y\n\n> 状态: spec-ready\n\n## 意图\n\nbody\n",
+            encoding="utf-8",
+        )
+        classified = self._classify()
+        self.assertEqual(classified["draft_spec"], [])
+        self.assertEqual(classified["ready_spec"], [".agents/specs/fix-y.md"])
+        self.assertEqual(classified["code"], [])
+
+    def test_code_files_classified_as_code(self) -> None:
+        """Non-spec files go into the code bucket."""
+        self._make_dirty("backend/api.py", "frontend/app.js")
+        classified = self._classify()
+        self.assertEqual(classified["draft_spec"], [])
+        self.assertEqual(classified["ready_spec"], [])
+        self.assertEqual(sorted(classified["code"]),
+                         ["backend/api.py", "frontend/app.js"])
+
+    def test_mixed_draft_spec_and_code(self) -> None:
+        """When both draft spec and code are dirty, each bucket is populated."""
+        self._make_dirty(".agents/specs/fix-z.md", "backend/api.py")
+        (self.project / ".agents/specs/fix-z.md").write_text(
+            "# fix-z\n\n> 状态: draft\n\n## 意图\n\nbody\n",
+            encoding="utf-8",
+        )
+        classified = self._classify()
+        self.assertEqual(classified["draft_spec"], [".agents/specs/fix-z.md"])
+        self.assertEqual(classified["ready_spec"], [])
+        self.assertEqual(classified["code"], ["backend/api.py"])
+
+    def test_spec_with_no_status_defaults_to_draft(self) -> None:
+        """A spec without an explicit Status: line defaults to draft
+        (matches the existing frontmatter regex convention in
+        validate_spec.py which treats missing status as draft)."""
+        self._make_dirty(".agents/specs/no-status.md")
+        (self.project / ".agents/specs/no-status.md").write_text(
+            "# no-status\n\n## 意图\n\nbody\n",
+            encoding="utf-8",
+        )
+        classified = self._classify()
+        self.assertEqual(classified["draft_spec"],
+                         [".agents/specs/no-status.md"])
+
+    def test_commit_prereq_skipped_for_draft_spec_only(self) -> None:
+        """When only a draft spec is dirty, _apply_commit_prereq returns
+        the recommendation unchanged (no commit prefix, no `&&` chain).
+        The advice instead surfaces via _print_uncommitted_work_hint."""
+        from project_status import _apply_commit_prereq, _classify_uncommitted_files
+        self._make_dirty(".agents/specs/fix-q.md")
+        (self.project / ".agents/specs/fix-q.md").write_text(
+            "# fix-q\n\n> 状态: draft\n\n## 意图\n\nbody\n",
+            encoding="utf-8",
+        )
+        recommendation = {
+            "action": "vibe amend 补全 spec",
+            "action_command": "vibe amend . fix-q '补全 5 段'",
+        }
+        result = _apply_commit_prereq(str(self.project), recommendation)
+        # No commit prefix injected — draft-spec-only dirt must not be
+        # woven into the next action.
+        self.assertNotIn("commit", result["action"].lower())
+        self.assertNotIn("vibe commit", result["action_command"])
+
+    def test_commit_prereq_still_active_for_code_dirt(self) -> None:
+        """When code is dirty, _apply_commit_prereq DOES weave the commit
+        step in (existing behaviour preserved)."""
+        from project_status import _apply_commit_prereq
+        self._make_dirty("backend/api.py")
+        recommendation = {
+            "action": "vibe advance",
+            "action_command": "vibe advance . fix-q in-progress",
+        }
+        result = _apply_commit_prereq(str(self.project), recommendation)
+        self.assertIn("commit", result["action"].lower())
+        self.assertIn("vibe commit", result["action_command"])
+
+    def test_uncommitted_hint_surfaces_draft_spec_message(self) -> None:
+        """_print_uncommitted_work_hint emits the draft-spec-tailored
+        message (建议: 先 amend 补全 spec) instead of the generic commit
+        line when only a draft spec is dirty."""
+        import io
+        import contextlib
+        from project_status import _print_uncommitted_work_hint
+        self._make_dirty(".agents/specs/fix-h.md")
+        (self.project / ".agents/specs/fix-h.md").write_text(
+            "# fix-h\n\n> 状态: draft\n\n## 意图\n\nbody\n",
+            encoding="utf-8",
+        )
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            _print_uncommitted_work_hint(str(self.project))
+        out = buf.getvalue()
+        # Draft-spec-specific phrasing
+        self.assertIn("draft spec", out.lower())
+        self.assertIn("vibe amend", out)
+        self.assertIn("<!-- vibe:uncommitted_draft_spec:", out)
+        # And NO generic "未提交改动 (Rule 54: 应提交)" line — that bucket
+        # should be empty when only draft specs are dirty.
+        self.assertNotIn("Rule 54: 应提交", out)
