@@ -270,6 +270,8 @@ def main() -> None:
     decision.add_argument("basis")
     decision.add_argument("evidence")
     decision.add_argument("--reviewer", required=True)
+    decision.add_argument("--role", default="")
+    decision.add_argument("--reason", default="")
 
     amend = sub.add_parser("amend")
     amend.add_argument("project_root")
@@ -594,6 +596,7 @@ def main() -> None:
         result = record_review.record_review(
             root, args.spec_name, args.conclusion, args.basis,
             args.evidence, args.reviewer,
+            role=args.role, reason=args.reason,
         )
         if result is None:
             raise SystemExit(1)

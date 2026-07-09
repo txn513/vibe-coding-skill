@@ -18,7 +18,14 @@ def record_review(
     basis: str,
     evidence: str,
     reviewer: str,
+    role: str = "",
+    reason: str = "",
 ) -> str | None:
+    """role/reason 是 2026-07-10 #4 review-decision-identity 配套参数.
+
+    默认空字符串 (= role 视为 'reviewer'), reviewer == builder 时 WARN.
+    role='override_approver' 必须 reason 非空, 否则 raise.
+    """
     spec_name = validate_artifact_name(spec_name, "规格名称")
     if conclusion not in CONCLUSIONS:
         raise ValueError(f"无效审查结论: {conclusion}")
@@ -74,6 +81,17 @@ def record_review(
             "  \u00b7 \u4ee3\u7801\u7247\u6bb5\uff08\u53cd\u5f15\u53f7\u5305\u4f4f identifier\uff09\n"
             f"  \u5f53\u524d\u4f9d\u636e: '{basis}'"
         )
+
+    # 2026-07-10 #4 review-decision-identity: review-decision 检查
+    # reviewer vs builder, 与 advance released --role override_approver 机制对齐。
+    # 默认 WARN, 不阻塞; 仅当 role == override_approver 时合法 (要求非空 reason)。
+    identity_warn = _check_reviewer_identity(
+        project_root, spec_name, reviewer,
+        id_role=role, id_reason=reason,
+    )
+    if identity_warn:
+        print(identity_warn)
+        print("<!-- vibe:review_identity_advisory: surfaced -->")
 
     review_file = _latest_pending_review(project_root, spec_name)
     if not review_file:
@@ -142,6 +160,58 @@ def _latest_pending_review(project_root: str, spec_name: str) -> str | None:
     return sorted(matches)[-1] if matches else None
 
 
+
+def _check_reviewer_identity(
+    project_root: str,
+    spec_name: str,
+    reviewer: str,
+    id_role: str,
+    id_reason: str,
+) -> str:
+    """2026-07-10 advisory #4: review-decision 检查 reviewer != builder.
+
+    motive: Rule 5 约束 reviewer != builder, 但 review-decision 命令
+    没有 enforce。advance released 已经有 --role override_approver 机制,
+    review-decision 应该对齐 — 默认让 agent 走普通 reviewer 路径,
+    reviewer == builder 时 WARN。如果 agent 显式 role=override_approver
+    且 reason 非空, 视为合法, 不发 WARN。
+
+    Returns: warning string (caller prints) or empty string.
+    """
+    role_norm = (id_role or "").strip().lower() or "reviewer"
+    if role_norm == "override_approver":
+        if not id_reason.strip():
+            raise ValueError(
+                "Rule 5: role=override_approver 必须 --reason 非空 (audit trail). "
+                "参考 advance released --role override_approver 机制。"
+            )
+        return ""
+    # 普通 reviewer 路径: 抓 spec 的 builder
+    spec_file = os.path.join(
+        project_root, ".agents", "specs", f"{spec_name}.md"
+    )
+    builder = ""
+    if os.path.isfile(spec_file):
+        try:
+            with open(spec_file, encoding="utf-8") as handle:
+                spec_content = handle.read()
+            m = re.search(r"^>\s*(?:\u5efa\u9020\u8005|Builder):\s*(.+?)\s*$", spec_content, re.MULTILINE)
+            if m:
+                builder = m.group(1).strip()
+        except OSError:
+            builder = ""
+    reviewer_norm = reviewer.strip().lower()
+    if builder and reviewer_norm and reviewer_norm == builder.lower():
+        return (
+            f"\u26a0\ufe0f  reviewer 与 builder 同身份 ({builder}), 可能违反 Rule 5 "
+            "(reviewer != builder)。如确实单人项目 / 演示, 改用:\n"
+            "  vibe review-decision . <spec> ... --reviewer <name> \\\n"
+            "    --role override_approver --reason '<why>'\n"
+            "参考 advance released 的等价机制。"
+        )
+    return ""
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Record a structured review decision")
     parser.add_argument("project_root")
@@ -150,6 +220,8 @@ if __name__ == "__main__":
     parser.add_argument("basis")
     parser.add_argument("evidence")
     parser.add_argument("--reviewer", required=True)
+    parser.add_argument("--role", default="")
+    parser.add_argument("--reason", default="")
     args = parser.parse_args()
     record_review(
         os.path.abspath(args.project_root),
@@ -158,4 +230,6 @@ if __name__ == "__main__":
         args.basis,
         args.evidence,
         args.reviewer,
+        role=args.role,
+        reason=args.reason,
     )

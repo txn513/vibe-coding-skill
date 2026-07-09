@@ -9826,3 +9826,101 @@ class CommitPathsLogicalUnitAdvisoryTests(unittest.TestCase):
         from commit import _audit_paths_logical_unit
         paths = ["backend/a.py", "frontend/b.js", "tests/test_x.py"]
         self.assertEqual(_audit_paths_logical_unit(paths), [])
+
+
+class ReviewDecisionIdentityAdvisoryTests(unittest.TestCase):
+    """Cover 2026-07-10 advisory #4: review-decision-identity.
+
+    Review-decision should align with advance released's
+    --role override_approver mechanism. Default role=reviewer flags
+    reviewer==builder with a WARN. role=override_approver requires
+    --reason non-empty (otherwise raise). Advisory only when role is
+    the default reviewer path.
+    """
+
+    def _setup_spec(self, project_root, spec_name, builder_value):
+        import os
+        spec_dir = os.path.join(project_root, ".agents", "specs")
+        os.makedirs(spec_dir, exist_ok=True)
+        path = os.path.join(spec_dir, f"{spec_name}.md")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(
+                f"# {spec_name}\n\n> Status: in-progress\n"
+                f"> 建造者: {builder_value}\n\n## Intent\nplaceholder.\n"
+            )
+
+    def test_default_role_no_builder_no_warning(self) -> None:
+        """If spec has no Builder field, advisory does not block."""
+        import os
+        import tempfile
+        from record_review import _check_reviewer_identity
+
+        with tempfile.TemporaryDirectory() as tmp:
+            self._setup_spec(tmp, "x", "")
+            warn = _check_reviewer_identity(tmp, "x", "lance", "", "")
+            self.assertEqual(warn, "")
+
+    def test_default_role_reviewer_differs_no_warning(self) -> None:
+        """Reviewer ≠ Builder → clean path."""
+        import os
+        import tempfile
+        from record_review import _check_reviewer_identity
+
+        with tempfile.TemporaryDirectory() as tmp:
+            self._setup_spec(tmp, "x", "alice")
+            warn = _check_reviewer_identity(tmp, "x", "bob", "", "")
+            self.assertEqual(warn, "")
+
+    def test_default_role_same_identity_warns(self) -> None:
+        """Default role + reviewer == builder → WARN + remediation hint."""
+        import os
+        import tempfile
+        from record_review import _check_reviewer_identity
+
+        with tempfile.TemporaryDirectory() as tmp:
+            self._setup_spec(tmp, "x", "lance")
+            warn = _check_reviewer_identity(tmp, "x", "lance", "", "")
+        self.assertIn("reviewer 与 builder 同身份", warn)
+        self.assertIn("override_approver", warn)
+        self.assertIn("Rule 5", warn)
+
+    def test_override_approver_with_reason_passes(self) -> None:
+        """role=override_approver + non-empty reason → no warning."""
+        import os
+        import tempfile
+        from record_review import _check_reviewer_identity
+
+        with tempfile.TemporaryDirectory() as tmp:
+            self._setup_spec(tmp, "x", "lance")
+            warn = _check_reviewer_identity(
+                tmp, "x", "lance", "override_approver",
+                "single-actor demo, no second identity available",
+            )
+            self.assertEqual(warn, "")
+
+    def test_override_approver_without_reason_raises(self) -> None:
+        """role=override_approver + empty reason → ValueError (audit trail)."""
+        import os
+        import tempfile
+        from record_review import _check_reviewer_identity
+
+        with tempfile.TemporaryDirectory() as tmp:
+            self._setup_spec(tmp, "x", "lance")
+            with self.assertRaises(ValueError) as ctx:
+                _check_reviewer_identity(
+                    tmp, "x", "lance", "override_approver", ""
+                )
+        self.assertIn("reason", str(ctx.exception).lower())
+
+    def test_vibe_cli_review_decision_help_lists_role_and_reason(self) -> None:
+        """vibe review-decision --help should list --role and --reason options."""
+        import subprocess
+        result = subprocess.run(
+            ["python3", "scripts/vibe.py", "review-decision", "--help"],
+            capture_output=True, text=True, cwd=".",
+            timeout=15,
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+        self.assertIn("--role", result.stdout)
+        self.assertIn("--reason", result.stdout)
+
