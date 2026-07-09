@@ -46,6 +46,8 @@ import self_prune
 import self_analyze
 import self_upgrade
 import set_status
+from workflow_state import ensure_workflow, risk_profile
+import advance_checklist
 import spec_amend
 import retrospective
 import spec_scorer
@@ -8626,3 +8628,122 @@ class EvidenceDescriptionMultiWordTests(unittest.TestCase):
         self.assertIn("ran the full pytest suite", evidence)
         # Command-Digests must reflect only the `true` argv, not the description
         self.assertIn("Command-Digests: 8894cdad26ef749f", evidence)  # command_digest(["true"])
+
+
+class AdvanceChecklistTests(unittest.TestCase):
+    """Cover the soft action checklist printed before `vibe advance`.
+
+    The checklist is advisory only — it surfaces missing evidence,
+    reviewer-separation warnings for high-risk specs, dirty worktree,
+    and stale plan digest. None of these gate the advance, but each
+    is a common reason an agent retries an advance 2-3 times before
+    noticing the real blocker.
+    """
+
+    def setUp(self) -> None:
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.project = Path(self.tempdir.name)
+        init_project.init_project(str(self.project), "web")
+        # Default to in-progress so most tests have a real transition context.
+        self._write_spec("in-progress")
+
+    def _write_spec(self, status: str = "in-progress", risk: str = "medium") -> None:
+        # spec_metadata parses `> 风险:` only when it starts the line, so
+        # place 风险 on its own line in addition to the bundled header.
+        content = VALID_SPEC.format(status=status)
+        if f"风险: {risk}" not in content:
+            # add a standalone `> 风险: <risk>` line right after the header
+            content = content.replace(
+                "\n## 意图", f"\n> 风险: {risk}\n\n## 意图", 1,
+            )
+        (self.project / ".agents" / "specs" / "demo.md").write_text(content, encoding="utf-8")
+
+    def tearDown(self) -> None:
+        self.tempdir.cleanup()
+
+    def _load(self) -> tuple[str, dict, dict]:
+        spec_content = (self.project / ".agents" / "specs" / "demo.md").read_text(encoding="utf-8")
+        workflow, _ = ensure_workflow(str(self.project))
+        profile = risk_profile(str(self.project), spec_content)
+        return spec_content, profile, workflow
+
+    def _hint(self, target: str, actor: str = "", role: str = "", current: str = "in-progress") -> str:
+        spec_content, profile, workflow = self._load()
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            advance_checklist.print_advance_checklist(
+                str(self.project), "demo", spec_content, current, target,
+                profile, workflow, actor, role,
+            )
+        return buf.getvalue()
+
+    def test_release_evidence_missing_hint(self) -> None:
+        """No release evidence → checklist surfaces it before done advance."""
+        out = self._hint("done")
+        self.assertIn("release 证据", out)
+        self.assertIn("<!-- vibe:advance_checklist:", out)
+
+    def test_verify_evidence_missing_hint(self) -> None:
+        """No verify evidence → checklist surfaces it."""
+        out = self._hint("review")
+        self.assertIn("verify 证据", out)
+
+    def test_no_hints_when_all_evidence_present(self) -> None:
+        """With verify+release evidence AND valid plan, checklist is empty."""
+        from common import spec_digest, project_context_digest
+        spec_content = (self.project / ".agents" / "specs" / "demo.md").read_text(encoding="utf-8")
+        ev_dir = self.project / ".agents" / "evidence" / "demo"
+        ev_dir.mkdir(parents=True, exist_ok=True)
+        (ev_dir / "verify.md").write_text(
+            "# demo — verify\n\n> 规格摘要: 0 | 上下文摘要: 0 | 结果: passed\n",
+            encoding="utf-8",
+        )
+        (ev_dir / "release.md").write_text(
+            "# demo — release\n\n> 规格摘要: 0 | 上下文摘要: 0 | 结果: passed\n",
+            encoding="utf-8",
+        )
+        # Valid plan with current digest
+        plans_dir = self.project / ".agents" / "plans"
+        plans_dir.mkdir(parents=True, exist_ok=True)
+        (plans_dir / "demo.md").write_text(
+            f"# demo plan\n\n> 规格摘要: {spec_digest(spec_content)} | 上下文摘要: {project_context_digest(str(self.project))}\n",
+            encoding="utf-8",
+        )
+        out = self._hint("done")
+        self.assertNotIn("证据缺失", out)
+        self.assertNotIn("<!-- vibe:advance_checklist:", out)
+
+    def test_reviewer_separation_for_high_risk(self) -> None:
+        """High-risk + advance-to-review with actor==builder → separation hint."""
+        wf_path = self.project / ".agents" / "workflow.json"
+        wf = json.loads(wf_path.read_text(encoding="utf-8"))
+        wf["risk_profiles"]["high"]["require_role_separation"] = True
+        wf["review_separation"]["required_for"] = ["high"]
+        wf["roles"]["builder"] = "session-builder"
+        wf_path.write_text(json.dumps(wf), encoding="utf-8")
+
+        self._write_spec("in-progress", "high")
+
+        out = self._hint("review", actor="session-builder", role="builder")
+        self.assertIn("独立 reviewer", out)
+        self.assertIn("session-builder", out)
+
+    def test_no_reviewer_hint_for_medium_risk(self) -> None:
+        """Medium-risk should NOT fire reviewer-separation hint."""
+        out = self._hint("review", actor="session-builder", role="builder")
+        self.assertNotIn("独立 reviewer", out)
+
+    def test_stale_plan_digest_hint(self) -> None:
+        """In-progress spec with no plan file → plan digest hint."""
+        out = self._hint("review")
+        # spec is in-progress with no plan → expect plan digest hint
+        self.assertIn("实施计划", out)
+        self.assertIn(".agents/plans/demo.md", out)
+
+    def test_empty_checklist_for_draft_advance(self) -> None:
+        """Draft → spec-ready with no evidence needed yet → no hints at all."""
+        self._write_spec("draft", "medium")
+        out = self._hint("spec-ready", current="draft")
+        # require_verify=False for draft transition (it's not relevant yet)
+        self.assertNotIn("证据缺失", out)
+        self.assertNotIn("<!-- vibe:advance_checklist:", out)

@@ -207,6 +207,8 @@ def main() -> None:
                         help="released 推进时不自动生成 changelog")
     advance.add_argument("--changelog-version", default="",
                         help="released 推进时使用的 changelog 版本号（默认按时间戳）")
+    advance.add_argument("--no-checklist", action="store_true",
+                        help="跳过 advance 前的 advisory action checklist")
 
     archive_stale = sub.add_parser("archive-stale")
     archive_stale.add_argument("project_root")
@@ -486,6 +488,7 @@ def main() -> None:
             args.actor, args.role,
             auto_changelog=not args.skip_changelog,
             changelog_version=args.changelog_version,
+            no_checklist=args.no_checklist,
         )
         if result is None:
             raise SystemExit(1)

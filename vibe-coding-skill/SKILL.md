@@ -233,7 +233,14 @@ artifacts merely because a template exists.
     CLI prints a compact next-action hint summarising the spec's risk profile
     and remaining gates (review / release / observe). The hint is read-only
     guidance, never an implicit advance — review and observation gates must
-    still be triggered explicitly.
+    still be triggered explicitly. Before `vibe advance` runs the hard gate
+    for the target status, the CLI prints a soft action checklist
+    (missing evidence, high-risk reviewer-separation, dirty worktree, stale
+    plan digest) and emits a `<!-- vibe:advance_checklist: ... -->` marker.
+    The checklist is advisory only — the hard gate is the source of truth.
+    Use `vibe advance --no-checklist` to suppress the checklist for
+    emergencies; this is the same escape-hatch family as `--no-verify` and
+    `--quick`.
 23. **One active writer per spec**: Use one active writer per spec.
     Parallelize through separate specs or worktrees instead of adding
     distributed locking to this Skill.

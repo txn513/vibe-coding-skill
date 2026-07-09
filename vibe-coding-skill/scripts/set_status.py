@@ -26,6 +26,7 @@ from common import (
 )
 from policy_sources import unresolved_conflicts
 import generate_changelog
+import advance_checklist
 from workflow_state import (
     configured_commands,
     dependency_cycles,
@@ -63,6 +64,7 @@ def set_status(
     auto_changelog: bool = True,
     changelog_version: str = "",
     allow_dirty: bool = False,
+    no_checklist: bool = False,
 ) -> str | None:
     spec_name = validate_artifact_name(spec_name, "规格名称")
     spec_file = os.path.join(project_root, ".agents", "specs", f"{spec_name}.md")
@@ -98,6 +100,15 @@ def set_status(
     if new_status == current_status:
         print(f"⚠️  状态未变: {spec_name} 已经是 {current_status}")
         return current_status
+
+    # Pre-advance action checklist (advisory). Surfaces missing evidence,
+    # high-risk reviewer-separation, dirty worktree, and stale plan digest
+    # before the agent runs into a hard gate failure.
+    if not no_checklist:
+        advance_checklist.print_advance_checklist(
+            project_root, spec_name, content, current_status, new_status,
+            profile, workflow, actor, role,
+        )
 
     if force and not (force_reason or "").strip():
         print("❌ 使用 --force 时必须通过 --reason 记录绕过原因")
