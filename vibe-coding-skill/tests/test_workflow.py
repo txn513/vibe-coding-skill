@@ -9196,3 +9196,134 @@ class UncommittedFilesClassificationTests(unittest.TestCase):
         # And NO generic "未提交改动 (Rule 54: 应提交)" line — that bucket
         # should be empty when only draft specs are dirty.
         self.assertNotIn("Rule 54: 应提交", out)
+
+
+class StalePlanClassificationTests(unittest.TestCase):
+    """Cover rule54-spec-vs-code 候选 extension — `_classify_stale_plans`
+    detects `.agents/plans/*.md` files whose recorded spec digest no
+    longer matches the current spec file. Stale plans are a separate
+    advisory bucket from draft specs:
+
+    - draft spec = spec content has not passed validate_spec yet
+    - stale plan = plan was generated against an older version of the
+      spec and may not reflect the current implementation plan
+
+    The stale-plan hint surfaces AFTER the uncommitted-work hint, with
+    its own marker. `_apply_commit_prereq` does NOT block on stale
+    plans (plans are reference documents, not source of truth).
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name)
+        subprocess.run(["git", "init"], cwd=str(self.project), capture_output=True)
+        subprocess.run(
+            ["git", "config", "user.email", "t@t"], cwd=str(self.project),
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "T"], cwd=str(self.project),
+            capture_output=True,
+        )
+        (self.project / ".agents").mkdir()
+        (self.project / ".agents/specs").mkdir()
+        (self.project / ".agents/plans").mkdir()
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _write_spec(self, name: str, body: str = "") -> Path:
+        path = self.project / ".agents/specs" / f"{name}.md"
+        # Default content: a minimal spec that yields a stable digest
+        # for the given body. The spec_digest() implementation reads
+        # the file as-is, so two specs with the same body produce the
+        # same digest.
+        content = (
+            f"# {name}\n\n"
+            f"> 状态: spec-ready\n\n"
+            f"## 意图\n\n{body or 'body'}\n"
+        )
+        path.write_text(content, encoding="utf-8")
+        return path
+
+    def _write_plan(self, name: str, spec_digest: str) -> Path:
+        path = self.project / ".agents/plans" / f"{name}.md"
+        content = (
+            f"# {name} — 实施计划\n\n"
+            f"> 基于规格: .agents/specs/{name}.md | "
+            f"规格摘要: {spec_digest} | 上下文摘要: deadbeef\n\n"
+            f"## 任务\n\n- [ ] task 1\n"
+        )
+        path.write_text(content, encoding="utf-8")
+        return path
+
+    def test_fresh_plan_not_stale(self) -> None:
+        """A plan whose recorded digest matches the spec is fresh."""
+        self._write_spec("fix-x", body="body-v1")
+        from common import spec_digest
+        spec_full = self.project / ".agents/specs/fix-x.md"
+        with open(spec_full, encoding="utf-8") as f:
+            digest = spec_digest(f.read())
+        self._write_plan("fix-x", spec_digest=digest)
+        from project_status import _classify_stale_plans
+        stale = _classify_stale_plans(str(self.project))
+        self.assertEqual(stale, [])
+
+    def test_stale_plan_detected_when_spec_changes(self) -> None:
+        """A plan whose recorded digest no longer matches the spec is
+        flagged as stale. Real-world cause: agent modified the spec
+        after plan generation and forgot to re-run `vibe plan`."""
+        self._write_spec("fix-y", body="body-v1")
+        from common import spec_digest
+        spec_full = self.project / ".agents/specs/fix-y.md"
+        with open(spec_full, encoding="utf-8") as f:
+            old_digest = spec_digest(f.read())
+        # Write plan with the OLD digest (simulating plan generated
+        # before spec change).
+        self._write_plan("fix-y", spec_digest=old_digest)
+        # Now mutate the spec — digest changes, plan is stale.
+        spec_full.write_text(
+            "# fix-y\n\n> 状态: spec-ready\n\n## 意图\n\nbody-v2\n",
+            encoding="utf-8",
+        )
+        from project_status import _classify_stale_plans
+        stale = _classify_stale_plans(str(self.project))
+        self.assertEqual(stale, [".agents/plans/fix-y.md"])
+
+    def test_missing_spec_skips_check(self) -> None:
+        """If the plan references a spec file that no longer exists,
+        skip the staleness check (don't crash, don't false-positive)."""
+        # No spec file written, but plan references one
+        self._write_plan("ghost", spec_digest="deadbeef")
+        from project_status import _classify_stale_plans
+        stale = _classify_stale_plans(str(self.project))
+        self.assertEqual(stale, [])
+
+    def test_uncommitted_hint_surfaces_stale_plan_message(self) -> None:
+        """The uncommitted-work hint emits the stale-plan-tailored
+        message and marker when any plan file is stale."""
+        import io
+        import contextlib
+        from project_status import _print_uncommitted_work_hint
+        # Set up stale plan: spec at v2 digest, plan at v1 digest.
+        spec_path = self._write_spec("fix-z", body="body-v1")
+        from common import spec_digest
+        with open(spec_path, encoding="utf-8") as f:
+            old_digest = spec_digest(f.read())
+        self._write_plan("fix-z", spec_digest=old_digest)
+        spec_path.write_text(
+            "# fix-z\n\n> 状态: spec-ready\n\n## 意图\n\nbody-v2\n",
+            encoding="utf-8",
+        )
+        # Make sure there are no other uncommitted files (we only care
+        # about the stale-plan hint, which surfaces regardless of git
+        # status because the check reads plan files directly).
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            _print_uncommitted_work_hint(str(self.project))
+        out = buf.getvalue()
+        # Stale-plan hint phrasing
+        self.assertIn("stale", out.lower())  # "stale plan" / "stale" appears
+        self.assertIn("<!-- vibe:stale_plans:", out)
+        # And the advisory mentions the plan file
+        self.assertIn(".agents/plans/fix-z.md", out)
