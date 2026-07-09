@@ -254,6 +254,7 @@ def doctor(project_root: str) -> dict:
     _audit_policy_sources(Path(project_root), issues, warnings)
     _audit_context_freshness(Path(project_root), warnings)
     _audit_retro_gap_candidates(project_root, warnings)
+    _audit_evidence_commit_freshness(project_root, warnings)
     # Rule 56: accumulate adjacent-location protection stats across specs
     adjacent_stats = {"total": 0, "protected": 0, "skipped": 0}
 
@@ -681,6 +682,95 @@ def _audit_retro_gap_candidates(project_root, warnings):
         warnings.append(
             f"retro gap 候选 {total} 个未确认（新 verify evidence 写入时会逐条提示）"
         )
+
+
+def _audit_evidence_commit_freshness(project_root: str, warnings: list[str]) -> None:
+    """2026-07-10 advisory #1: evidence 记录时的 HEAD 与当前 HEAD 不一致时 WARN.
+
+    motive: Spec record 的 evidence frontmatter 会烧入 `Commit: <hash>`,
+    代表 record 这一刻的工作区状态。如果之后又有 commit 推过了该 hash,
+    evidence 描述的代码状态可能已经飘移 — 典型场景是用户在 record evidence
+    后没立即 commit (dirty + new commit),或者误把 dirty + 旧 commit 当成
+    "已验证" 的状态。
+
+    判断与实现边界:
+    - 仅 advisory, 不阻塞. 允许"先 record 验证, 再补 commit"的合法工作流.
+    - 仅警告 stale: "evidence 的 Commit 仍存在, 但有 ≥1 个 commit 在它前面".
+    - 不再警告"Commit 已不存在 / amend 后被丢掉" — 那类场景无法静态判断.
+    """
+    import re
+    import subprocess
+
+    evidence_root = os.path.join(project_root, ".agents", "evidence")
+    if not os.path.isdir(evidence_root):
+        return
+    # 快速判断当前 repo 的 HEAD 与 evidence 是否同根.
+    try:
+        head = subprocess.run(
+            ["git", "-C", project_root, "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if head.returncode != 0:
+            return
+        current_head = head.stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        return
+
+    stale = []
+    commit_re = re.compile(r"^>\s*Commit:\s*([0-9a-f]{7,40})\b", re.MULTILINE)
+    for spec_dir in sorted(os.listdir(evidence_root)):
+        spec_path = os.path.join(evidence_root, spec_dir)
+        if not os.path.isdir(spec_path):
+            continue
+        for fname in sorted(os.listdir(spec_path)):
+            if not fname.endswith(".md"):
+                continue
+            fpath = os.path.join(spec_path, fname)
+            try:
+                with open(fpath, encoding="utf-8") as handle:
+                    content = handle.read()
+            except OSError:
+                continue
+            m = commit_re.search(content)
+            if not m:
+                continue
+            recorded = m.group(1)
+            if recorded == current_head:
+                continue
+            # recorded 仍然存在?
+            try:
+                exists = subprocess.run(
+                    ["git", "-C", project_root, "cat-file", "-t", recorded],
+                    capture_output=True, text=True, timeout=3,
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                continue
+            if exists.returncode != 0:
+                continue
+            # 落后 N 个 commit?
+            try:
+                behind = subprocess.run(
+                    [
+                        "git", "-C", project_root, "rev-list", "--count",
+                        f"{recorded}..{current_head}",
+                    ],
+                    capture_output=True, text=True, timeout=3,
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                continue
+            if behind.returncode == 0 and behind.stdout.strip().isdigit():
+                n = int(behind.stdout.strip())
+                if n > 0:
+                    stale.append((spec_dir, fname, recorded, n))
+    if stale:
+        sample = ", ".join(f"{s}/{f} (-{n})" for s, f, _, n in stale[:3])
+        more = f" (+{len(stale)-3} more)" if len(stale) > 3 else ""
+        warnings.append(
+            f"evidence 记录时 HEAD 已过期 {len(stale)} 份 (advisory #1 worktree-clean): "
+            f"{sample}{more}. evidence 描述的状态可能已不反映当前代码。"
+            "重跑 verify 或在 commit message 引用 evidence 文件路径补 commit。"
+        )
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Audit project workflow integrity")
