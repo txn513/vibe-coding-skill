@@ -352,6 +352,18 @@ def commit(
     # This is the lowest-cost, highest-value enhancement — it
     # doesn't block the commit, just highlights risk areas.
     _print_evidence_grep(project_root, full_diff)
+    # Rule 64 advisory runs at diff_shown so the agent sees the
+    # anti-pattern alongside the diff. Position rationale: if the
+    # advisory only fires after the review gate, the agent is already
+    # writing --review-summary and has nothing concrete to cite.
+    # Surfacing it here lets the agent either (a) write the
+    # anti-pattern into the review-summary as an observation, or
+    # (b) fix the code and re-stage before --reviewed.
+    if not no_async_gate:
+        hints = code_pattern_gate.scan_changed_python_files(
+            project_root, diff_text=full_diff,
+        )
+        code_pattern_gate.print_code_pattern_hints(hints, suppress=no_async_gate)
     print("<!-- vibe:commit_review: diff_shown -->")
     # Step 2 enforcement: --reviewed must come after a prior step 1
     # (vibe commit without --reviewed) that wrote the marker.
@@ -534,19 +546,10 @@ def commit(
             print(f"     ... 还有 {len(untracked) - 10} 个")
     print()
 
-    # 1b. Rule 64 advisory — asyncio.create_task + shared AsyncSession commit.
-    # Advisory only; the hard gate below is still the source of truth.
-    # Reads the same diff that the user is about to commit, so it costs
-    # nothing extra to run, and gives the agent a chance to fix the
-    # pattern before the race crashes a different spec.
-    if not no_async_gate:
-        diff_for_scan = _git_diff_full(project_root)
-        hints = code_pattern_gate.scan_changed_python_files(
-            project_root, diff_text=diff_for_scan,
-        )
-        code_pattern_gate.print_code_pattern_hints(hints, suppress=no_async_gate)
-
     # 2. Verify — select verify tier based on flags and config.
+    # Note: Rule 64 advisory already ran above at diff_shown, so the
+    # agent has had a chance to fix or acknowledge the anti-pattern
+    # before this point. We do not re-run the scan here.
     #
     # Three tiers (fastest → slowest):
     #   verify_scope  — fast, scoped to changed files. Ideal for
