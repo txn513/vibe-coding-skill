@@ -48,7 +48,40 @@ REVIEW_SUMMARY_TEMPLATE = """--review-summary 模板 (per-file + 行号 + 业务
   test_x.py: L100-L120 新增 fixture, 不影响旧测试
 
 接受的行号信号: L25 / line 25 / :25 / `code_fragment`
-无行号 → exit 9 (硬门禁, --quick 或 --no-verify 可绕过)"""
+无行号 → exit 9 (硬门禁, --quick 或 --no-verify 可绕过)
+
+例外: .agents/evidence/ / .agents/plans/ / .agents/reviews/ /
+      .agents/changelogs/ / .agents/activity.md 等 vibe 自动生成
+      文件不需要行号引用 (Rule 55 排除自动生成文件, 2026-07-10)。"""
+
+
+
+# Path prefixes / exact paths for files that vibe generates automatically
+# and that do NOT require line-ref citations in review-summary. The line-ref
+# gate exists to prevent agents from rubber-stamping their own code without
+# reading the diff; auto-generated files are written by scripts and have no
+# human-readable "lines" worth citing. Forcing line refs on them is
+# form-pass overhead that does not improve review quality.
+#
+# Whitelist is intentionally explicit (not glob) so an agent cannot bypass
+# the gate by renaming an auto-generated file with an off-list prefix.
+AUTO_GENERATED_PATH_PREFIXES = (
+    ".agents/evidence/",
+    ".agents/plans/",
+    ".agents/reviews/",
+    ".agents/changelogs/",
+)
+AUTO_GENERATED_PATH_EXACT = {
+    ".agents/activity.md",
+}
+
+
+def _is_auto_generated_path(filepath: str) -> bool:
+    """True if filepath is a vibe-managed artifact that does not need
+    a line-ref citation in review-summary."""
+    if filepath in AUTO_GENERATED_PATH_EXACT:
+        return True
+    return any(filepath.startswith(p) for p in AUTO_GENERATED_PATH_PREFIXES)
 
 
 def _review_marker_path(project_root: str) -> str:
@@ -495,8 +528,16 @@ def commit(
             # file gate 已经处理过了; 这里只关心有结论描述的部分。
             if ":" not in part:
                 continue
-            # 提取 ":" 后面的结论文字
-            _, _, conclusion = part.partition(":")
+            # 提取 filepath 和 ":" 后面的结论文字
+            filepath, _, conclusion = part.partition(":")
+            filepath = filepath.strip()
+            # Rule 55 exclusion (2026-07-10): vibe 自动生成文件
+            # (evidence/plans/reviews/changelogs/activity.md) 没有"行号"
+            # 概念, 跳过 line-ref 检查。这些文件由 vibe scripts 写入,
+            # agent 不需要"审查行号", 写结论就行 (eg "重新生成 plan,
+            # digest 已更新")。missing_file gate 仍然要求每个文件被提到。
+            if _is_auto_generated_path(filepath):
+                continue
             if not line_ref_pattern.search(conclusion):
                 no_line_ref_parts.append(part)
         if no_line_ref_parts:
