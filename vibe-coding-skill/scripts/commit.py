@@ -213,17 +213,34 @@ def _git_diff_full(project_root: str) -> str:
     return out.rstrip() or "(no tracked changes)"
 
 
-def _git_diff_stat(project_root: str) -> str:
+def _git_diff_stat(project_root: str, staged_only: bool = False) -> str:
     """Return `git diff --stat` summary for quick overview.
 
-    Shown alongside the full diff so the Agent gets both the
-    summary and the details.
+    staged_only=True returns `git diff --stat --cached` — the
+    commit-scoped view, what would actually land in the next
+    commit. Used by the R53 missing_file_review gate so the
+    review-summary only has to mention files in THIS commit, not
+    every dirty file in the working tree (otherwise
+    "vibe commit --paths" / "--staged" granularity flow breaks:
+    the gate would force the agent to list untracked dirty
+    files that are NOT part of this commit).
+
+    staged_only=False returns `git diff --stat HEAD` — the
+    working-tree-wide view, useful as a "what's dirty" overview
+    before the commit lands.
     """
-    rc, out, err = _run(
-        ["git", "diff", "--stat", "HEAD"], project_root
-    )
-    if rc != 0:
-        rc, out, err = _run(["git", "diff", "--stat"], project_root)
+    if staged_only:
+        rc, out, err = _run(
+            ["git", "diff", "--stat", "--cached"], project_root
+        )
+        if rc != 0:
+            rc, out, err = _run(["git", "diff", "--stat"], project_root)
+    else:
+        rc, out, err = _run(
+            ["git", "diff", "--stat", "HEAD"], project_root
+        )
+        if rc != 0:
+            rc, out, err = _run(["git", "diff", "--stat"], project_root)
     if rc != 0:
         return f"(git diff failed: {err.strip()})"
     return out.rstrip() or "(no tracked changes)"
@@ -435,7 +452,7 @@ def commit(
         # like "confirmed no issues" without actually reading each
         # file diff. This is the most common failure mode observed
         # across multiple projects.
-        stat_text = _git_diff_stat(project_root)
+        stat_text = _git_diff_stat(project_root, staged_only=True)
         if stat_text and stat_text != "(no tracked changes)":
             changed_files = _extract_changed_files_from_stat(stat_text)
             missing_files = []

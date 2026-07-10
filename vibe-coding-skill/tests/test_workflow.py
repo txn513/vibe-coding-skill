@@ -9924,3 +9924,93 @@ class ReviewDecisionIdentityAdvisoryTests(unittest.TestCase):
         self.assertIn("--role", result.stdout)
         self.assertIn("--reason", result.stdout)
 
+
+
+class CommitStatScopeTests(unittest.TestCase):
+    """Cover 2026-07-10 R53 fix: _git_diff_stat should accept staged_only
+    so the missing_file_review gate runs against the commit-scoped diff
+    (--cached), not the working-tree-wide diff (HEAD). Without this,
+    `vibe commit --paths` / `--staged` granularity is broken: the gate
+    requires review-summary to mention all dirty files, not just the
+    files actually landing in this commit. Bug fix, not new rule.
+    """
+
+    def _setup_repo(self):
+        import os
+        import subprocess
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            subprocess.run(
+                ["git", "init", "-q", "--initial-branch=main"],
+                cwd=tmp, check=True, capture_output=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.email", "t@t"],
+                cwd=tmp, check=True, capture_output=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.name", "t"],
+                cwd=tmp, check=True, capture_output=True,
+            )
+            with open(os.path.join(tmp, "keep.md"), "w") as f:
+                f.write("keep")
+            with open(os.path.join(tmp, "staged.md"), "w") as f:
+                f.write("staged content\n")
+            with open(os.path.join(tmp, "dirty.md"), "w") as f:
+                f.write("dirty content\n")
+            subprocess.run(["git", "add", "keep.md", "staged.md", "dirty.md"],
+                           cwd=tmp, check=True, capture_output=True)
+            subprocess.run(["git", "commit", "-q", "-m", "init"],
+                           cwd=tmp, check=True, capture_output=True)
+            # Modify BOTH staged.md and dirty.md; then `git add` only staged.md
+            with open(os.path.join(tmp, "staged.md"), "w") as f:
+                f.write("staged content v2\n")
+            with open(os.path.join(tmp, "dirty.md"), "w") as f:
+                f.write("dirty content v2\n")
+            subprocess.run(["git", "add", "staged.md"],
+                           cwd=tmp, check=True, capture_output=True)
+            yield tmp
+
+    def test_default_stat_includes_working_tree(self) -> None:
+        """Default _git_diff_stat shows working-tree-wide view."""
+        from commit import _git_diff_stat
+        for tmp in self._setup_repo():
+            stat = _git_diff_stat(tmp, staged_only=False)
+            self.assertIn("dirty.md", stat, f"working-tree-wide must list dirty file; got:\n{stat}")
+            self.assertIn("staged.md", stat)
+
+    def test_staged_only_stat_excludes_dirty(self) -> None:
+        """staged_only=True shows only the commit-scoped diff (--cached)."""
+        from commit import _git_diff_stat
+        for tmp in self._setup_repo():
+            stat = _git_diff_stat(tmp, staged_only=True)
+            self.assertIn("staged.md", stat, f"staged file must appear; got:\n{stat}")
+            self.assertNotIn("dirty.md", stat, f"dirty (unstaged) file must NOT appear; got:\n{stat}")
+
+    def test_no_tracked_changes_fallback(self) -> None:
+        """When there are no changes at all, return the empty placeholder."""
+        from commit import _git_diff_stat
+        import os
+        import subprocess
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            subprocess.run(
+                ["git", "init", "-q", "--initial-branch=main"],
+                cwd=tmp, check=True, capture_output=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.email", "t@t"],
+                cwd=tmp, check=True, capture_output=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.name", "t"],
+                cwd=tmp, check=True, capture_output=True,
+            )
+            with open(os.path.join(tmp, "f.md"), "w") as f:
+                f.write("f")
+            subprocess.run(["git", "add", "f.md"], cwd=tmp, check=True, capture_output=True)
+            subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=tmp, check=True, capture_output=True)
+            self.assertEqual(_git_diff_stat(tmp, staged_only=False), "(no tracked changes)")
+            self.assertEqual(_git_diff_stat(tmp, staged_only=True), "(no tracked changes)")
