@@ -797,6 +797,105 @@ def _audit_paths_logical_unit(paths):
     return warnings
 
 
+def _extract_commit_message(commit_argv: list[str]) -> str:
+    """Extract commit message from git commit argv.
+
+    Handles `-m "msg"`, `-m"msg"`, `--message=msg`, `--message msg`.
+    Returns empty string if no message flag found (agent will be prompted
+    by git itself for an editor-based message — drift advisory silently
+    skips in that case).
+    """
+    msg_parts: list[str] = []
+    i = 0
+    while i < len(commit_argv):
+        arg = commit_argv[i]
+        if arg in ("-m", "--message") and i + 1 < len(commit_argv):
+            msg_parts.append(commit_argv[i + 1])
+            i += 2
+        elif arg.startswith("-m") and len(arg) > 2:
+            # -m"msg" or -mmsg
+            msg_parts.append(arg[2:])
+            i += 1
+        elif arg.startswith("--message="):
+            msg_parts.append(arg[len("--message="):])
+            i += 1
+        else:
+            i += 1
+    return " ".join(msg_parts)
+
+
+def _check_inbox_drift_advisory(commit_argv: list[str], project_root: str) -> list[str]:
+    """Detect commit message references fix-<name> but inbox row still [ ].
+
+    Returns list of fix names that have unclosed inbox rows. Empty list
+    means no drift (or feature disabled, or no inbox file).
+
+    Rule 65 opt-in: only fires when workflow.json.features.inbox = True.
+    """
+    workflow_path = os.path.join(project_root, ".agents", "workflow.json")
+    if not os.path.exists(workflow_path):
+        return []
+    try:
+        import json as _json
+        with open(workflow_path, encoding="utf-8") as f:
+            workflow = _json.load(f)
+    except (OSError, _json.JSONDecodeError):
+        return []
+    features = (workflow or {}).get("features", {})
+    if not features.get("inbox", False):
+        return []
+
+    message = _extract_commit_message(commit_argv)
+    if not message:
+        return []
+    # Find fix-<name> tokens in the commit message.
+    # Three forms recognised (all map to inbox rows that say "fix-<name>"):
+    #   - explicit: fix-clipboard-catch / fix_clipboard_catch
+    #   - conventional commits: fix(clipboard-catch) / fix[clipboard-catch]
+    #   - conventional commits underscore: fix(clipboard_catch)
+    # The conventional-commits form is reconstructed as "fix-<name>" so it
+    # matches the inbox row format.
+    fix_names: list[str] = []
+    for raw_match in re.finditer(
+        r"fix[-_]([A-Za-z][\w-]+)|fix\(([A-Za-z][\w-]+)\)",
+        message,
+        re.IGNORECASE,
+    ):
+        # Two capture groups: alt-1 captures fix-X / fix_X, alt-2 captures fix(X).
+        captured = raw_match.group(1) or raw_match.group(2)
+        if captured:
+            # Reconstruct canonical fix-<name> form (dash separator).
+            fix_names.append("fix-" + captured.replace("_", "-"))
+        else:
+            # Already in fix-<name> form (alt-2 path that consumed only one char).
+            fix_names.append(raw_match.group(0).replace("_", "-"))
+    if not fix_names:
+        return []
+
+    inbox_path = os.path.join(project_root, ".agents", "bug-inbox.md")
+    if not os.path.exists(inbox_path):
+        return []
+
+    try:
+        with open(inbox_path, encoding="utf-8") as f:
+            inbox_content = f.read()
+    except OSError:
+        return []
+
+    unclosed: list[str] = []
+    for fix_name in fix_names:
+        # Normalize: fix_clipboard_catch → fix-clipboard-catch (matches inbox rows).
+        # Keep both forms to handle agent that mixes separators.
+        candidates = {fix_name, fix_name.replace("_", "-"), fix_name.replace("-", "_")}
+        for cand in candidates:
+            # Find a - [ ] (open) row mentioning this fix name.
+            pattern = r"^-\s*\[\s*\]\s*[^\n]*?" + re.escape(cand) + r"[^\n]*$"
+            if re.search(pattern, inbox_content, re.MULTILINE | re.IGNORECASE):
+                unclosed.append(fix_name)
+                break
+    return unclosed
+
+
 def _print_paths_logical_unit_warnings(paths):
     warnings = _audit_paths_logical_unit(paths)
     if not warnings:

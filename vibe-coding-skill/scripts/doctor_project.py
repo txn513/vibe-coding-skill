@@ -214,6 +214,76 @@ def _audit_raw_git_commits(project_root: str, warnings: list[str]) -> None:
         return
 
 
+def _audit_inbox_drift(project_root: str, warnings: list[str]) -> None:
+    """Detect done spec with open inbox bug (Rule 65, opt-in).
+
+    For each spec in `.agents/specs/` with status `done` or `released`,
+    check if `.agents/bug-inbox.md` contains a `- [ ]` row mentioning
+    that spec name. If yes, append a warning ("spec X done but inbox
+    still has open row").
+
+    Only fires when:
+      - workflow.json.features.inbox = True (opt-in)
+      - .agents/bug-inbox.md exists
+
+    Does not filter by fix-<name> prefix — any done spec with an open
+    inbox row that names it is drift, regardless of naming convention.
+    """
+    workflow_path = os.path.join(project_root, ".agents", "workflow.json")
+    if not os.path.exists(workflow_path):
+        return
+    try:
+        import json as _json
+        with open(workflow_path, encoding="utf-8") as f:
+            workflow = _json.load(f)
+    except (OSError, _json.JSONDecodeError):
+        return
+    features = (workflow or {}).get("features", {})
+    if not features.get("inbox", False):
+        return
+
+    inbox_path = os.path.join(project_root, ".agents", "bug-inbox.md")
+    if not os.path.exists(inbox_path):
+        return
+    try:
+        with open(inbox_path, encoding="utf-8") as f:
+            inbox_content = f.read()
+    except OSError:
+        return
+
+    specs_dir = os.path.join(project_root, ".agents", "specs")
+    if not os.path.exists(specs_dir):
+        return
+
+    # Find open rows mentioning each spec name.
+    # Pattern: ^- [ ] <anything> <spec-name> <anything>$
+    for filename in sorted(os.listdir(specs_dir)):
+        if not filename.endswith(".md") or filename.endswith("-amendments.md"):
+            continue
+        spec_path = os.path.join(specs_dir, filename)
+        try:
+            with open(spec_path, encoding="utf-8") as f:
+                spec_content = f.read()
+        except OSError:
+            continue
+        # Read status (Chinese field; we accept any prefix per project config).
+        status_match = re.search(r">\s*状态:\s*(\S+)", spec_content)
+        if not status_match:
+            continue
+        status = status_match.group(1).strip()
+        if status not in ("done", "released"):
+            continue
+        spec_name = filename[:-3]  # strip ".md"
+        # Open inbox row mentioning this spec name.
+        pattern = r"^-\s*\[\s*\]\s*[^\n]*?" + re.escape(spec_name) + r"[^\n]*$"
+        match = re.search(pattern, inbox_content, re.MULTILINE | re.IGNORECASE)
+        if match:
+            warnings.append(
+                f"inbox drift: {spec_name} ({status}) 有 inbox 行仍 [ ] — "
+                "按 inbox ## 同步规则（强制）段第 2 条同步 ([ ] → [x] + 关闭笔记 + commit-sha)"
+            )
+
+
 def doctor(project_root: str) -> dict:
     workflow, migrated = ensure_workflow(project_root)
     issues = []
@@ -256,6 +326,7 @@ def doctor(project_root: str) -> dict:
     _audit_retro_gap_candidates(project_root, warnings)
     _audit_evidence_commit_freshness(project_root, warnings)
     _audit_reproduction_runtime_present(project_root, warnings)
+    _audit_inbox_drift(project_root, warnings)
     # Rule 56: accumulate adjacent-location protection stats across specs
     adjacent_stats = {"total": 0, "protected": 0, "skipped": 0}
 

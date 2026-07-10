@@ -10317,3 +10317,206 @@ class BugInboxOptInFeatureTests(unittest.TestCase):
             inbox_path = os.path.join(agents_dir, "bug-inbox.md")
             self.assertFalse(os.path.exists(inbox_path),
                              msg="bug-inbox.md must NOT exist when features.inbox=false")
+
+
+class CommitInboxDriftAdvisoryTests(unittest.TestCase):
+    """Cover 2026-07-11 candidate 5 commit-side: inbox drift advisory.
+
+    Rule 65 opt-in: only fires when workflow.json.features.inbox = True.
+    Detects commit message references fix-<name> but inbox row still [ ].
+    """
+
+    def _setup(self, tmp, *, inbox_enabled, inbox_content):
+        """Helper: minimal .agents/{workflow.json, bug-inbox.md} layout."""
+        import json as _json
+        os.makedirs(os.path.join(tmp, ".agents"))
+        wf = {"features": {"inbox": inbox_enabled}}
+        with open(os.path.join(tmp, ".agents", "workflow.json"), "w") as f:
+            _json.dump(wf, f)
+        if inbox_content is not None:
+            with open(os.path.join(tmp, ".agents", "bug-inbox.md"), "w") as f:
+                f.write(inbox_content)
+
+    def test_extract_commit_message_various_forms(self) -> None:
+        """Handles -m, --message, --message=, combined flags."""
+        from commit import _extract_commit_message
+        self.assertEqual(_extract_commit_message(["-m", "fix-a: foo"]), "fix-a: foo")
+        self.assertEqual(_extract_commit_message(["--message=fix-b"]), "fix-b")
+        self.assertEqual(_extract_commit_message(["--message", "fix-c"]), "fix-c")
+        self.assertEqual(_extract_commit_message(["--staged"]), "")
+        self.assertEqual(_extract_commit_message(["-m", "fix-d", "--no-verify"]), "fix-d")
+
+    def test_feature_disabled_no_advisory(self) -> None:
+        """features.inbox = False → function returns empty list (no advisory)."""
+        import tempfile
+        from commit import _check_inbox_drift_advisory
+        with tempfile.TemporaryDirectory() as tmp:
+            self._setup(tmp, inbox_enabled=False,
+                        inbox_content="- [ ] P2: fix-clipboard-catch missing")
+            result = _check_inbox_drift_advisory(["-m", "fix-clipboard-catch"], tmp)
+            self.assertEqual(result, [])
+
+    def test_open_row_match_returns_fix_name(self) -> None:
+        """commit mentions fix-<name>, inbox has matching [ ] row → return name.
+
+        Tests both forms:
+        - fix-clipboard-catch (explicit dash form)
+        - fix(clipboard-catch) (conventional-commits form)
+        """
+        import tempfile
+        from commit import _check_inbox_drift_advisory
+        with tempfile.TemporaryDirectory() as tmp:
+            self._setup(tmp, inbox_enabled=True,
+                        inbox_content="# Inbox\n- [ ] P2: fix-clipboard-catch missing .catch()\n")
+            # Explicit dash form
+            result = _check_inbox_drift_advisory(
+                ["-m", "fix-clipboard-catch writeText"], tmp
+            )
+            self.assertIn("fix-clipboard-catch", result)
+            # Conventional-commits form
+            result2 = _check_inbox_drift_advisory(
+                ["-m", "fix(clipboard-catch): add .catch()"], tmp
+            )
+            self.assertIn("fix-clipboard-catch", result2)
+
+    def test_closed_row_no_advisory(self) -> None:
+        """Inbox row already [x] → no drift, return empty list."""
+        import tempfile
+        from commit import _check_inbox_drift_advisory
+        with tempfile.TemporaryDirectory() as tmp:
+            self._setup(tmp, inbox_enabled=True,
+                        inbox_content="# Inbox\n- [x] P2: fix-clipboard-catch missing\n")
+            result = _check_inbox_drift_advisory(
+                ["-m", "fix(clipboard): add catch"], tmp
+            )
+            self.assertEqual(result, [])
+
+    def test_underscore_separator_variant(self) -> None:
+        """fix_xxx (underscore) in commit message matches fix-xxx (dash) row.
+
+        The function returns the canonical form (fix-<name>) regardless
+        of which separator the commit message used.
+        """
+        import tempfile
+        from commit import _check_inbox_drift_advisory
+        with tempfile.TemporaryDirectory() as tmp:
+            self._setup(tmp, inbox_enabled=True,
+                        inbox_content="# Inbox\n- [ ] P2: fix-clipboard-catch missing\n")
+            result = _check_inbox_drift_advisory(
+                ["-m", "fix_clipboard_catch writeText"], tmp
+            )
+            self.assertIn("fix-clipboard-catch", result)
+
+    def test_no_fix_in_message_no_advisory(self) -> None:
+        """Commit message without fix-<name> → no advisory (regardless of inbox)."""
+        import tempfile
+        from commit import _check_inbox_drift_advisory
+        with tempfile.TemporaryDirectory() as tmp:
+            self._setup(tmp, inbox_enabled=True,
+                        inbox_content="# Inbox\n- [ ] P2: some-bug - app.js:1\n")
+            result = _check_inbox_drift_advisory(["-m", "chore: cleanup"], tmp)
+            self.assertEqual(result, [])
+
+    def test_no_inbox_file_no_advisory(self) -> None:
+        """No .agents/bug-inbox.md → no advisory (feature on but no file)."""
+        import tempfile
+        from commit import _check_inbox_drift_advisory
+        with tempfile.TemporaryDirectory() as tmp:
+            self._setup(tmp, inbox_enabled=True, inbox_content=None)
+            result = _check_inbox_drift_advisory(["-m", "fix-clipboard-catch"], tmp)
+            self.assertEqual(result, [])
+
+
+class DoctorInboxDriftAuditTests(unittest.TestCase):
+    """Cover 2026-07-11 candidate 5 doctor-side: inbox drift warning.
+
+    Detects spec with status=done/released but inbox row still [ ].
+    Only fires when workflow.json.features.inbox = True.
+    """
+
+    def _setup(self, tmp, *, inbox_enabled, inbox_content, specs):
+        """Helper: full .agents/{workflow.json, bug-inbox.md, specs/} layout."""
+        import json as _json
+        os.makedirs(os.path.join(tmp, ".agents", "specs"))
+        wf = {"features": {"inbox": inbox_enabled}}
+        with open(os.path.join(tmp, ".agents", "workflow.json"), "w") as f:
+            _json.dump(wf, f)
+        if inbox_content is not None:
+            with open(os.path.join(tmp, ".agents", "bug-inbox.md"), "w") as f:
+                f.write(inbox_content)
+        for name, content in specs.items():
+            with open(os.path.join(tmp, ".agents", "specs", name + ".md"), "w") as f:
+                f.write(content)
+
+    def test_feature_disabled_no_warning(self) -> None:
+        """features.inbox = False → no warning emitted."""
+        import tempfile
+        from doctor_project import _audit_inbox_drift
+        with tempfile.TemporaryDirectory() as tmp:
+            self._setup(tmp, inbox_enabled=False,
+                        inbox_content="- [ ] P2: fix-clipboard-catch missing",
+                        specs={"fix-clipboard-catch": "# spec\n> 状态: done\n"})
+            warnings: list = []
+            _audit_inbox_drift(tmp, warnings)
+            self.assertEqual(warnings, [])
+
+    def test_done_spec_with_open_row_emits_warning(self) -> None:
+        """Status=done + open inbox row → warning surfaces."""
+        import tempfile
+        from doctor_project import _audit_inbox_drift
+        with tempfile.TemporaryDirectory() as tmp:
+            self._setup(tmp, inbox_enabled=True,
+                        inbox_content="# Inbox\n- [ ] P2: fix-clipboard-catch missing\n",
+                        specs={"fix-clipboard-catch": "# spec\n> 状态: done\n"})
+            warnings: list = []
+            _audit_inbox_drift(tmp, warnings)
+            self.assertEqual(len(warnings), 1)
+            self.assertIn("inbox drift", warnings[0])
+            self.assertIn("fix-clipboard-catch", warnings[0])
+
+    def test_in_progress_spec_no_warning(self) -> None:
+        """Status=in-progress (not done) → no warning."""
+        import tempfile
+        from doctor_project import _audit_inbox_drift
+        with tempfile.TemporaryDirectory() as tmp:
+            self._setup(tmp, inbox_enabled=True,
+                        inbox_content="# Inbox\n- [ ] P2: fix-clipboard-catch missing\n",
+                        specs={"fix-clipboard-catch": "# spec\n> 状态: in-progress\n"})
+            warnings: list = []
+            _audit_inbox_drift(tmp, warnings)
+            self.assertEqual(warnings, [])
+
+    def test_done_spec_with_closed_row_no_warning(self) -> None:
+        """Status=done + inbox row [x] (closed) → no warning (already synced)."""
+        import tempfile
+        from doctor_project import _audit_inbox_drift
+        with tempfile.TemporaryDirectory() as tmp:
+            self._setup(tmp, inbox_enabled=True,
+                        inbox_content="# Inbox\n- [x] P2: fix-clipboard-catch missing\n  - 关闭: ✅\n",
+                        specs={"fix-clipboard-catch": "# spec\n> 状态: done\n"})
+            warnings: list = []
+            _audit_inbox_drift(tmp, warnings)
+            self.assertEqual(warnings, [])
+
+    def test_no_inbox_file_no_warning(self) -> None:
+        """No .agents/bug-inbox.md → no warning (project doesn't use inbox)."""
+        import tempfile
+        from doctor_project import _audit_inbox_drift
+        with tempfile.TemporaryDirectory() as tmp:
+            self._setup(tmp, inbox_enabled=True, inbox_content=None,
+                        specs={"fix-clipboard-catch": "# spec\n> 状态: done\n"})
+            warnings: list = []
+            _audit_inbox_drift(tmp, warnings)
+            self.assertEqual(warnings, [])
+
+    def test_released_spec_with_open_row_emits_warning(self) -> None:
+        """Status=released (intermediate state) also surfaces drift."""
+        import tempfile
+        from doctor_project import _audit_inbox_drift
+        with tempfile.TemporaryDirectory() as tmp:
+            self._setup(tmp, inbox_enabled=True,
+                        inbox_content="# Inbox\n- [ ] P2: fix-clipboard-catch missing\n",
+                        specs={"fix-clipboard-catch": "# spec\n> 状态: released\n"})
+            warnings: list = []
+            _audit_inbox_drift(tmp, warnings)
+            self.assertEqual(len(warnings), 1)
