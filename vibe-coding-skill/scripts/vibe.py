@@ -65,6 +65,17 @@ troubleshooting:
   Bash 把 --command 解释成第一个命令的参数 → 用 bash -c 包住整段 shell
   pipe | 在 --command value 里被 quote escape 弄坏 → 用 bash -c 或 shlex 拆分
   vibe flag (--configured / --actor / --role) 出现在 --command 之后 → R36 报错
+
+AC reference format (verify phase 必须):
+  ✅ AC1, AC2, AC3, AC4, AC5, AC6, AC7    ← 每个 AC token 单独写
+  ✅ AC1 AC2 AC3 AC4 AC5 AC6 AC7           ← 空格分隔
+  ❌ AC1-7                                  ← 区间写法, gate 正则只匹配首个数字
+  ❌ AC1~7 / AC1..7                         ← 同上
+
+  Gate regex: AC + 可选连字符 + 可选空白 + 数字 (每个 ACn token 必须独立匹配)
+  区间写法会被打回, 然后每个 AC 重写一次。Retro: fix-membership-tier-stale-cache
+  advance to review 第一次报 "缺少验收标准引用: AC2-AC7", 根因是 description
+  写 "AC1-7" — AC1 匹配了, AC2-7 没匹配。
 """
 
 import refresh_context

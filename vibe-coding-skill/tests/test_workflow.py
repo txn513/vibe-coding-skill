@@ -10014,3 +10014,166 @@ class CommitStatScopeTests(unittest.TestCase):
             subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=tmp, check=True, capture_output=True)
             self.assertEqual(_git_diff_stat(tmp, staged_only=False), "(no tracked changes)")
             self.assertEqual(_git_diff_stat(tmp, staged_only=True), "(no tracked changes)")
+
+
+class EvidenceEpilogACReferenceFormatTests(unittest.TestCase):
+    """Cover 2026-07-10 candidate 1: `vibe evidence --help` epilog gains
+    AC reference format examples so agents don't burn a retry cycle
+    discovering that "AC1-7" is not accepted by the per-AC gate regex.
+
+    Retro 实证: fix-membership-tier-stale-cache advance to review 第一次
+    fail, description 写 "AC1-7", gate 正则只匹配首个数字, 报
+    "缺少验收标准引用: AC2-AC7".
+    """
+
+    def test_evidence_epilog_contains_ac_reference_format_examples(self) -> None:
+        """Epilog must show ✅ vs ❌ AC formats and explain why intervals fail."""
+        import subprocess
+        proc = subprocess.run(
+            [sys.executable, str(SCRIPTS_DIR / "vibe.py"),
+             "evidence", "--help"],
+            capture_output=True, text=True, timeout=10,
+        )
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+        out = proc.stdout
+        # Header is present
+        self.assertIn("AC reference format", out)
+        # Show each ✅ / ❌ example
+        self.assertIn("AC1, AC2, AC3, AC4, AC5, AC6, AC7", out)
+        self.assertIn("AC1-7", out)
+        self.assertIn("AC1~7", out)
+        # Explanation references the actual gate behaviour
+        self.assertIn("gate", out.lower())
+        self.assertIn("区间写法", out)
+
+
+class CommitEpilogArchiveSubdirectoryTests(unittest.TestCase):
+    """Cover 2026-07-10 candidate 2: REVIEW_SUMMARY_TEMPLATE gains archive
+    subdirectory line-range examples because agents writing review-summary
+    for archived evidence/reviews files (deep timestamped paths) tend to
+    skip the line-ref citation. The gate catches it, but a discovered
+    example avoids one retry cycle.
+
+    Retro 实证: fix-membership-tier-stale-cache R53 第一次 fail, 5 个
+    archive verify 快照都漏 line range, 被 gate 拦下。
+    """
+
+    def test_commit_review_summary_template_warns_about_archive(self) -> None:
+        """REVIEW_SUMMARY_TEMPLATE should explicitly mention archive
+        subdirectory paths and the line-range requirement."""
+        from commit import REVIEW_SUMMARY_TEMPLATE
+        self.assertIn("archive", REVIEW_SUMMARY_TEMPLATE.lower())
+        self.assertIn(".agents/archive/", REVIEW_SUMMARY_TEMPLATE)
+        self.assertIn("line range", REVIEW_SUMMARY_TEMPLATE.lower())
+        # The "归档版本" anti-pattern is mentioned
+        self.assertIn("归档版本", REVIEW_SUMMARY_TEMPLATE)
+
+
+class AdvanceChecklistFrontendBrowserTests(unittest.TestCase):
+    """Cover 2026-07-10 candidate 4: `advance_checklist` adds an advisory
+    for frontend / browser-affecting specs whose verify evidence lacks
+    any browser smoke trace. Advisory only, never blocks the gate.
+
+    Retro 实证: fix-membership-tier-stale-cache 是 localStorage + DOM bug,
+    verify 阶段只跑 pytest 1674 pass, 没浏览器实测 → 误判已覆盖。
+    """
+
+    def _setup_project(self, tmp: str, *, spec_text: str, verify_text: str) -> str:
+        """Helper: create a temp project with one spec + one verify evidence."""
+        import os
+        spec_dir = os.path.join(tmp, ".agents", "specs")
+        ev_dir = os.path.join(tmp, ".agents", "evidence", "fix-test")
+        os.makedirs(spec_dir)
+        os.makedirs(ev_dir)
+        spec_path = os.path.join(spec_dir, "fix-test.md")
+        with open(spec_path, "w", encoding="utf-8") as f:
+            f.write(spec_text)
+        with open(os.path.join(ev_dir, "verify.md"), "w", encoding="utf-8") as f:
+            f.write(verify_text)
+        return spec_path
+
+    def test_frontend_spec_without_browser_smoke_emits_advisory(self) -> None:
+        """localStorage + DOM spec, verify has only pytest → advisory fires."""
+        import os
+        import tempfile
+        from advance_checklist import _check_frontend_browser_test
+
+        spec = (
+            "# fix-test\n\n"
+            "> Status: in-progress\n\n"
+            "## 涉及范围\n\n"
+            "修复 localStorage 缓存 + DOM 渲染 bug, UI 渲染异常\n"
+        )
+        verify = (
+            "# fix-test - verify\n\n"
+            "pytest tests/ -v 1674 pass\n"
+            "AC1: 通过\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            self._setup_project(tmp, spec_text=spec, verify_text=verify)
+            hint = _check_frontend_browser_test(tmp, "fix-test", spec, "review")
+            self.assertIsNotNone(hint)
+            self.assertIn("浏览器", hint)
+            self.assertIn("advisory", hint.lower())
+
+    def test_frontend_spec_with_browser_smoke_no_advisory(self) -> None:
+        """If verify.md mentions 'browser' or 'playwright', no advisory."""
+        import os
+        import tempfile
+        from advance_checklist import _check_frontend_browser_test
+
+        spec = (
+            "# fix-test\n\n"
+            "> Status: in-progress\n\n"
+            "## 涉及范围\n\n"
+            "前端 localStorage 修复, UI 渲染\n"
+        )
+        verify = (
+            "# fix-test - verify\n\n"
+            "pytest tests/ -v 1674 pass\n"
+            "playwright e2e chrome browser smoke 通过\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            self._setup_project(tmp, spec_text=spec, verify_text=verify)
+            hint = _check_frontend_browser_test(tmp, "fix-test", spec, "review")
+            self.assertIsNone(hint)
+
+    def test_non_frontend_spec_no_advisory(self) -> None:
+        """Backend-only spec without frontend keywords → no advisory."""
+        import os
+        import tempfile
+        from advance_checklist import _check_frontend_browser_test
+
+        spec = (
+            "# fix-test\n\n"
+            "> Status: in-progress\n\n"
+            "## 涉及范围\n\n"
+            "修复 SQL 索引, 优化查询性能\n"
+        )
+        verify = "# fix-test - verify\npytest tests/ -v 200 pass\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            self._setup_project(tmp, spec_text=spec, verify_text=verify)
+            hint = _check_frontend_browser_test(tmp, "fix-test", spec, "review")
+            self.assertIsNone(hint)
+
+    def test_frontend_spec_without_verify_evidence_no_advisory(self) -> None:
+        """Frontend spec but no verify.md yet → upstream evidence-phase
+        check handles 'missing verify'; we don't duplicate that."""
+        import os
+        import tempfile
+        from advance_checklist import _check_frontend_browser_test
+
+        spec = (
+            "# fix-test\n\n"
+            "> Status: in-progress\n\n"
+            "## 涉及范围\n\n"
+            "前端 localStorage DOM 修复\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            spec_dir = os.path.join(tmp, ".agents", "specs")
+            os.makedirs(spec_dir)
+            with open(os.path.join(spec_dir, "fix-test.md"), "w", encoding="utf-8") as f:
+                f.write(spec)
+            # No .agents/evidence/<spec>/verify.md
+            hint = _check_frontend_browser_test(tmp, "fix-test", spec, "review")
+            self.assertIsNone(hint)

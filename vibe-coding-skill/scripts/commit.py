@@ -52,7 +52,19 @@ REVIEW_SUMMARY_TEMPLATE = """--review-summary 模板 (per-file + 行号 + 业务
 
 例外: .agents/evidence/ / .agents/plans/ / .agents/reviews/ /
       .agents/changelogs/ / .agents/activity.md 等 vibe 自动生成
-      文件不需要行号引用 (Rule 55 排除自动生成文件, 2026-07-10)。"""
+      文件不需要行号引用 (Rule 55 排除自动生成文件, 2026-07-10)。
+
+Archive 子目录 (line range 易漏, 2026-07-10 retro):
+  .agents/archive/<spec>/<timestamp>/evidence/<file>    ← 需 line range
+  .agents/archive/<spec>/<timestamp>/reviews/<file>     ← 需 line range
+  .agents/archive/<spec>/<timestamp>/verify/<file>      ← 需 line range
+
+  ❌ "归档版本" 不带 line range → R53 missing_line_refs 拦下
+  ✅ archive/<spec>/20260710-133016/evidence/verify.md: line 1-33 旧 verify 快照
+  ✅ basename 也可: verify.md: L1-L33 旧 verify 快照 (path entry 包含 basename)
+
+  根因: archive 路径深 + 时间戳命名, agent mental check 易跳过行号;
+  gate 不会因为路径深就豁免 line-ref 要求 (auto-generated 白名单不含 archive)。"""
 
 
 
