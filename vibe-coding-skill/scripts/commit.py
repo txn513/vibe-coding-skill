@@ -830,7 +830,7 @@ def _check_inbox_drift_advisory(commit_argv: list[str], project_root: str) -> li
     Returns list of fix names that have unclosed inbox rows. Empty list
     means no drift (or feature disabled, or no inbox file).
 
-    Rule 65 opt-in: only fires when workflow.json.features.inbox = True.
+    Rule 65 opt-in: only fires when workflow.json.bugs.inbox = True.
     """
     workflow_path = os.path.join(project_root, ".agents", "workflow.json")
     if not os.path.exists(workflow_path):
@@ -841,8 +841,8 @@ def _check_inbox_drift_advisory(commit_argv: list[str], project_root: str) -> li
             workflow = _json.load(f)
     except (OSError, _json.JSONDecodeError):
         return []
-    features = (workflow or {}).get("features", {})
-    if not features.get("inbox", False):
+    bugs = (workflow or {}).get("bugs", {})
+    if not bugs.get("inbox", False):
         return []
 
     message = _extract_commit_message(commit_argv)

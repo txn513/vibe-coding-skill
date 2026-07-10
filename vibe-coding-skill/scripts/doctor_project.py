@@ -223,7 +223,7 @@ def _audit_inbox_drift(project_root: str, warnings: list[str]) -> None:
     still has open row").
 
     Only fires when:
-      - workflow.json.features.inbox = True (opt-in)
+      - workflow.json.bugs.inbox = True (opt-in)
       - .agents/bug-inbox.md exists
 
     Does not filter by fix-<name> prefix — any done spec with an open
@@ -238,8 +238,8 @@ def _audit_inbox_drift(project_root: str, warnings: list[str]) -> None:
             workflow = _json.load(f)
     except (OSError, _json.JSONDecodeError):
         return
-    features = (workflow or {}).get("features", {})
-    if not features.get("inbox", False):
+    bugs = (workflow or {}).get("bugs", {})
+    if not bugs.get("inbox", False):
         return
 
     inbox_path = os.path.join(project_root, ".agents", "bug-inbox.md")

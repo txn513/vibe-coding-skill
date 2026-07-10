@@ -84,7 +84,7 @@ def default_workflow(project_name: str) -> dict:
         "review_separation": {
             "required_for": ["high"],
         },
-        "features": {
+        "bugs": {
             "inbox": False,
         },
     }
@@ -110,7 +110,7 @@ def migrate(value: dict, project_name: str) -> bool:
     for key in (
         "project_id", "roles", "risk_profiles", "commands", "model_tiers",
         "repositories", "archive", "stage_stall_sla", "risk_required_rules",
-        "review_separation", "features",
+        "review_separation", "bugs",
     ):
         if key not in value:
             value[key] = defaults[key]
@@ -132,6 +132,24 @@ def migrate(value: dict, project_name: str) -> bool:
                 if key not in value["risk_profiles"][risk]:
                     value["risk_profiles"][risk][key] = default
                     changed = True
+    # Migration: features.inbox (Rule 65 v1) was renamed to bugs.inbox (Rule 65 v2).
+    # If a project already has features.inbox = True, copy it to bugs.inbox so the
+    # inbox opt-in is preserved across the rename, then drop the legacy features dict.
+    legacy_features = value.get("features")
+    if isinstance(legacy_features, dict) and "inbox" in legacy_features:
+        legacy_inbox = bool(legacy_features.get("inbox"))
+        bugs_block = value.setdefault("bugs", {})
+        if not isinstance(bugs_block, dict):
+            bugs_block = {}
+            value["bugs"] = bugs_block
+        # Always overwrite the default False with the legacy value so opt-in
+        # is preserved across the rename. The default loop above already added
+        # bugs.inbox = False, so we set it unconditionally here.
+        bugs_block["inbox"] = legacy_inbox
+        changed = True
+        # Drop legacy features dict (was only ever used for inbox).
+        value.pop("features", None)
+        changed = True
     if value.get("schema_version") != SCHEMA_VERSION:
         value["schema_version"] = SCHEMA_VERSION
         changed = True

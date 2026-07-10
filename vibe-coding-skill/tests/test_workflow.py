@@ -10183,25 +10183,27 @@ class BugInboxOptInFeatureTests(unittest.TestCase):
     """Cover 2026-07-11 inbox opt-in feature (Rule 65).
 
     Tests verify:
-    - workflow.json default has features.inbox = False (opt-in)
-    - migrate() adds features.inbox to old workflow.json files
-    - vibe init with features.inbox = True generates .agents/bug-inbox.md
+    - workflow.json default has bugs.inbox = False (opt-in)
+    - migrate() adds bugs.inbox to old workflow.json files
+    - vibe init with bugs.inbox = True generates .agents/bug-inbox.md
     - vibe init preserves existing .agents/bug-inbox.md (idempotent)
-    - vibe init with features.inbox = False does NOT generate inbox
+    - vibe init with bugs.inbox = False does NOT generate inbox
     - inbox template contains required universal sections
     """
 
     def test_default_workflow_has_inbox_opt_in_disabled(self) -> None:
-        """Skill default must be opt-in (features.inbox = False) so
+        """Skill default must be opt-in (bugs.inbox = False) so
         projects are not forced into the inbox convention."""
         from workflow_state import default_workflow
         wf = default_workflow("test")
-        self.assertIn("features", wf)
-        self.assertIn("inbox", wf["features"])
-        self.assertEqual(wf["features"]["inbox"], False)
+        self.assertIn("bugs", wf)
+        self.assertNotIn("features", wf,
+                         msg="legacy features dict removed in favour of bugs block")
+        self.assertIn("inbox", wf["bugs"])
+        self.assertEqual(wf["bugs"]["inbox"], False)
 
-    def test_migrate_adds_features_inbox_to_legacy_workflow(self) -> None:
-        """workflow.json files predating Rule 65 must gain features.inbox = False."""
+    def test_migrate_adds_bugs_inbox_to_legacy_workflow(self) -> None:
+        """workflow.json files predating Rule 65 must gain bugs.inbox = False."""
         from workflow_state import migrate
         legacy = {
             "schema_version": 10, "project_id": "x", "roles": {},
@@ -10211,8 +10213,29 @@ class BugInboxOptInFeatureTests(unittest.TestCase):
         }
         changed = migrate(legacy, "x")
         self.assertTrue(changed)
-        self.assertIn("features", legacy)
-        self.assertEqual(legacy["features"]["inbox"], False)
+        self.assertIn("bugs", legacy)
+        self.assertNotIn("features", legacy,
+                         msg="features dict dropped after migration to bugs.inbox")
+        self.assertEqual(legacy["bugs"]["inbox"], False)
+
+    def test_migrate_preserves_legacy_features_inbox_true(self) -> None:
+        """Legacy workflow.json with features.inbox = True must migrate to
+        bugs.inbox = True (opt-in preserved across the rename)."""
+        from workflow_state import migrate
+        legacy = {
+            "schema_version": 10, "project_id": "x", "roles": {},
+            "risk_profiles": {}, "commands": {}, "model_tiers": {},
+            "repositories": [], "archive": {}, "stage_stall_sla": {},
+            "risk_required_rules": {}, "review_separation": {},
+            "features": {"inbox": True},
+        }
+        changed = migrate(legacy, "x")
+        self.assertTrue(changed)
+        self.assertNotIn("features", legacy,
+                         msg="legacy features dict dropped after migration")
+        self.assertIn("bugs", legacy)
+        self.assertEqual(legacy["bugs"]["inbox"], True,
+                         msg="opt-in preserved across rename")
 
     def test_inbox_template_exists_and_has_universal_sections(self) -> None:
         """templates/bug-inbox.md must contain the universal inbox structure
@@ -10233,20 +10256,20 @@ class BugInboxOptInFeatureTests(unittest.TestCase):
         self.assertIn("[ ]", content)
         self.assertIn("[x]", content)
 
-    def test_init_generates_inbox_when_features_inbox_true(self) -> None:
-        """When workflow.json.features.inbox = True, vibe init creates
+    def test_init_generates_inbox_when_bugs_inbox_true(self) -> None:
+        """When workflow.json.bugs.inbox = True, vibe init creates
         .agents/bug-inbox.md from the template with today's date stamped in."""
         import importlib
         import tempfile
         import shutil
 
         with tempfile.TemporaryDirectory() as tmp:
-            # Pre-create workflow.json with features.inbox = True
+            # Pre-create workflow.json with bugs.inbox = True
             agents_dir = os.path.join(tmp, ".agents")
             os.makedirs(agents_dir)
             from workflow_state import default_workflow
             wf = default_workflow("inbox-test")
-            wf["features"]["inbox"] = True
+            wf["bugs"]["inbox"] = True
             from common import atomic_write_json
             atomic_write_json(os.path.join(agents_dir, "workflow.json"), wf)
 
@@ -10257,7 +10280,7 @@ class BugInboxOptInFeatureTests(unittest.TestCase):
 
             inbox_path = os.path.join(agents_dir, "bug-inbox.md")
             self.assertTrue(os.path.exists(inbox_path),
-                            msg="bug-inbox.md must be generated when features.inbox=true")
+                            msg="bug-inbox.md must be generated when bugs.inbox=true")
             with open(inbox_path, encoding="utf-8") as f:
                 content = f.read()
             # Date should be stamped in (not the YYYY-MM-DD placeholder)
@@ -10277,7 +10300,7 @@ class BugInboxOptInFeatureTests(unittest.TestCase):
             from workflow_state import default_workflow
             from common import atomic_write_json
             wf = default_workflow("inbox-test")
-            wf["features"]["inbox"] = True
+            wf["bugs"]["inbox"] = True
             atomic_write_json(os.path.join(agents_dir, "workflow.json"), wf)
 
             # Pre-existing inbox with custom content
@@ -10295,8 +10318,8 @@ class BugInboxOptInFeatureTests(unittest.TestCase):
             self.assertEqual(content, sentinel,
                              msg="Existing bug-inbox.md must be preserved verbatim")
 
-    def test_init_skips_inbox_when_features_inbox_false(self) -> None:
-        """Default off: features.inbox = False → no bug-inbox.md generated."""
+    def test_init_skips_inbox_when_bugs_inbox_false(self) -> None:
+        """Default off: bugs.inbox = False → no bug-inbox.md generated."""
         import importlib
         import tempfile
 
@@ -10306,8 +10329,8 @@ class BugInboxOptInFeatureTests(unittest.TestCase):
             from workflow_state import default_workflow
             from common import atomic_write_json
             wf = default_workflow("no-inbox-test")
-            # Default already has features.inbox = False
-            self.assertEqual(wf["features"]["inbox"], False)
+            # Default already has bugs.inbox = False
+            self.assertEqual(wf["bugs"]["inbox"], False)
             atomic_write_json(os.path.join(agents_dir, "workflow.json"), wf)
 
             import init_project
@@ -10316,13 +10339,13 @@ class BugInboxOptInFeatureTests(unittest.TestCase):
 
             inbox_path = os.path.join(agents_dir, "bug-inbox.md")
             self.assertFalse(os.path.exists(inbox_path),
-                             msg="bug-inbox.md must NOT exist when features.inbox=false")
+                             msg="bug-inbox.md must NOT exist when bugs.inbox=false")
 
 
 class CommitInboxDriftAdvisoryTests(unittest.TestCase):
     """Cover 2026-07-11 candidate 5 commit-side: inbox drift advisory.
 
-    Rule 65 opt-in: only fires when workflow.json.features.inbox = True.
+    Rule 65 opt-in: only fires when workflow.json.bugs.inbox = True.
     Detects commit message references fix-<name> but inbox row still [ ].
     """
 
@@ -10330,7 +10353,7 @@ class CommitInboxDriftAdvisoryTests(unittest.TestCase):
         """Helper: minimal .agents/{workflow.json, bug-inbox.md} layout."""
         import json as _json
         os.makedirs(os.path.join(tmp, ".agents"))
-        wf = {"features": {"inbox": inbox_enabled}}
+        wf = {"bugs": {"inbox": inbox_enabled}}
         with open(os.path.join(tmp, ".agents", "workflow.json"), "w") as f:
             _json.dump(wf, f)
         if inbox_content is not None:
@@ -10347,7 +10370,7 @@ class CommitInboxDriftAdvisoryTests(unittest.TestCase):
         self.assertEqual(_extract_commit_message(["-m", "fix-d", "--no-verify"]), "fix-d")
 
     def test_feature_disabled_no_advisory(self) -> None:
-        """features.inbox = False → function returns empty list (no advisory)."""
+        """bugs.inbox = False → function returns empty list (no advisory)."""
         import tempfile
         from commit import _check_inbox_drift_advisory
         with tempfile.TemporaryDirectory() as tmp:
@@ -10431,14 +10454,14 @@ class DoctorInboxDriftAuditTests(unittest.TestCase):
     """Cover 2026-07-11 candidate 5 doctor-side: inbox drift warning.
 
     Detects spec with status=done/released but inbox row still [ ].
-    Only fires when workflow.json.features.inbox = True.
+    Only fires when workflow.json.bugs.inbox = True.
     """
 
     def _setup(self, tmp, *, inbox_enabled, inbox_content, specs):
         """Helper: full .agents/{workflow.json, bug-inbox.md, specs/} layout."""
         import json as _json
         os.makedirs(os.path.join(tmp, ".agents", "specs"))
-        wf = {"features": {"inbox": inbox_enabled}}
+        wf = {"bugs": {"inbox": inbox_enabled}}
         with open(os.path.join(tmp, ".agents", "workflow.json"), "w") as f:
             _json.dump(wf, f)
         if inbox_content is not None:
@@ -10449,7 +10472,7 @@ class DoctorInboxDriftAuditTests(unittest.TestCase):
                 f.write(content)
 
     def test_feature_disabled_no_warning(self) -> None:
-        """features.inbox = False → no warning emitted."""
+        """bugs.inbox = False → no warning emitted."""
         import tempfile
         from doctor_project import _audit_inbox_drift
         with tempfile.TemporaryDirectory() as tmp:

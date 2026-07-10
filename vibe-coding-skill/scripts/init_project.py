@@ -114,13 +114,13 @@ def init_project(path: str, project_type: str = "generic", force: bool = False) 
     workflow, _ = ensure_workflow(path)
     policy_manifest = scan_policy_sources(Path(path), apply=True)
 
-    # Rule 65: bug-inbox opt-in. When features.inbox is true, generate
+    # Rule 65: bug-inbox opt-in. When workflow.bugs.inbox is true, generate
     # .agents/bug-inbox.md from templates/bug-inbox.md so the project has
     # a fresh append-only bug ledger scaffold. Existing projects that
     # already have a bug-inbox.md are not overwritten (init is idempotent
     # for that file — the agent manually migrated content keeps priority).
-    features = (workflow or {}).get("features", {})
-    if features.get("inbox", False):
+    bugs = (workflow or {}).get("bugs", {})
+    if bugs.get("inbox", False):
         inbox_src = os.path.join(TEMPLATE_DIR, "bug-inbox.md")
         inbox_dst = os.path.join(agents_dir, "bug-inbox.md")
         if os.path.exists(inbox_src) and not os.path.exists(inbox_dst):
@@ -133,11 +133,11 @@ def init_project(path: str, project_type: str = "generic", force: bool = False) 
                 datetime.now(timezone.utc).strftime("%Y-%m-%d"),
             )
             atomic_write(inbox_dst, inbox_content)
-            print(f"   .agents/bug-inbox.md — bug 入口 ledger (Rule 65, features.inbox=true)")
+            print(f"   .agents/bug-inbox.md — bug 入口 ledger (Rule 65, bugs.inbox=true)")
         elif os.path.exists(inbox_dst):
             print(f"   .agents/bug-inbox.md — 已存在, 未覆盖 (保留项目级内容)")
         else:
-            print(f"   ⚠️  features.inbox=true 但 templates/bug-inbox.md 不存在")
+            print(f"   ⚠️  bugs.inbox=true 但 templates/bug-inbox.md 不存在")
 
     print(f"✅ 项目初始化完成: {path}")
     print(f"   AGENTS.md     — Agent 上下文文件（含阶段强制规范）")
