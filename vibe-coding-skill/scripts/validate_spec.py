@@ -125,13 +125,26 @@ def validate_spec(spec_path: str) -> dict:
     else:
         issues.append({"severity": "warning", "msg": "未找到正常路径验收标准段落"})
 
-    # 4. Check scope is defined
+    # 4. Check scope is defined. Supports multi-line file lists — capture
+    # from `- **<sf>**:` to the next `- **...**:` line OR `## ` heading
+    # boundary. The capture is greedy across newlines so an agent that
+    # wrote:
+    #   - **新增文件**:
+    #     - src/foo.ts
+    #     - src/bar.ts
+    # is recognised as defined (same condition: non-empty body, no
+    # placeholder fragments). 2026-07-10 candidate 2.
     scope_fields = ["新增文件", "修改文件", "不动文件"]
     scope_defined = False
     for sf in scope_fields:
-        pattern = rf"- \*\*{sf}\*\*: (.+)"
-        m = re.search(pattern, content)
-        if m and m.group(1).strip() and not any(p in m.group(1) for p in ["(计划", "(描述", "(绝对"]):
+        start_m = re.search(rf"^- \*\*{sf}\*\*:\s*", content, re.MULTILINE)
+        if not start_m:
+            continue
+        body_start = start_m.end()
+        rest = content[body_start:]
+        boundary_m = re.search(r"^(?:- \*\*[^\*]+\*\*:|##\s)", rest, re.MULTILINE)
+        body = rest[: boundary_m.start()] if boundary_m else rest
+        if body.strip() and not any(p in body for p in ["(计划", "(描述", "(绝对"]):
             scope_defined = True
             break
 
