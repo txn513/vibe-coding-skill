@@ -10543,3 +10543,49 @@ class DoctorInboxDriftAuditTests(unittest.TestCase):
             warnings: list = []
             _audit_inbox_drift(tmp, warnings)
             self.assertEqual(len(warnings), 1)
+
+
+class ReviewSummarySeparatorGuidanceTests(unittest.TestCase):
+    """Cover 2026-07-11 candidate 3: REVIEW_SUMMARY_TEMPLATE epilog
+    recommends newline as file-entry separator and warns about
+    embedded-; brittleness (retro 2026-07-08 evidence).
+    """
+
+    def test_review_summary_template_prefers_newline_separator(self) -> None:
+        """The template must explicitly recommend newlines for multi-file
+        review-summary, since embedded ; in descriptions confuses the
+        splitter and triggers R53 missing_line_refs false-positives."""
+        from commit import REVIEW_SUMMARY_TEMPLATE
+        # Recommend / preferred wording
+        self.assertIn("推荐换行", REVIEW_SUMMARY_TEMPLATE)
+        self.assertIn("Multi-file 写法", REVIEW_SUMMARY_TEMPLATE)
+        self.assertIn("splitter", REVIEW_SUMMARY_TEMPLATE.lower())
+
+    def test_review_summary_template_warns_about_embedded_semicolons(self) -> None:
+        """A description containing ; inside an entry (e.g. describing two
+        line ranges as "L789 area; L1130 area") collides with the ; separator
+        — epilog must surface this trap."""
+        from commit import REVIEW_SUMMARY_TEMPLATE
+        # Anti-pattern example
+        self.assertIn("L789", REVIEW_SUMMARY_TEMPLATE,
+                      msg="must show the embedded-semicolon anti-pattern example")
+        self.assertIn("area; L1130", REVIEW_SUMMARY_TEMPLATE,
+                      msg="must show that embedded ; inside a description is the trap")
+        # The resolution direction
+        self.assertIn("缺 :", REVIEW_SUMMARY_TEMPLATE,
+                      msg="must explain what the gate sees when splitter miscuts")
+
+    def test_commit_help_outputs_newline_recommendation(self) -> None:
+        """vibe commit --help output must surface the new separator guidance
+        to agents before they write the summary."""
+        proc = subprocess.run(
+            [sys.executable, str(SCRIPTS_DIR / "vibe.py"),
+             "commit", "--help"],
+            capture_output=True, text=True, timeout=10,
+        )
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+        out = proc.stdout
+        self.assertIn("推荐换行", out)
+        self.assertIn("Multi-file 写法", out)
+        # Anti-pattern section is visible
+        self.assertIn("L789", out)

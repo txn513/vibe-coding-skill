@@ -64,7 +64,24 @@ Archive 子目录 (line range 易漏, 2026-07-10 retro):
   ✅ basename 也可: verify.md: L1-L33 旧 verify 快照 (path entry 包含 basename)
 
   根因: archive 路径深 + 时间戳命名, agent mental check 易跳过行号;
-  gate 不会因为路径深就豁免 line-ref 要求 (auto-generated 白名单不含 archive)。"""
+  gate 不会因为路径深就豁免 line-ref 要求 (auto-generated 白名单不含 archive)。
+
+Multi-file 写法 (推荐换行分隔, 2026-07-11):
+  splittersplit 用 [\\n;]+ 切分; 优先换行, 描述里出现 ; 不影响 splitter 边界.
+
+  ✅ 多文件换行 (推荐, 抗 ; 干扰):
+    --review-summary 'app.py: L25-L30 检查加 closed
+    utils.py: L42-L55 加 helper 包装
+    test_x.py: L100-L120 新增 fixture'
+
+  ✅ 单行 ; 分隔 (仍兼容):
+    --review-summary 'app.py: L25-L30 检查; utils.py: 加 helper; test_x.py: 加 fixture'
+
+  ❌ 描述内嵌 ; 跟分隔符冲突 (retro 撞过, 2026-07-08):
+    --review-summary 'app.py: L789 area; L1130 area; utils.py: 加 helper'
+                            ^^^^^^^^ splitter 切开, 后续 part 缺 : 触发 missing_line_refs
+
+  默认行为: 换行最稳, 描述里出现 ; 时也用换行更安全."""
 
 
 
