@@ -10589,3 +10589,232 @@ class ReviewSummarySeparatorGuidanceTests(unittest.TestCase):
         self.assertIn("Multi-file 写法", out)
         # Anti-pattern section is visible
         self.assertIn("L789", out)
+
+
+class RecordEvidenceAutoDefaultActorRoleTests(unittest.TestCase):
+    """Cover 2026-07-10 candidate 1: `vibe evidence` auto-defaults
+    `--actor` and `--role` from workflow.json roles when the project has
+    a single named operator (the 99% case). The previous behaviour wrote
+    "未记录" actor/role into evidence and required the agent to type
+    `--actor lance --role builder` on every call — pure noise that
+    blocked advance gates (`_identity_matches` rejects empty actor).
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name)
+        init_project.init_project(str(self.project), "web")
+        self.write_spec(status="in-progress")
+        self._configure_actor("builder", "lance")
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def write_spec(self, name: str = "example", status: str = "draft") -> Path:
+        path = self.project / ".agents" / "specs" / f"{name}.md"
+        path.write_text(VALID_SPEC.format(status=status), encoding="utf-8")
+        return path
+
+    def _configure_actor(self, role: str, actor: str) -> None:
+        wf_path = self.project / ".agents" / "workflow.json"
+        wf = json.loads(wf_path.read_text(encoding="utf-8"))
+        wf.setdefault("roles", {})[role] = actor
+        wf_path.write_text(json.dumps(wf), encoding="utf-8")
+
+    def test_verify_auto_defaults_builder_actor_role(self) -> None:
+        """No --actor / --role passed → read workflow.json roles.builder,
+        write evidence with Actor=lance / Role=builder, suppress hint."""
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            evidence_path = record_evidence.record_evidence(
+                str(self.project), "example", "verify", "passed",
+                "checks passed",
+            )
+        text = output.getvalue()
+        # Hint must NOT fire — defaults filled.
+        self.assertNotIn("未记录执行者身份", text)
+        self.assertNotIn("evidence_identity_hint", text)
+        # Evidence file must have Actor=lance / Role=builder, not 未记录.
+        content = Path(evidence_path).read_text(encoding="utf-8")
+        self.assertIn("Actor: lance", content)
+        self.assertIn("Role: builder", content)
+        self.assertNotIn("Actor: 未记录", content)
+        self.assertNotIn("Role: 未记录", content)
+
+    def test_release_auto_defaults_releaser(self) -> None:
+        """verify→release phase shift: roles.releaser is read."""
+        self._configure_actor("releaser", "alice")
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            evidence_path = record_evidence.record_evidence(
+                str(self.project), "example", "release", "passed",
+                "release done",
+            )
+        text = output.getvalue()
+        self.assertNotIn("未记录执行者身份", text)
+        content = Path(evidence_path).read_text(encoding="utf-8")
+        self.assertIn("Actor: alice", content)
+        self.assertIn("Role: releaser", content)
+
+    def test_observe_auto_defaults_observer(self) -> None:
+        """observe phase uses roles.observer when configured."""
+        self._configure_actor("observer", "bob")
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            evidence_path = record_evidence.record_evidence(
+                str(self.project), "example", "observe", "passed",
+                "observation logged",
+            )
+        text = output.getvalue()
+        self.assertNotIn("未记录执行者身份", text)
+        content = Path(evidence_path).read_text(encoding="utf-8")
+        self.assertIn("Actor: bob", content)
+        self.assertIn("Role: observer", content)
+
+    def test_empty_configured_role_keeps_existing_advisory(self) -> None:
+        """Multi-actor / fresh project: roles.builder == "" → existing
+        advisory still fires (record-side identity must be explicit)."""
+        # Default workflow has all roles empty; we only configured builder
+        # in setUp(). Clear it to simulate multi-actor project.
+        wf_path = self.project / ".agents" / "workflow.json"
+        wf = json.loads(wf_path.read_text(encoding="utf-8"))
+        wf.setdefault("roles", {})["builder"] = ""
+        wf_path.write_text(json.dumps(wf), encoding="utf-8")
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            record_evidence.record_evidence(
+                str(self.project), "example", "verify", "passed",
+                "checks passed",
+            )
+        text = output.getvalue()
+        # Existing hint still fires because auto-default was a no-op.
+        self.assertIn("未记录执行者身份", text)
+        self.assertIn("--actor", text)
+        self.assertIn("--role builder", text)
+
+    def test_explicit_actor_role_still_respected(self) -> None:
+        """If the agent explicitly passes --actor / --role, those win
+        over workflow defaults — no surprises on multi-actor teams."""
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            evidence_path = record_evidence.record_evidence(
+                str(self.project), "example", "verify", "passed",
+                "checks passed",
+                "explicit-agent", "reviewer",
+            )
+        text = output.getvalue()
+        self.assertNotIn("未记录执行者身份", text)
+        content = Path(evidence_path).read_text(encoding="utf-8")
+        self.assertIn("Actor: explicit-agent", content)
+        self.assertIn("Role: reviewer", content)
+
+
+class ValidateSpecScopeMultilineTests(unittest.TestCase):
+    """Cover 2026-07-10 candidate 2: spec scope validator supports
+    multi-line file lists. The previous regex `- **<sf>**: (.+)` only
+    captured the first line, so a spec that wrote:
+
+      - **新增文件**:
+        - src/foo.ts
+        - src/bar.ts
+
+    was flagged as "涉及范围未定义" — wrong, the spec is just formatted
+    for readability. The new logic captures until the next `- **...**:`
+    line OR `## ` heading boundary and applies the same non-empty /
+    no-placeholder check.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = Path(self.tmp.name) / "spec.md"
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _write(self, body: str) -> None:
+        self.path.write_text(body, encoding="utf-8")
+
+    def _scope_warning(self) -> list[str]:
+        import validate_spec
+        result = validate_spec.validate_spec(str(self.path))
+        return [issue["msg"] for issue in result["issues"]
+                if issue["severity"] == "warning"
+                and "涉及范围" in issue["msg"]]
+
+    def test_multiline_new_files_list_is_defined(self) -> None:
+        """The motivating case: - **新增文件**: followed by file list
+        on separate lines must be recognised as defined scope."""
+        self._write(
+            "# sample\n\n> 状态: draft\n\n"
+            "## 意图 (Intent)\n\ntext body here\n\n"
+            "## 涉及范围\n"
+            "- **新增文件**:\n"
+            "  - src/foo.ts\n"
+            "  - src/bar.ts\n"
+            "- **修改文件**: 无\n"
+            "- **不动文件**: src/stable.ts\n\n"
+            "## 验收标准 (Acceptance Criteria)\n\n- [ ] AC1\n"
+        )
+        self.assertEqual(self._scope_warning(), [])
+
+    def test_single_line_still_works(self) -> None:
+        """Backward compat: inline `- **新增文件**: src/foo.ts` still
+        recognised (no regression to pre-candidate behaviour)."""
+        self._write(
+            "# sample\n\n> 状态: draft\n\n"
+            "## 意图 (Intent)\n\ntext body here\n\n"
+            "## 涉及范围\n\n"
+            "- **新增文件**: src/foo.ts\n"
+            "- **修改文件**: 无\n"
+            "- **不动文件**: src/stable.ts\n\n"
+            "## 验收标准 (Acceptance Criteria)\n\n- [ ] AC1\n"
+        )
+        self.assertEqual(self._scope_warning(), [])
+
+    def test_placeholder_body_still_flagged(self) -> None:
+        """Even multi-line, a body that's only a placeholder marker is
+        still flagged — Rule 9 (project-local learning) contract holds."""
+        self._write(
+            "# sample\n\n> 状态: draft\n\n"
+            "## 意图 (Intent)\n\ntext body here\n\n"
+            "## 涉及范围\n"
+            "- **新增文件**: (计划某文件)\n"
+            "- **修改文件**: (描述)\n"
+            "- **不动文件**: (绝对不碰)\n\n"
+            "## 验收标准 (Acceptance Criteria)\n\n- [ ] AC1\n"
+        )
+        # All three are placeholders → flagged (placeholder pattern matches).
+        warnings = self._scope_warning()
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("涉及范围未定义", warnings[0])
+
+    def test_empty_body_still_flagged(self) -> None:
+        """Field with nothing after the colon (multi-line, all blank)
+        is correctly identified as undefined scope."""
+        self._write(
+            "# sample\n\n> 状态: draft\n\n"
+            "## 意图 (Intent)\n\ntext body here\n\n"
+            "## 涉及范围\n"
+            "- **新增文件**:\n"
+            "- **修改文件**:\n"
+            "- **不动文件**:\n\n"
+            "## 验收标准 (Acceptance Criteria)\n\n- [ ] AC1\n"
+        )
+        # All three bodies empty → flagged.
+        warnings = self._scope_warning()
+        self.assertEqual(len(warnings), 1)
+
+    def test_modified_field_multiline_defined(self) -> None:
+        """Multi-line **修改文件** also recognised (not just 新增文件)."""
+        self._write(
+            "# sample\n\n> 状态: draft\n\n"
+            "## 意图 (Intent)\n\ntext body here\n\n"
+            "## 涉及范围\n"
+            "- **新增文件**: 无\n"
+            "- **修改文件**:\n"
+            "  - src/api.ts:42\n"
+            "  - src/db.ts:100\n"
+            "- **不动文件**: src/stable.ts\n\n"
+            "## 验收标准 (Acceptance Criteria)\n\n- [ ] AC1\n"
+        )
+        self.assertEqual(self._scope_warning(), [])

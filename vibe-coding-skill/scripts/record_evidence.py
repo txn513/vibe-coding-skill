@@ -75,20 +75,38 @@ def record_evidence(
     if command:
         commands = [command]
 
+    # Auto-default actor/role from workflow.json roles (Single-Actor
+    # Convenience). Most projects have a single named operator per role
+    # (e.g. roles.builder = "lance"); forcing the agent to type
+    # `--actor lance --role builder` on every evidence call is pure noise.
+    # For multi-actor projects (roles.<expected_role> == ""), this is a
+    # no-op and the existing advisory still fires so the agent must
+    # specify identity explicitly. 2026-07-10 candidate 1.
+    _phase_to_role_default = {
+        "verify": "builder",
+        "release": "releaser",
+        "observe": "observer",
+    }
+    _expected_role = _phase_to_role_default.get(phase, "builder")
+    if not actor or not role:
+        _configured_actor = (
+            (workflow.get("roles") or {}).get(_expected_role, "") or ""
+        ).strip()
+        if _configured_actor:
+            if not actor:
+                actor = _configured_actor
+            if not role:
+                role = _expected_role
+
     # Advisory A: suggest filling actor/role (Record-Side Identity Hint)
     # If user did not pass --actor or --role, suggest filling them.
-    # This is advisory only; we do not silently default because:
-    # (1) different phases of the same spec may be recorded by different
-    # roles (builder in-progress, releaser release, observer observe);
-    # (2) the recorded identity is the agent/person recording the evidence,
-    # which is a different fact from the project role assigned to the spec.
+    # Auto-default above already filled from workflow.json roles when the
+    # project has a single named operator; this advisory only fires for
+    # multi-actor / fresh projects where the recorded identity must be
+    # specified explicitly. The phase_to_role table here is the same
+    # fallback used to pick --role hint text.
     if not actor or not role:
-        phase_to_role = {
-            "verify": "builder",
-            "release": "releaser",
-            "observe": "observer",
-        }
-        suggested_role = phase_to_role.get(phase)
+        suggested_role = _phase_to_role_default.get(phase)
         missing = []
         if not actor:
             missing.append("--actor")
