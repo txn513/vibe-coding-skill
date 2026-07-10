@@ -10177,3 +10177,143 @@ class AdvanceChecklistFrontendBrowserTests(unittest.TestCase):
             # No .agents/evidence/<spec>/verify.md
             hint = _check_frontend_browser_test(tmp, "fix-test", spec, "review")
             self.assertIsNone(hint)
+
+
+class BugInboxOptInFeatureTests(unittest.TestCase):
+    """Cover 2026-07-11 inbox opt-in feature (Rule 65).
+
+    Tests verify:
+    - workflow.json default has features.inbox = False (opt-in)
+    - migrate() adds features.inbox to old workflow.json files
+    - vibe init with features.inbox = True generates .agents/bug-inbox.md
+    - vibe init preserves existing .agents/bug-inbox.md (idempotent)
+    - vibe init with features.inbox = False does NOT generate inbox
+    - inbox template contains required universal sections
+    """
+
+    def test_default_workflow_has_inbox_opt_in_disabled(self) -> None:
+        """Skill default must be opt-in (features.inbox = False) so
+        projects are not forced into the inbox convention."""
+        from workflow_state import default_workflow
+        wf = default_workflow("test")
+        self.assertIn("features", wf)
+        self.assertIn("inbox", wf["features"])
+        self.assertEqual(wf["features"]["inbox"], False)
+
+    def test_migrate_adds_features_inbox_to_legacy_workflow(self) -> None:
+        """workflow.json files predating Rule 65 must gain features.inbox = False."""
+        from workflow_state import migrate
+        legacy = {
+            "schema_version": 10, "project_id": "x", "roles": {},
+            "risk_profiles": {}, "commands": {}, "model_tiers": {},
+            "repositories": [], "archive": {}, "stage_stall_sla": {},
+            "risk_required_rules": {}, "review_separation": {},
+        }
+        changed = migrate(legacy, "x")
+        self.assertTrue(changed)
+        self.assertIn("features", legacy)
+        self.assertEqual(legacy["features"]["inbox"], False)
+
+    def test_inbox_template_exists_and_has_universal_sections(self) -> None:
+        """templates/bug-inbox.md must contain the universal inbox structure
+        so any opt-in project gets a consistent scaffold."""
+        from init_project import SKILL_DIR
+        template_path = os.path.join(SKILL_DIR, "templates", "bug-inbox.md")
+        self.assertTrue(os.path.exists(template_path),
+                        msg="templates/bug-inbox.md must exist for opt-in init")
+        with open(template_path, encoding="utf-8") as f:
+            content = f.read()
+        # Universal sections (must be present in any inbox)
+        self.assertIn("# Bug Inbox", content)
+        self.assertIn("风险级别", content)
+        self.assertIn("R10", content)  # ties to Skill R10
+        self.assertIn("验证笔记", content)
+        self.assertIn("关闭规则", content)
+        self.assertIn("同步规则", content)
+        self.assertIn("[ ]", content)
+        self.assertIn("[x]", content)
+
+    def test_init_generates_inbox_when_features_inbox_true(self) -> None:
+        """When workflow.json.features.inbox = True, vibe init creates
+        .agents/bug-inbox.md from the template with today's date stamped in."""
+        import importlib
+        import tempfile
+        import shutil
+
+        with tempfile.TemporaryDirectory() as tmp:
+            # Pre-create workflow.json with features.inbox = True
+            agents_dir = os.path.join(tmp, ".agents")
+            os.makedirs(agents_dir)
+            from workflow_state import default_workflow
+            wf = default_workflow("inbox-test")
+            wf["features"]["inbox"] = True
+            from common import atomic_write_json
+            atomic_write_json(os.path.join(agents_dir, "workflow.json"), wf)
+
+            # Run init
+            import init_project
+            importlib.reload(init_project)
+            init_project.init_project(tmp)
+
+            inbox_path = os.path.join(agents_dir, "bug-inbox.md")
+            self.assertTrue(os.path.exists(inbox_path),
+                            msg="bug-inbox.md must be generated when features.inbox=true")
+            with open(inbox_path, encoding="utf-8") as f:
+                content = f.read()
+            # Date should be stamped in (not the YYYY-MM-DD placeholder)
+            from datetime import datetime, timezone
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            self.assertIn(today, content)
+
+    def test_init_does_not_overwrite_existing_inbox(self) -> None:
+        """If .agents/bug-inbox.md already exists, init must NOT overwrite
+        it — preserves project-specific content (e.g. legacy Gemkeep inbox)."""
+        import importlib
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            agents_dir = os.path.join(tmp, ".agents")
+            os.makedirs(agents_dir)
+            from workflow_state import default_workflow
+            from common import atomic_write_json
+            wf = default_workflow("inbox-test")
+            wf["features"]["inbox"] = True
+            atomic_write_json(os.path.join(agents_dir, "workflow.json"), wf)
+
+            # Pre-existing inbox with custom content
+            inbox_path = os.path.join(agents_dir, "bug-inbox.md")
+            sentinel = "MY PROJECT-SPECIFIC CONTENT (preserved)"
+            with open(inbox_path, "w", encoding="utf-8") as f:
+                f.write(sentinel)
+
+            import init_project
+            importlib.reload(init_project)
+            init_project.init_project(tmp)
+
+            with open(inbox_path, encoding="utf-8") as f:
+                content = f.read()
+            self.assertEqual(content, sentinel,
+                             msg="Existing bug-inbox.md must be preserved verbatim")
+
+    def test_init_skips_inbox_when_features_inbox_false(self) -> None:
+        """Default off: features.inbox = False → no bug-inbox.md generated."""
+        import importlib
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            agents_dir = os.path.join(tmp, ".agents")
+            os.makedirs(agents_dir)
+            from workflow_state import default_workflow
+            from common import atomic_write_json
+            wf = default_workflow("no-inbox-test")
+            # Default already has features.inbox = False
+            self.assertEqual(wf["features"]["inbox"], False)
+            atomic_write_json(os.path.join(agents_dir, "workflow.json"), wf)
+
+            import init_project
+            importlib.reload(init_project)
+            init_project.init_project(tmp)
+
+            inbox_path = os.path.join(agents_dir, "bug-inbox.md")
+            self.assertFalse(os.path.exists(inbox_path),
+                             msg="bug-inbox.md must NOT exist when features.inbox=false")

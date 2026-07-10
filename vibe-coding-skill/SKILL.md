@@ -861,6 +861,8 @@ artifacts merely because a template exists.
     ordering, return-type widening) are NOT covered — type checkers catch
     those.
 
+65. **Bug inbox is an opt-in append-only ledger**: Projects MAY enable a `.agents/bug-inbox.md` ledger by setting `workflow.json.features.inbox = true` (default: `false`). When enabled, `vibe init` generates `.agents/bug-inbox.md` from `templates/bug-inbox.md` with a fresh append-only scaffold (header + risk-level matrix aligned with R10 + verification note format + closure rules + sync rules + speed-lookup commands). The inbox is the entry point for bugs that originate from scans, retro discoveries, or external reports; hotfixes (user-reported mid-session) MAY bypass the ledger but must reference the bug description in the commit message. Every inbox bug line MUST follow the format `- [ ] <risk>: <description> — <path:line> (<date>)` with at least one indented verification note (`- 验证 (date, actor): ✅/❌/⚠️ + concrete conclusion`). Closure flips `[ ]` to `[x]` and appends a `关闭 (date, actor): ✅/❌ <reason> — <commit-sha> (<spec-name> done)` line; rows are never deleted (append-only preserves audit trail). Drift detection (commit + doctor) is INTENTIONALLY deferred until ≥2 projects have adopted inbox — premature automation would hardcode a project-specific convention into Skill core. Projects that already have a `.agents/bug-inbox.md` (e.g. ones that adopted the pattern before this rule) are NOT overwritten by `vibe init`; their content is preserved verbatim so the ledger keeps continuity.
+
 ## State Model
 
 Normal states are:

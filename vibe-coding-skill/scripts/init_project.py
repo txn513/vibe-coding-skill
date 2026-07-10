@@ -111,8 +111,33 @@ def init_project(path: str, project_type: str = "generic", force: bool = False) 
 
     # Record the Skill version that initialised this project (Rule 52).
     _record_skill_version(agents_dir)
-    ensure_workflow(path)
+    workflow, _ = ensure_workflow(path)
     policy_manifest = scan_policy_sources(Path(path), apply=True)
+
+    # Rule 65: bug-inbox opt-in. When features.inbox is true, generate
+    # .agents/bug-inbox.md from templates/bug-inbox.md so the project has
+    # a fresh append-only bug ledger scaffold. Existing projects that
+    # already have a bug-inbox.md are not overwritten (init is idempotent
+    # for that file — the agent manually migrated content keeps priority).
+    features = (workflow or {}).get("features", {})
+    if features.get("inbox", False):
+        inbox_src = os.path.join(TEMPLATE_DIR, "bug-inbox.md")
+        inbox_dst = os.path.join(agents_dir, "bug-inbox.md")
+        if os.path.exists(inbox_src) and not os.path.exists(inbox_dst):
+            with open(inbox_src, encoding="utf-8") as f:
+                inbox_content = f.read()
+            # Stamp the initialisation date into the catalog header so the
+            # template doesn't ship with a placeholder.
+            inbox_content = inbox_content.replace(
+                "YYYY-MM-DD",
+                datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            )
+            atomic_write(inbox_dst, inbox_content)
+            print(f"   .agents/bug-inbox.md — bug 入口 ledger (Rule 65, features.inbox=true)")
+        elif os.path.exists(inbox_dst):
+            print(f"   .agents/bug-inbox.md — 已存在, 未覆盖 (保留项目级内容)")
+        else:
+            print(f"   ⚠️  features.inbox=true 但 templates/bug-inbox.md 不存在")
 
     print(f"✅ 项目初始化完成: {path}")
     print(f"   AGENTS.md     — Agent 上下文文件（含阶段强制规范）")

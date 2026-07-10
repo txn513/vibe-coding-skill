@@ -84,6 +84,9 @@ def default_workflow(project_name: str) -> dict:
         "review_separation": {
             "required_for": ["high"],
         },
+        "features": {
+            "inbox": False,
+        },
     }
 
 
@@ -107,7 +110,7 @@ def migrate(value: dict, project_name: str) -> bool:
     for key in (
         "project_id", "roles", "risk_profiles", "commands", "model_tiers",
         "repositories", "archive", "stage_stall_sla", "risk_required_rules",
-        "review_separation",
+        "review_separation", "features",
     ):
         if key not in value:
             value[key] = defaults[key]
