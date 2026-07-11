@@ -239,6 +239,17 @@ def set_status(
                 else:
                     print("❌ 标记 done 前需要一份结论为 approved 的关联审查记录")
                     print("   先运行 generate_review.py，并由独立审查者填写结论")
+                    print()
+                    print("   review-decision 必须填齐 5 段必备字段 (缺一段都过不了 review gate):")
+                    print("     1. > Decision-Record: <16-hex sha>  (record_review.py 自动算)")
+                    print("     2. | 结论: approved                    (或 changes-requested)")
+                    print("     3. - 结论依据: <file:line + 业务结论>  (含 grep / call-site / 影响面)")
+                    print("     4. - 已核对的验证证据: <evidence path 或 AC 引用>")
+                    print("     5. | Reviewer: <identity, 跟 builder 不同 (high-risk) 或相同可走 override>")
+                    print()
+                    print('   命令: vibe review-decision <project> <spec> approved "<file:line 业务结论>" "<evidence/path 或 AC 引用>" --reviewer <identity>')
+                    print("   (advisory: 错误消息列出必填字段，避免 retry 几次才搞清楚 record_review CLI 三参数)")
+                    print("<!-- vibe:review_decision_fields_remind: 5_fields -->")
                 return None
         if new_status == "released" and profile["require_release"] and not _has_current_evidence(
             project_root, spec_name, content, "release", profile, workflow

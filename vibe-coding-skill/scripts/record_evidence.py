@@ -227,6 +227,22 @@ def record_evidence(
 ```
 """
     atomic_write(evidence_file, content)
+    # C2 advisory (2026-07-11): bug spec fix-regression gate requires
+    # Command-Digests line to include ALL configured verify digests
+    # (subset check). If the agent recorded custom --command instead
+    # of --configured, the gate silently fails. Surface the gap right
+    # after recording so the agent fixes Command-Digests or re-records
+    # with --configured. Skipped when not bug-fix-regression (no gate
+    # to misalign with).
+    if (
+        phase == "verify"
+        and purpose == "fix-regression"
+        and command
+        and not configured
+    ):
+        _emit_fix_regression_digest_advisory(
+            project_root, command_digests, workflow
+        )
     if phase == "verify" and purpose == "standard" and spec_fields.get("risk") != "low":
         missing_ac = _missing_acceptance_criteria_references(
             spec_content, content, spec_fields.get("risk", "medium")
@@ -256,6 +272,49 @@ def _redact_output(output: str) -> str:
         r"\1 [REDACTED]",
         output,
     )
+
+
+def _emit_fix_regression_digest_advisory(
+    project_root: str, actual_digests: list[str], workflow: dict
+) -> None:
+    """Surface configured digest subset gap before advance gate hits it.
+
+    The bug-spec fix-regression evidence advance gate requires
+    `Command-Digests` ⊇ configured verify digests (subset check, see
+    set_status.py:_has_current_evidence purpose=fix-regression). When
+    agent records evidence with a custom `--command` instead of
+    `--configured`, the digests only contain the custom commands and
+    the gate silently fails on next `vibe advance review`.
+
+    2026-07-11 candidate 2 advisory — discover the gap at record
+    time, not advance time, by listing configured vs actual digests.
+    """
+    from workflow_state import configured_commands
+    from common import command_digest as _cd
+
+    configured = configured_commands(workflow, "verify")
+    if not configured:
+        return
+    expected = {_cd(c) for c in configured}
+    actual = set(actual_digests or [])
+    missing = expected - actual
+    if not missing:
+        return
+    print()
+    print("⚠️  Evidence Command-Digests 子集提示 (Rule 10 + 53b2afc):")
+    print("   bug spec fix-regression 推进 review 时 gate 要求")
+    print("   Command-Digests ⊇ configured verify digests。")
+    print(f"   当前实际 ({len(actual)}):")
+    for d in sorted(actual):
+        print(f"     - {d}")
+    print(f"   configured ({len(expected)}) — missing {len(missing)}:")
+    for d in sorted(missing):
+        print(f"     - {d}")
+    print("   修复方法 A: 用 `--configured` 重新跑 evidence，自动捕获所有 configured 命令 digest")
+    print("   修复方法 B: 在 evidence 文本里额外跑一次 configured verify 命令并把 digest 加进 Command-Digests")
+    print("   (advisory 不阻塞; advance 时 gate 会 reject, 看到这条提示可预先对齐)")
+    print("<!-- vibe:fix_regression_digest_subset: missing="
+          f"{','.join(sorted(missing))} -->")
 
 
 def misplaced_vibe_options(command: list[str] | None) -> list[str]:
