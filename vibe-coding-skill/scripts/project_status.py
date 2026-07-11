@@ -439,14 +439,17 @@ def _aggregate_signals(project_root: str, *, skip_self_analyze: bool = False, sk
             "source_file": sig.get("source_file", ""),
             "status": sig.get("status", "unknown"),
         }
-        # For mixed-level signals probe both pools; for explicit levels
-        # probe only the matching pool. Allows substring dedup against
-        # self_analyze failure_modes regardless of which pool they live in.
-        probe_pools = (
-            [skill_pool, project_pool]
-            if resolved_level == "project" and level == "mixed"
-            else [skill_pool if resolved_level == "skill" else project_pool]
-        )
+        # For mixed-level signals probe both pools but default-pool first
+        # matches resolved_level (heuristic's best guess), so brand-new
+        # keys land in the pool the heuristic intended. For explicit
+        # levels only probe the matching pool. Substring dedup against
+        # self_analyze failure_modes is allowed in both directions.
+        if level == "mixed":
+            default_pool = skill_pool if resolved_level == "skill" else project_pool
+            other_pool = project_pool if default_pool is skill_pool else skill_pool
+            probe_pools = [default_pool, other_pool]
+        else:
+            probe_pools = [skill_pool if resolved_level == "skill" else project_pool]
         merged = False
         for pool in probe_pools:
             if key in pool:

@@ -178,17 +178,28 @@ def _extract_title(content: str) -> str:
 
 
 def _infer_level(content: str) -> str:
-    """Best-effort level inference. Falls back to 'mixed'."""
+    """Best-effort level inference. Falls back to 'mixed'.
+
+    Heuristic weights (2026-07-11):
+      - explicit prefixes ("Skill upgrade:" / "Project-level:" / "项目级")
+        are strong signals and count for 3 points each
+      - mid-content keywords ("skill ", "skill 升级", "rule ", "项目沉淀")
+        are weaker signals and count for 1 point each
+      - tie or no signal → 'mixed'
+
+    Threshold: any positive score on a side resolves to that level.
+    Mixed means: aggregator will probe both pools using substring dedup.
+    """
     text = content.lower()
-    skill_hits = sum(
-        text.count(k) for k in ("skill ", "skill 升级", "skill-level", "skill candidate", "rule ")
-    )
-    project_hits = sum(
-        text.count(k) for k in ("项目级", "project-level", "project 沉淀", "项目沉淀")
-    )
-    if skill_hits > project_hits and skill_hits >= 2:
+    strong_skill = sum(text.count(k) for k in ("skill upgrade:", "skill 升级:", "skill-level:"))
+    strong_project = sum(text.count(k) for k in ("project-level:", "project 沉淀:", "项目级"))
+    weak_skill = sum(text.count(k) for k in ("skill ", "skill 升级", "skill-level", "skill candidate", "rule "))
+    weak_project = sum(text.count(k) for k in ("项目级", "project-level", "project 沉淀", "项目沉淀"))
+    skill_score = strong_skill * 3 + weak_skill
+    project_score = strong_project * 3 + weak_project
+    if skill_score > project_score and skill_score > 0:
         return "skill"
-    if project_hits > skill_hits and project_hits >= 2:
+    if project_score > skill_score and project_score > 0:
         return "project"
     return "mixed"
 

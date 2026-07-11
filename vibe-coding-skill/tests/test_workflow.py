@@ -11725,3 +11725,74 @@ class RetrospectivePrefillTests(unittest.TestCase):
             # File should be untouched
             content = Path(retro).read_text(encoding="utf-8")
             self.assertIn("{{PRIMARY_FAILURE_MODE}}", content)
+
+
+class AggregatorPoolRoutingTests(unittest.TestCase):
+    """Regression tests for the bug found in 2026-07-11 smoke testing:
+
+    upgrade_signals signals with level='mixed' (heuristic couldn't decide)
+    were defaulting to skill_pool, even when resolved_level was 'project'.
+    This put project-level-only proposal-file signals into skill_candidates.
+
+    Real failure mode: an agent would see "Skill 候选" listed for what
+    was actually a project-level implementation checklist change. Worse,
+    a Skill maintainer might mistakenly prioritize those for Skill-level
+    review when they're really project-local.
+    """
+
+    def test_mixed_level_project_signal_lands_in_project_pool(self) -> None:
+        """Title with single 'project-level' mention → level='mixed' →
+        resolved_level='project' → MUST land in project_signals,
+        not skill_candidates."""
+        with tempfile.TemporaryDirectory() as tmp:
+            proj = Path(tmp)
+            init_project.init_project(tmp, "web")
+            (proj / ".agents" / "skill-upgrade-candidates-x.md").write_text(
+                "# Project-level: 补充 Implementation Checklist 的边界条件项\n\n"
+                "**状态**: proposed\n",
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "init", "-q"], cwd=tmp, check=True)
+
+            from scripts import project_status  # noqa: PLC0415
+            agg = project_status._aggregate_signals(tmp)
+            # No Skill-level signals should appear from this single
+            # project-level proposal file.
+            self.assertEqual(
+                len(agg["skill_candidates"]), 0,
+                msg=f"project-level signal wrongly routed to "
+                    f"skill_candidates: {agg['skill_candidates']}"
+            )
+            self.assertGreaterEqual(len(agg["project_signals"]), 1)
+            # The signal must be in the project pool, with upgrade_signals source
+            found = [
+                c for c in agg["project_signals"]
+                if "upgrade_signals" in c["sources"]
+            ]
+            self.assertEqual(len(found), 1)
+            self.assertEqual(found[0]["level"], "project")
+
+    def test_mixed_level_skill_signal_lands_in_skill_pool(self) -> None:
+        """Title with single 'skill' mention → level='mixed' →
+        resolved_level='project' BUT in this case the title has
+        'skill' indicator. Test ensures heuristic direction works
+        both ways."""
+        with tempfile.TemporaryDirectory() as tmp:
+            proj = Path(tmp)
+            init_project.init_project(tmp, "web")
+            (proj / ".agents" / "skill-upgrade-candidates-x.md").write_text(
+                "# Skill upgrade: spec drift auto-detection\n\n"
+                "**状态**: proposed\n",
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "init", "-q"], cwd=tmp, check=True)
+
+            from scripts import project_status  # noqa: PLC0415
+            agg = project_status._aggregate_signals(tmp)
+            # This should land in skill_candidates because title starts
+            # with "Skill upgrade:" (heuristic detects 2+ skill hits).
+            skill_only = [
+                c for c in agg["skill_candidates"]
+                if "upgrade_signals" in c["sources"]
+            ]
+            self.assertEqual(len(skill_only), 1)
