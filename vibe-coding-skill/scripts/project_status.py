@@ -591,49 +591,70 @@ def _maybe_inject_governance_candidates(
 
 
 def _print_self_analyze_summary(project_root: str, skip: bool = False) -> None:
-    """P1+ (2026-07-11): surface self_analyze governance candidates inline.
+    """P1+ (2026-07-11): surface aggregated signals inline.
 
-    Called from project_next() (after gate_verdict). Persists full
-    report to .agents/reports/self-analyze.md for query by downstream
-    tools / agent re-read. Top 3 candidates printed; full list
-    accessible via `vibe self-analyze <project>`.
+    Called from project_next() as a FALLBACK for the post-retro
+    surfacing (which fires when vibe retrospective writes a retro).
+    Even if the agent skipped writing a retro for the just-finished
+    spec, vibe next still surfaces whatever is currently in the
+    aggregator pool — from prior retros AND from upgrade-candidate
+    files. So the "agent completed a feature, but no retro, ran
+    vibe next for the next thing instead" path still surfaces
+    accumulated signals.
 
-    Pass `skip=True` to bypass when caller has already invoked the
-    report persist (e.g. for `--skip-self-analyze` batch use).
+    Shows:
+      - Skill-level candidates (top 5 with priority + sources)
+      - Project-level signals (top 5 with sources)
+      - Both buckets only printed if non-empty
+      - Silent when aggregator pool is empty (no spam)
+
+    Pass `skip=True` to bypass for batch/test use.
     """
     if skip:
         return
     try:
-        import self_analyze
-    except Exception:  # noqa: BLE001
+        aggregated = _aggregate_signals(project_root)
+    except Exception:  # noqa: BLE001 — aggregator failure must not break vibe next
         return
-    try:
-        findings = self_analyze.analyze(project_root)
-    except Exception:  # noqa: BLE001
-        return
-    if "error" in findings:
-        # self_analyze requires >= 2 retros; silent when not enough.
-        return
-    candidates = findings.get("governance_candidates", [])
-    if not candidates:
+    skill_candidates = aggregated.get("skill_candidates", [])
+    project_signals = aggregated.get("project_signals", [])
+    if not skill_candidates and not project_signals:
         return
     print()
-    print(
-        f"📚 self_analyze (P1+): {len(candidates)} 条 governance 候选"
-        " —— 跨项目可复用 / 抽象治理规则的发现:"
-    )
-    for cand in candidates[:3]:
-        mode = cand.get("failure_mode", "?")
-        issue = cand.get("issue", "")
-        print(f"   - {mode}: {issue[:120]}{'...' if len(issue) > 120 else ''}")
-    if len(candidates) > 3:
-        print(f"   ... 还有 {len(candidates) - 3} 条")
+    if skill_candidates:
+        print(
+            f"📚 Skill 候选 (P1+, 待管理员评审): {len(skill_candidates)} 条"
+        )
+        for cand in skill_candidates[:5]:
+            mode = cand.get("title", "?")
+            issue = cand.get("issue", "")
+            sources_str = ",".join(cand.get("sources", []))
+            priority_marker = "🔴" if cand.get("priority") == "high" else "🟡"
+            print(
+                f"   {priority_marker} {mode}: {issue[:100]}{'...' if len(issue) > 100 else ''} "
+                f"(来源: {sources_str})"
+            )
+        if len(skill_candidates) > 5:
+            print(f"   ... 还有 {len(skill_candidates) - 5} 条")
+    if project_signals:
+        print(
+            f"📂 项目级信号 (P1+, 待沉淀): {len(project_signals)} 条"
+        )
+        for sig in project_signals[:5]:
+            title = sig.get("title", "?")
+            sources_str = ",".join(sig.get("sources", []))
+            print(
+                f"   - {title} (来源: {sources_str})"
+            )
+        if len(project_signals) > 5:
+            print(f"   ... 还有 {len(project_signals) - 5} 条")
     print(
         f"   命令: vibe self-analyze {project_root} | "
         f"报告: .agents/reports/self-analyze.md"
     )
     print(
-        f"<!-- vibe:self_analyze_summary: count={len(candidates)} -->"
+        f"<!-- vibe:self_analyze_summary: skill={len(skill_candidates)} "
+        f"project={len(project_signals)} -->"
     )
 
 

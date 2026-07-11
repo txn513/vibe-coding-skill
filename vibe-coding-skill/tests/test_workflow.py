@@ -11338,17 +11338,16 @@ class NextAutoFireSelfAnalyzeTests(unittest.TestCase):
                 project_status.project_next(tmp, args=None)
             text = output.getvalue()
             # Auto-fired summary header
-            self.assertIn("self_analyze (P1+):", text)
-            self.assertIn("governance 候选", text)
+            # Header marker for Skill-level bucket (P1+ fallback surfacing)
+            self.assertIn("Skill 候选 (P1+", text)
+            # Header marker for project-level bucket
+            self.assertIn("项目级信号 (P1+", text)
             # Failure mode surfaced (top candidate)
             self.assertIn("manual code review", text)
-            # Marker tag present (Rule 50 machine-readable)
+            # Machine marker present (Rule 50, includes skill + project counts)
             self.assertIn("vibe:self_analyze_summary:", text)
-            # Aggregator output includes both Skill-level + project-level signals
-            # (project-level "项目级信号" comes from self_analyze.suggestions on
-            # the same 3 retros — see _aggregate_signals dedup behavior).
-            self.assertIn("Skill 候选", text)
-            self.assertIn("项目级信号", text)
+            self.assertIn("skill=1", text)
+            self.assertIn("project=3", text)
 
     def test_vibe_next_silent_when_no_retros(self) -> None:
         """When retros/ dir doesn't exist or has <2 retros, self_analyze
@@ -11886,3 +11885,77 @@ class AggregatorPostRetroTests(unittest.TestCase):
                     finally:
                         mod._aggregate_signals = orig
                     break
+
+
+class VibeNextFallbackTests(unittest.TestCase):
+    """Cover P1+ (2026-07-11): vibe next as fallback for post-retro surfacing.
+
+    User principle (2026-07-11 review): "agent normally walks through
+    a flow, after completing a feature it should trigger". The natural
+    trigger is `vibe retrospective`. But agents don't always write
+    retro right after a feature — they may move to next spec via
+    `vibe next` first.
+
+    Fallback requirement: `vibe next` MUST surface accumulated signals
+    even if no retro was written for the just-finished feature, AS
+    LONG AS prior retros / proposal files exist in the project.
+
+    This is the safety net: post-retro surfacing is the primary
+    trigger, but vibe next catches the case where the agent skipped
+    retro and went straight to planning the next thing.
+    """
+
+    def test_vibe_next_surfaces_skill_when_no_new_retro(self) -> None:
+        """Skill-level candidates from prior retros surface in vibe next
+        even when no retro was written for the just-finished feature."""
+        with tempfile.TemporaryDirectory() as tmp:
+            proj = Path(tmp)
+            init_project.init_project(tmp, "web")
+            subprocess.run(["git", "init", "-q"], cwd=tmp, check=True)
+            (proj / ".agents" / "retros").mkdir(parents=True, exist_ok=True)
+            for i in range(2):
+                (proj / ".agents" / "retros" / f"old-{i}.md").write_text(
+                    f"# old-{i}\n\n## 失败模式\n\n- **主失败模式**: evidence not reviewed\n## 目标回顾\n\n**最初意图**: x\n**实际交付**: y\n**差异分析**: z\n",
+                    encoding="utf-8",
+                )
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                project_status.project_next(tmp, args=None)
+            text = output.getvalue()
+            # Skill-level fallback works
+            self.assertIn("Skill 候选 (P1+", text)
+            self.assertIn("evidence not reviewed", text)
+            # Priority marker present (🔴 for high, 🟡 for medium)
+            self.assertTrue("🔴" in text or "🟡" in text)
+
+    def test_vibe_next_surfaces_project_signals_in_detail(self) -> None:
+        """Project-level signals appear with full details (not just a count)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            proj = Path(tmp)
+            init_project.init_project(tmp, "web")
+            subprocess.run(["git", "init", "-q"], cwd=tmp, check=True)
+            (proj / ".agents" / "skill-upgrade-candidates-2026-07-08.md").write_text(
+                "# Project-level: 补充 Implementation Checklist 的边界条件项\n\n"
+                "**状态**: proposed\n",
+                encoding="utf-8",
+            )
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                project_status.project_next(tmp, args=None)
+            text = output.getvalue()
+            # Project-level signal detail appears (not just a count)
+            self.assertIn("项目级信号 (P1+", text)
+            self.assertIn("Implementation Checklist", text)
+            self.assertIn("upgrade_signals", text)
+
+    def test_vibe_next_silent_when_aggregator_pool_empty(self) -> None:
+        """No retros + no proposal files → vibe next silent (no spam)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            init_project.init_project(tmp, "web")
+            subprocess.run(["git", "init", "-q"], cwd=tmp, check=True)
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                project_status.project_next(tmp, args=None)
+            text = output.getvalue()
+            self.assertNotIn("Skill 候选 (P1+", text)
+            self.assertNotIn("项目级信号 (P1+", text)
