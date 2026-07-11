@@ -12313,3 +12313,220 @@ class VibeStatusAggregatorCountTests(unittest.TestCase):
             # no longer counted, not that all buckets are empty).
             self.assertIn("0 条 Skill", text2)
             self.assertNotIn("1 条 Skill", text2)
+
+
+
+class EvidenceMissingDigestsDiagnosticTests(unittest.TestCase):
+    """Cover the upgrade triggered by 2026-07-12 chore-gitignore-aggregator-exclude
+    retro: agent hits retry after `vibe evidence --command` (manual digest)
+    doesn't satisfy workflow.json configured-command digest set.
+
+    Set_status gate previously emitted "❌ 进入审查前需要当前规格版本的
+    verify 证据" without naming which digest was missing or which CLI
+    flag re-runs evidence with the configured capture. The 2026-07-12
+    retro showed the agent fell back to manually patching the
+    `Command-Digests:` line in verify.md (anti-pattern). The fix adds a
+    `_missing_command_digests()` helper and a diagnostic hint in the
+    gate failure message.
+    """
+
+    def setUp(self) -> None:
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.project = Path(self.tempdir.name)
+        init_project.init_project(str(self.project), "web")
+        subprocess.run(["git", "init", "-q"], cwd=str(self.project), check=True)
+
+    def tearDown(self) -> None:
+        self.tempdir.cleanup()
+
+    def _setup_workflow_with_verify_command(self) -> str:
+        """Configure workflow.json commands.verify with a fake command,
+        return its expected digest."""
+        wf_path = self.project / ".agents" / "workflow.json"
+        wf = json.loads(wf_path.read_text(encoding="utf-8"))
+        wf["commands"]["verify"] = [["bash", "-c", "true"]]
+        wf_path.write_text(json.dumps(wf), encoding="utf-8")
+        from common import command_digest, spec_digest
+        self._spec_digest = spec_digest  # bind for inner use
+        return command_digest(["bash", "-c", "true"])
+
+    def _write_spec(self, name: str = "demo") -> str:
+        """Write a spec and return its content."""
+        content = (
+            f"# {name}\n\n"
+            "> 状态: in-progress | 创建: 2026-07-12 00:00 UTC | 更新: 2026-07-12 00:00 UTC\n\n"
+            "## 意图\n修复 bug\n\n"
+            "## 验收标准\n"
+            "- AC1 测试通过\n\n"
+            "## 涉及范围\n"
+            "- **修改文件**: src/example.py\n"
+        )
+        (self.project / ".agents" / "specs" / f"{name}.md").write_text(
+            content, encoding="utf-8",
+        )
+        return content
+
+    def test_missing_command_digests_helper_returns_missing(self) -> None:
+        """When evidence file exists but its Command-Digests don't cover
+        the workflow.json verify command, helper returns the missing
+        digest + configured command list."""
+        expected_digest = self._setup_workflow_with_verify_command()
+        spec_content = self._write_spec("demo")
+
+        # Write a verify.md with a DIFFERENT digest (simulating --command
+        # manual capture that doesn't match configured).
+        ev_dir = self.project / ".agents" / "evidence" / "demo"
+        ev_dir.mkdir(parents=True, exist_ok=True)
+        # Real record_evidence.py writes each metadata field on its own
+        # `>` line, NOT a single combined `>` line — regex requires that.
+        (ev_dir / "verify.md").write_text(
+            f"# demo — verify\n\n"
+            f"> 规格: demo | 规格摘要: {self._spec_digest(spec_content)}\n"
+            f"> Command-Digests: deadbeefdeadbeef\n",
+            encoding="utf-8",
+        )
+        from scripts import set_status as st
+        wf, _ = ensure_workflow(str(self.project))
+        profile = risk_profile(str(self.project), spec_content)
+        missing, configured = st._missing_command_digests(
+            str(self.project), "demo", "verify", wf,
+        )
+        self.assertEqual(missing, [expected_digest])
+        self.assertEqual(configured, [["bash", "-c", "true"]])
+
+    def test_missing_command_digests_helper_empty_when_configured_covered(self) -> None:
+        """When evidence covers the configured digest, helper returns ([], [])."""
+        from common import command_digest
+        expected_digest = self._setup_workflow_with_verify_command()
+        spec_content = self._write_spec("demo")
+
+        ev_dir = self.project / ".agents" / "evidence" / "demo"
+        ev_dir.mkdir(parents=True, exist_ok=True)
+        (ev_dir / "verify.md").write_text(
+            f"# demo — verify\n\n"
+            f"> 规格: demo | 规格摘要: {self._spec_digest(spec_content)}\n"
+            f"> Command-Digests: {expected_digest}\n",
+            encoding="utf-8",
+        )
+        from scripts import set_status as st
+        wf, _ = ensure_workflow(str(self.project))
+        profile = risk_profile(str(self.project), spec_content)
+        missing, configured = st._missing_command_digests(
+            str(self.project), "demo", "verify", wf,
+        )
+        # Helper always returns the configured commands when present
+        # (so callers can print the retry path); missing is empty when
+        # evidence already covers the digest set.
+        self.assertEqual(missing, [])
+        self.assertEqual(configured, [["bash", "-c", "true"]])
+
+    def test_set_status_gate_emits_diagnostic_when_missing_digest(self) -> None:
+        """When the verify gate fails due to missing Command-Digests, the
+        error output must mention the missing digest AND `--configured`
+        retry path so the agent can self-correct without manual patches."""
+        expected_digest = self._setup_workflow_with_verify_command()
+        spec_content = self._write_spec("demo")
+
+        ev_dir = self.project / ".agents" / "evidence" / "demo"
+        ev_dir.mkdir(parents=True, exist_ok=True)
+        # Actor/Role match expected_role="builder" so role check passes.
+        # Digest intentionally missing → commands_ok fails.
+        # Real record_evidence.py format: each metadata field on its
+        # own `>` line. Snapshot/Actor/Role/AC come on independent lines
+        # so role/identity checks pass without breaking digest parsing.
+        (ev_dir / "verify.md").write_text(
+            f"# demo — verify\n\n"
+            f"> 规格: demo | 规格摘要: {self._spec_digest(spec_content)}\n"
+            f"> Snapshot: N/A\n"
+            f"> Actor: lance | Role: builder\n"
+            f"> Command-Digests: deadbeefdeadbeef\n"
+            f"AC1\n",
+            encoding="utf-8",
+        )
+
+        from scripts import set_status as st
+        wf, _ = ensure_workflow(str(self.project))
+        profile = risk_profile(str(self.project), spec_content)
+
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            result = st.set_status(
+                str(self.project), "demo", "review",
+                force=False, force_reason="",
+                actor="lance", role="builder",
+                auto_changelog=False,
+            )
+        text = output.getvalue()
+        # Gate should reject the advance (commands_ok=False)
+        self.assertIsNone(result)
+        # Diagnostic hints surface:
+        self.assertIn("❌ 进入审查前需要当前规格版本的 verify 证据", text)
+        self.assertIn("Missing Command-Digests", text)
+        self.assertIn(expected_digest, text)
+        self.assertIn("--configured", text)
+        self.assertIn("--purpose fix-regression", text)
+
+
+class EvidenceCommandPositionOrderTests(unittest.TestCase):
+    """Cover the 2026-07-12 chore-gitignore-aggregator-exclude retro:
+    EVIDENCE_EPILOG and argparse error output now make `--command` last
+    visible to the agent before they retry with the wrong flag order.
+    """
+
+    def test_epilog_documents_position_order(self) -> None:
+        """EVIDENCE_EPILOG contains the Position Order section with the
+        required flag sequence (--actor/--role/--purpose/--configured
+        before --command)."""
+        from scripts import vibe
+        text = vibe.EVIDENCE_EPILOG
+        self.assertIn("Position order (REQUIRED", text)
+        self.assertIn("REMAINDER", text)
+        self.assertIn("吞掉后续 flag", text)
+        # Within the Position Order section only, --actor must come before
+        # --role, --purpose, --configured, --command (in that order).
+        pos_start = text.find("Position order (REQUIRED")
+        pos_section = text[pos_start:]
+        # Walk forward finding each flag in order — first occurrence is
+        # the correct one in the Position Order section.
+        actor_idx = pos_section.find("--actor")
+        role_idx = pos_section.find("--role", actor_idx)
+        purpose_idx = pos_section.find("--purpose", role_idx)
+        configured_idx = pos_section.find("--configured", purpose_idx)
+        command_idx = pos_section.find("--command", configured_idx)
+        self.assertGreater(actor_idx, 0)
+        self.assertGreater(role_idx, actor_idx)
+        self.assertGreater(purpose_idx, role_idx)
+        self.assertGreater(configured_idx, purpose_idx)
+        self.assertGreater(command_idx, configured_idx)
+
+    def test_epilog_lists_2_common_errors(self) -> None:
+        """EVIDENCE_EPILOG surfaces the two retro-empirical wrong-order
+        mistakes as ❌ cases so the agent sees them before running."""
+        from scripts import vibe
+        text = vibe.EVIDENCE_EPILOG
+        # First empirical error: --command too early
+        self.assertIn("--command 在前, --actor / --role / --purpose", text)
+        # Second empirical error: --purpose after --command
+        self.assertIn("--command", text)
+        self.assertIn("--purpose reproduction", text)
+        # At least one ❌ marker for each
+        self.assertGreaterEqual(text.count("❌"), 2)
+
+    def test_command_argparse_error_includes_fix_hint(self) -> None:
+        """When argparse detects vibe flags after --command, the error
+        message includes the 💡 fix hint pointing to the right order."""
+        from scripts import vibe
+        # Invoke the help formatter with a dry run - just verify the source
+        # contains the enhanced error message
+        src = open(vibe.__file__, encoding="utf-8").read()
+        self.assertIn("options must appear before --command", src)
+        self.assertIn("nargs=REMAINDER, 会吞掉后续所有 token", src)
+        self.assertIn("--actor --role --purpose --configured --command", src)
+
+    def test_command_nargs_remainder_metavar_set(self) -> None:
+        """--command REMAINDER has metavar="CMD" so --help output is
+        discoverable (e6d40ed template — never hide parameters)."""
+        from scripts import vibe
+        src = open(vibe.__file__, encoding="utf-8").read()
+        # metavar appears in the add_argument call for --command
+        self.assertIn('metavar="CMD"', src)

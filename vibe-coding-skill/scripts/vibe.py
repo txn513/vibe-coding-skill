@@ -93,6 +93,25 @@ AC reference format (verify phase 必须):
      (缺 non-empty evidence 描述, gate 报 "证据说明不能为空")
   ✅ vibe evidence . my-spec verify passed "ran pytest tests/ -v"
   ✅ vibe evidence . my-spec verify passed --command "pytest tests/ -v"
+
+Position order (REQUIRED — argparse nargs=REMAINDER on --command 吞掉后续 flag):
+  vibe evidence <project_root> <spec_name> <phase> <result> [description...]
+        [before --command flags]
+        --actor <name> --role <role> --purpose <purpose> --configured
+        --command "<cmd>"        <- must come LAST (REMAINDER swallows later flags)
+
+常见错误 (retro-empirical 2026-07-12):
+  ❌ --command 在前, --actor / --role / --purpose 在后
+       → argparse 报 "options must appear before --command: --purpose" 等
+       → 修复: 调整顺序, --command 放最末
+  ❌ vibe evidence . <spec> verify passed --command "..." --purpose reproduction
+       → 同样 R36 反模式; --purpose 必须放 --command 前面
+  ❌ --command 写了两次 (两个独立命令)
+       → bash 把第二个 --command 当成前一个命令的参数吞掉
+       → 修复: 用 `bash -c 'cmd1 && cmd2'` 合并到单 --command
+  ✅ vibe evidence . <spec> verify passed \
+        --actor lance --role builder --purpose reproduction --configured \
+        --command "pytest tests/ -v"
 """
 
 import refresh_context
@@ -384,8 +403,12 @@ def main() -> None:
     evidence.add_argument("description", nargs="*", default=[])  # 0+ tokens; shlex.join when dispatching
     evidence.add_argument("--actor", default="")
     evidence.add_argument("--role", default="")
-    evidence.add_argument("--command", dest="exec_command", nargs=argparse.REMAINDER)
-    evidence.add_argument("--configured", action="store_true")
+    evidence.add_argument(
+        "--command", dest="exec_command", nargs=argparse.REMAINDER, metavar="CMD",
+        help="Capture argv + digest for the command (REMAINDER: must come LAST).",
+    )
+    evidence.add_argument("--configured", action="store_true",
+                          help="Auto-capture digests from workflow.json [commands.<phase>]")
     evidence.add_argument("--purpose", choices=sorted(record_evidence.PURPOSES), default="standard")
     evidence.epilog = EVIDENCE_EPILOG
     evidence.formatter_class = argparse.RawDescriptionHelpFormatter
@@ -699,6 +722,8 @@ def main() -> None:
             parser.error(
                 "vibe evidence options must appear before --command: "
                 + ", ".join(misplaced)
+                + "\n   💡 --command 用 nargs=REMAINDER, 会吞掉后续所有 token"
+                + "\n   ✅ 正确顺序: --actor --role --purpose --configured --command"
             )
         # argparse.REMAINDER keeps quoted strings as one token. Resplit with
         # shlex so a quoted command such as `node /tmp/x.cjs` becomes the

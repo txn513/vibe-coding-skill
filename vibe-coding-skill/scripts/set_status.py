@@ -209,6 +209,24 @@ def set_status(
                 )
                 if missing_ac:
                     print(f"   verify 证据缺少验收标准引用: {', '.join(missing_ac)}")
+                # Surface missing Command-Digests explicitly so the agent
+                # knows the retry path is `vibe evidence --configured`,
+                # not "patch verify.md" (the 2026-07-12 retro anti-pattern).
+                missing_digests, configured_cmds = _missing_command_digests(
+                    project_root, spec_name, "verify", workflow,
+                )
+                if missing_digests:
+                    print(
+                        f"   💡 Missing Command-Digests: "
+                        f"{', '.join(missing_digests)}"
+                    )
+                    print(
+                        f"   💡 工作区验证失败时 retry 路径: "
+                        f"`vibe evidence {project_root} {spec_name} verify "
+                        f"passed <...> --configured` 自动抓 workflow.json "
+                        f"verify 命令 digest; "
+                        f"或 `--purpose fix-regression --configured` (bug spec)"
+                    )
                 print("   使用 record_evidence.py 记录 passed 或 not-applicable")
                 return None
 
@@ -655,6 +673,46 @@ def _allowed_result_for_purpose(purpose: str) -> str:
     if purpose == "reproduction":
         return "passed|failed|not-applicable"
     return "passed|not-applicable"
+
+
+def _missing_command_digests(
+    project_root: str,
+    spec_name: str,
+    phase: str,
+    workflow: dict,
+    purpose: str = "standard",
+) -> tuple[list[str], list[list[str]]]:
+    """Return (missing_digests, expected_commands) when the evidence file
+    is present but lacks Command-Digests that match workflow.json's
+    configured commands. Returned for diagnostic output at advance gate.
+
+    Returns ([], []) when there is nothing configured or evidence already
+    covers the digest set — caller suppresses the diagnostic hint.
+    """
+    configured = configured_commands(workflow, phase)
+    if not configured:
+        return [], []
+    expected = [command_digest(c) for c in configured]
+    evidence_name = phase if purpose == "standard" else f"{phase}-{purpose}"
+    evidence_file = os.path.join(
+        project_root, ".agents", "evidence", spec_name, f"{evidence_name}.md",
+    )
+    if not os.path.exists(evidence_file):
+        return [], []
+    with open(evidence_file, encoding="utf-8") as handle:
+        evidence = handle.read()
+    digest_match = re.search(
+        r"^>\s*Command-Digests:\s*(.+)$", evidence, re.MULTILINE,
+    )
+    actual = set()
+    if digest_match and digest_match.group(1).strip() != "N/A":
+        actual = {
+            item.strip()
+            for item in digest_match.group(1).split(",")
+            if item.strip()
+        }
+    missing = [d for d in expected if d not in actual]
+    return missing, configured
 
 
 def _has_current_evidence(
