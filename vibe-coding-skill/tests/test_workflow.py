@@ -11076,3 +11076,114 @@ class EvidenceHelpPositionOrderEpilogTests(unittest.TestCase):
         self.assertIn("bash -c", out)
         self.assertIn("AC reference format", out)
         self.assertIn("troubleshooting:", out)
+
+
+class RetrospectiveSkillCandidateCategorizationTests(unittest.TestCase):
+    """Cover 2026-07-11 follow-up: `vibe retrospective` output surfaces
+    the Skill 候选 vs 项目沉淀 categorization BEFORE the 4-step 下一步
+    list, so agents don't walk 1→2→3→4 sequentially and skip the Skill
+    候选 decision. Real failure mode: agents write retro, fill in
+    failure-modes and AGENTS.md updates, but leave the 沉淀落点 →
+    Skill 候选 fields as '{{SKILL_CANDIDATE}}' or 'no' — those gaps
+    are invisible to self_analyze and Skill-level patterns are lost.
+    """
+
+    def _setup_minimal_retro_project(self, tmp: str, *, skill_field: str, summary_field: str) -> str:
+        """Init project, write spec+retro with the two 沉淀落点 fields
+        either filled-in (categorization done) or left as placeholders."""
+        from pathlib import Path as _Path
+        proj = _Path(tmp)
+        init_project.init_project(tmp, "web")
+        # Spec at released (gate passes retro auto)
+        spec = proj / ".agents" / "specs" / "foo.md"
+        from tests.test_workflow import VALID_SPEC
+        spec.write_text(VALID_SPEC.format(status="released"), encoding="utf-8")
+        # Retro with skill-candidate fields filled or not
+        retro_dir = proj / ".agents" / "retros"
+        retro_dir.mkdir(parents=True, exist_ok=True)
+        retro = retro_dir / "foo.md"
+        retro.write_text(
+            "# foo retro\n\n"
+            "## 沉淀落点\n\n"
+            f"- **是否形成 Skill 治理候选**: {skill_field}\n"
+            f"- **如果形成，候选摘要是什么**: {summary_field}\n",
+            encoding="utf-8",
+        )
+        return tmp
+
+    def test_unfilled_skill_candidate_field_emits_warning(self) -> None:
+        """When retro 沉淀落点 → Skill 候选 two fields are left as
+        placeholders, the post-retrospective output surfaces a
+        ⚠️ reminder with the missing-field names."""
+        import tempfile
+        from retrospective import run_retrospective, _print_skill_candidate_field_status
+        with tempfile.TemporaryDirectory() as tmp:
+            self._setup_minimal_retro_project(
+                tmp,
+                skill_field="{{SKILL_CANDIDATE}}",
+                summary_field="(待填写)",
+            )
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                run_retrospective(tmp, "foo")
+            text = output.getvalue()
+            # Categorization header present
+            self.assertIn("Skill 候选 vs 项目沉淀", text)
+            self.assertIn("Rule 18", text)
+            # Unfilled warning emitted with marker tag
+            self.assertIn("尚未填写", text)
+            self.assertIn("retro_skill_candidate_unfilled:", text)
+            # The (待填写) lines for the agent to see and act on
+            self.assertIn("是否形成 Skill 治理候选", text)
+            self.assertIn("候选摘要", text)
+
+    def test_explicit_no_shows_comfort_message(self) -> None:
+        """If agent wrote an explicit '否' / 'no' in skill candidate
+        field, the output marks it as a positive decision (decision
+        made, not a missed step)."""
+        from retrospective import _print_skill_candidate_field_status
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            _print_skill_candidate_field_status(
+                ".", "foo"
+            ) if False else None  # placeholder so import parses
+        # Use a tempdir to exercise the real path
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            from pathlib import Path as _Path
+            proj = _Path(tmp)
+            (proj / ".agents" / "retros").mkdir(parents=True, exist_ok=True)
+            (proj / ".agents" / "retros" / "foo.md").write_text(
+                "## 沉淀落点\n\n"
+                "- **是否形成 Skill 治理候选**: 否\n"
+                "- **如果形成，候选摘要是什么**: 不形成\n",
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                _print_skill_candidate_field_status(tmp, "foo")
+            text = buf.getvalue()
+            self.assertIn("已决策: 不形成", text)
+
+    def test_filled_skill_candidate_shows_summary(self) -> None:
+        """If agent filled the skill candidate field with a real
+        summary, that summary is surfaced back as ✅ so the agent
+        sees their own categorization echoed (audit trail)."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            from pathlib import Path as _Path
+            proj = _Path(tmp)
+            (proj / ".agents" / "retros").mkdir(parents=True, exist_ok=True)
+            (proj / ".agents" / "retros" / "foo.md").write_text(
+                "## 沉淀落点\n\n"
+                "- **是否形成 Skill 治理候选**: 形成 (governance 级)\n"
+                "- **如果形成，候选摘要是什么**: 给 vibe commit 加 expected-file-list pre-print\n",
+                encoding="utf-8",
+            )
+            from retrospective import _print_skill_candidate_field_status
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                _print_skill_candidate_field_status(tmp, "foo")
+            text = buf.getvalue()
+            self.assertIn("✅ retro Skill 候选栏已填", text)
+            self.assertIn("形成 (governance 级)", text)
