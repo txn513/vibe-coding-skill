@@ -37,6 +37,15 @@ def run_retrospective(project_root: str, spec_name: str = "") -> dict | None:
     if not retro_file:
         return None
 
+    # P1+ (2026-07-11): auto-suggest Skill 候选 categorization BEFORE
+    # the agent reviews the retro. Without this hook the agent has to
+    # decide alone whether the failure mode should generalize — easy
+    # to skip, easy to lose the signal. Now the aggregator's view is
+    # written into the file as a starting point.
+    prefill_result = _prefill_skill_candidate_fields(
+        project_root, spec_name, retro_file,
+    )
+
     findings = self_analyze.analyze(project_root)
     governance_candidates = findings.get("governance_candidates", [])
     report_file = _write_retrospective_report(
@@ -59,6 +68,15 @@ def run_retrospective(project_root: str, spec_name: str = "") -> dict | None:
     print()
     # Surface the retro 沉淀落点 / SKILL_CANDIDATE field status explicitly.
     # Real failure mode: agent 走完 1-2-3 后从未回到 retro 末尾填这栏。
+    if prefill_result.get("status") == "prefilled":
+        formation = prefill_result.get("candidate", "?")
+        sources_str = ",".join(prefill_result.get("sources", [])) or "none"
+        print(f"   📝 已自动预填 Skill 候选栏: {formation} (印证: {sources_str})")
+        print(f"      请 agent 在 review 时确认/修改 → retro 文件已写入建议值")
+    elif prefill_result.get("status") == "already_filled":
+        print(f"   ℹ️  Skill 候选栏已有值, 不覆盖 (你已决策)")
+    elif prefill_result.get("status") == "no_primary_failure_mode":
+        print(f"   ⚠️  未找到 主失败模式 字段, 无法预填 — 请先填 retro '失败模式' 段")
     _print_skill_candidate_field_status(project_root, spec_name)
     print()
     print("   下一步:")
@@ -236,6 +254,159 @@ def _print_skill_candidate_field_status(project_root: str, spec_name: str) -> No
         print("   ℹ️  retro Skill 候选栏已决策: 不形成 (项目级规则已足够)")
     else:
         print(f"   ✅ retro Skill 候选栏已填: {skill_field[:60]}{'...' if len(skill_field) > 60 else ''}")
+
+
+def _prefill_skill_candidate_fields(
+    project_root: str,
+    spec_name: str,
+    retro_path: str,
+) -> dict:
+    """Auto-suggest Skill 候选 categorization in the retro file (P1+ 2026-07-11).
+
+    Real failure mode (before this hook): agents walked through the
+    retrospective 1→2→3→4 list and never reached "Skill 候选" at the
+    bottom. The retro file's "是否形成 Skill 治理候选" / "候选摘要"
+    fields stayed as {{SKILL_CANDIDATE}} placeholders. self_analyze
+    then saw no governance signal for that retro, and Skill-level
+    patterns the agent intended to surface were lost.
+
+    This function reads the just-created retro's primary failure mode,
+    consults the aggregator (self_analyze + upgrade_signals) for
+    cross-source corroboration, and writes a categorization suggestion
+    directly into the retro file. The agent then sees the suggestion
+    inline and can accept / modify / reject — instead of guessing.
+
+    Logic:
+      - primary_failure_mode present in self_analyze (≥2 retro) → "形成"
+      - primary_failure_mode present in upgrade_signals files → "形成"
+      - otherwise → "不形成"
+      - When "形成", also write a draft candidate summary based on
+        the issue / action / source list from the aggregator.
+
+    Returns a dict describing what was written, for downstream
+    display in run_retrospective's output.
+
+    Safety: never overwrites a non-empty / non-placeholder value.
+    If the agent has already filled these fields manually, we leave
+    them alone — prefill is suggestion-only.
+    """
+    if not os.path.exists(retro_path):
+        return {"status": "no_retro_file"}
+
+    with open(retro_path, encoding="utf-8") as handle:
+        content = handle.read()
+
+    primary_failure_mode = _extract_bullet_value(content, "主失败模式")
+    if not primary_failure_mode or "{{" in primary_failure_mode:
+        return {"status": "no_primary_failure_mode", "value": primary_failure_mode}
+
+    existing_candidate = _extract_bullet_value(content, "是否形成 Skill 治理候选")
+    existing_summary = _extract_bullet_value(content, "如果形成，候选摘要是什么")
+
+    # Don't overwrite agent's manual choice.
+    if existing_candidate and "{{" not in existing_candidate and "(待填写)" not in existing_candidate:
+        return {
+            "status": "already_filled",
+            "candidate": existing_candidate,
+            "summary": existing_summary,
+        }
+
+    # Consult the aggregator for cross-source corroboration.
+    formation = "不形成"
+    sources: list[str] = []
+    draft_summary = ""
+    try:
+        from scripts import project_status  # type: ignore[import-not-found]
+        aggregated = project_status._aggregate_signals(project_root)
+        normalized = re.sub(r"[^a-z0-9一-鿿]+", "-", primary_failure_mode.lower()).strip("-")
+        # Check skill_candidates for this failure_mode (cross-source dedup already ran)
+        for cand in aggregated.get("skill_candidates", []):
+            cand_key = cand.get("key", "")
+            if cand_key == normalized or normalized in cand_key or cand_key in normalized:
+                formation = "形成"
+                sources = cand.get("sources", [])
+                issue = cand.get("issue", "")
+                action = cand.get("action", "")
+                if issue:
+                    draft_summary = f"{primary_failure_mode}（{issue[:80]}{'...' if len(issue) > 80 else ''}）"
+                if action:
+                    draft_summary += f" 建议动作: {action[:80]}{'...' if len(action) > 80 else ''}"
+                break
+        else:
+            # Even if not in skill_candidates, check upgrade_signals
+            # project_signals pool — could still be relevant at the
+            # project level only.
+            for sig in aggregated.get("project_signals", []):
+                sig_key = sig.get("key", "")
+                if sig_key == normalized or normalized in sig_key or sig_key in normalized:
+                    sources = sig.get("sources", [])
+                    break
+    except Exception:  # noqa: BLE001
+        # Aggregator failure must NOT block the retro write — surface
+        # no suggestion rather than crash the agent's workflow.
+        pass
+
+    # Write suggestion into the retro file.
+    new_content = _replace_bullet_field(
+        content, "是否形成 Skill 治理候选", formation
+    )
+    if draft_summary:
+        new_content = _replace_bullet_field(
+            new_content, "如果形成，候选摘要是什么", draft_summary
+        )
+    elif formation == "形成":
+        # Minimal fallback so the field isn't blank when we say "形成".
+        new_content = _replace_bullet_field(
+            new_content,
+            "如果形成，候选摘要是什么",
+            f"{primary_failure_mode} 跨项目出现，需评估是否升 Skill（自动建议，需补充细节）",
+        )
+
+    # Marker comment so the agent can see this was auto-filled (machine
+    # + human-readable per Rule 50 audit-trail convention).
+    sources_str = ",".join(sources) if sources else "none"
+    marker = (
+        f"<!-- vibe:prefilled_skill_candidate: formation={formation} "
+        f"sources={sources_str} spec={spec_name} -->"
+    )
+    # Insert marker just before the "## 沉淀落点" section if present.
+    if "## 沉淀落点" in new_content:
+        new_content = new_content.replace(
+            "## 沉淀落点", marker + "\n\n## 沉淀落点", 1
+        )
+    else:
+        new_content = new_content.rstrip() + "\n\n" + marker + "\n"
+
+    with open(retro_path, "w", encoding="utf-8") as handle:
+        handle.write(new_content)
+
+    return {
+        "status": "prefilled",
+        "candidate": formation,
+        "summary": draft_summary,
+        "sources": sources,
+        "primary_failure_mode": primary_failure_mode,
+    }
+
+
+def _replace_bullet_field(content: str, field: str, new_value: str) -> str:
+    """Replace `- **field**: <value>` with `- **field**: <new_value>`.
+
+    Preserves the original bullet formatting (whitespace, dash count).
+    If the field is missing, append it under the 沉淀落点 section if
+    present, otherwise at end of file.
+    """
+    pattern = re.compile(rf"^(\s*-\s*)\*\*{re.escape(field)}\*\*:\s*.*$", re.MULTILINE)
+    if pattern.search(content):
+        return pattern.sub(rf"\1**{field}**: {new_value}", content, count=1)
+    # Field missing — append under 沉淀落点 if present, else append.
+    if "## 沉淀落点" in content:
+        return content.replace(
+            "## 沉淀落点",
+            f"## 沉淀落点\n\n- **{field}**: {new_value}",
+            1,
+        )
+    return content.rstrip() + f"\n\n- **{field}**: {new_value}\n"
 
 
 if __name__ == "__main__":

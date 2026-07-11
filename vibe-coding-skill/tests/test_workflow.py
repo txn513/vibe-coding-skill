@@ -11591,3 +11591,137 @@ class SkipUpgradeSignalsFlagTests(unittest.TestCase):
             self.assertGreaterEqual(len(agg["skill_candidates"]), 1)
             # upgrade_signals path was bypassed
             self.assertEqual(agg["raw"].get("upgrade_signals", {}).get("signals", []), [])
+
+
+class RetrospectivePrefillTests(unittest.TestCase):
+    """Cover P1+ (2026-07-11): vibe retrospective pre-fills Skill 候选 fields.
+
+    Real failure mode (before this hook): agents walk through 1→2→3→4
+    and never fill "是否形成 Skill 治理候选" / "候选摘要" at the bottom
+    of the retro. self_analyze then sees no governance signal for that
+    retro. The prefill closes this by writing an aggregator-derived
+    suggestion directly into the retro file before the agent reviews.
+
+    Pre-fill rules:
+      - failure_mode present in self_analyze (≥2 retro): 形成
+      - failure_mode present in upgrade_signals files: 形成
+      - otherwise: 不形成
+      - never overwrite agent's manual choice
+    """
+
+    def _make_retro_with_failure_mode(self, tmp: str, failure_mode: str) -> str:
+        """Write a retro with given primary failure mode (caller inits project)."""
+        from pathlib import Path as _Path
+        proj = _Path(tmp)
+        (proj / ".agents" / "retros").mkdir(parents=True, exist_ok=True)
+        retro = proj / ".agents" / "retros" / "spec-0.md"
+        retro.write_text(
+            f"# spec-0 retro\n\n"
+            "## 失败模式\n\n"
+            f"- **主失败模式**: {failure_mode}\n"
+            "## 目标回顾\n\n"
+            "**最初意图**: 实现该功能\n"
+            "**实际交付**: 已落地\n"
+            "**差异分析**: 无差异\n",
+            encoding="utf-8",
+        )
+        return str(retro)
+
+    def test_prefill_marks_forming_when_failure_mode_recurs(self) -> None:
+        """If failure_mode appears in ≥2 retros, prefill = 形成 + draft summary."""
+        with tempfile.TemporaryDirectory() as tmp:
+            from pathlib import Path as _Path
+            proj = _Path(tmp)
+            ip = init_project.init_project(tmp, "web")
+            (proj / ".agents" / "retros").mkdir(parents=True, exist_ok=True)
+            # Write 2 existing retros with the same failure_mode (≥2 threshold)
+            for i in range(2):
+                (proj / ".agents" / "retros" / f"old-{i}.md").write_text(
+                    f"# old-{i} retro\n\n"
+                    "## 失败模式\n\n"
+                    "- **主失败模式**: evidence not reviewed\n"
+                    "## 目标回顾\n\n"
+                    "**最初意图**: x\n**实际交付**: y\n**差异分析**: z\n",
+                    encoding="utf-8",
+                )
+            # Now write a new retro with the same failure_mode
+            retro = self._make_retro_with_failure_mode(tmp, "evidence not reviewed")
+
+            from scripts import retrospective as _retro
+            result = _retro._prefill_skill_candidate_fields(tmp, "spec-0", retro)
+            self.assertEqual(result["status"], "prefilled")
+            self.assertEqual(result["candidate"], "形成")
+            self.assertIn("self_analyze", result["sources"])
+            # Verify the file was written with suggestion
+            content = Path(retro).read_text(encoding="utf-8")
+            self.assertIn("**是否形成 Skill 治理候选**: 形成", content)
+            self.assertIn("<!-- vibe:prefilled_skill_candidate:", content)
+
+    def test_prefill_marks_not_forming_when_no_corroboration(self) -> None:
+        """If failure_mode is unique (no cross-source corroboration),
+        prefill = 不形成."""
+        with tempfile.TemporaryDirectory() as tmp:
+            from pathlib import Path as _Path
+            proj = _Path(tmp)
+            init_project.init_project(tmp, "web")
+            (proj / ".agents" / "retros").mkdir(parents=True, exist_ok=True)
+            # No existing retros — failure_mode is unique to this retro
+            retro = self._make_retro_with_failure_mode(
+                tmp, "one-off unique failure mode xyz",
+            )
+
+            from scripts import retrospective as _retro
+            result = _retro._prefill_skill_candidate_fields(tmp, "spec-0", retro)
+            self.assertEqual(result["status"], "prefilled")
+            self.assertEqual(result["candidate"], "不形成")
+
+    def test_prefill_does_not_overwrite_agent_choice(self) -> None:
+        """If agent has already filled Skill 候选 fields, prefill leaves
+        them alone (manual choice wins)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            from pathlib import Path as _Path
+            proj = _Path(tmp)
+            init_project.init_project(tmp, "web")
+            (proj / ".agents" / "retros").mkdir(parents=True, exist_ok=True)
+            retro = proj / ".agents" / "retros" / "spec-0.md"
+            retro.write_text(
+                "# spec-0 retro\n\n"
+                "## 失败模式\n\n"
+                "- **主失败模式**: manual code review skipped\n"
+                "## 沉淀落点\n\n"
+                "- **是否形成 Skill 治理候选**: 形成\n"
+                "- **如果形成，候选摘要是什么**: agent 手动写的摘要\n",
+                encoding="utf-8",
+            )
+
+            from scripts import retrospective as _retro
+            result = _retro._prefill_skill_candidate_fields(tmp, "spec-0", str(retro))
+            self.assertEqual(result["status"], "already_filled")
+            content = Path(retro).read_text(encoding="utf-8")
+            self.assertIn("agent 手动写的摘要", content)
+            # No machine marker added (since we didn't write)
+            self.assertNotIn("vibe:prefilled_skill_candidate:", content)
+
+    def test_prefill_handles_missing_primary_failure_mode(self) -> None:
+        """If 主失败模式 is empty/placeholder, prefill gracefully returns
+        no_primary_failure_mode without crashing or writing garbage."""
+        with tempfile.TemporaryDirectory() as tmp:
+            from pathlib import Path as _Path
+            proj = _Path(tmp)
+            init_project.init_project(tmp, "web")
+            (proj / ".agents" / "retros").mkdir(parents=True, exist_ok=True)
+            retro = proj / ".agents" / "retros" / "spec-0.md"
+            retro.write_text(
+                "# spec-0 retro\n\n"
+                "## 失败模式\n\n"
+                "- **主失败模式**: {{PRIMARY_FAILURE_MODE}}\n"
+                "## 沉淀落点\n\n",
+                encoding="utf-8",
+            )
+
+            from scripts import retrospective as _retro
+            result = _retro._prefill_skill_candidate_fields(tmp, "spec-0", str(retro))
+            self.assertEqual(result["status"], "no_primary_failure_mode")
+            # File should be untouched
+            content = Path(retro).read_text(encoding="utf-8")
+            self.assertIn("{{PRIMARY_FAILURE_MODE}}", content)
