@@ -470,6 +470,36 @@ def _aggregate_signals(project_root: str, *, skip_self_analyze: bool = False, sk
         if not merged:
             probe_pools[0][key] = entry
 
+    # Filter out candidates the agent has acknowledged/dismissed.
+    # Real failure mode (2026-07-11): without this filter, candidates
+    # accumulate and re-surface on every `vibe next`, leading to
+    # fatigue and eventual ignoring — which defeats the whole
+    # auto-surface story.
+    #
+    # Format: `.agents/.acknowledged-candidates.txt` — one key per line.
+    # To acknowledge a candidate, the agent writes its key (normalized
+    # via _normalize_key) to this file. Comments (# ...) and blank
+    # lines are ignored.
+    #
+    # Auto-mark logic: if a candidate is in BOTH skill_pool and
+    # project_pool AND the spec was implemented (no current spec
+    # mentions it), it's likely addressed — but this is conservative
+    # and not currently auto-triggered; manual ack is the contract.
+    ack_keys = _load_acknowledged_candidates(project_root)
+    if ack_keys:
+        for pool in (skill_pool, project_pool):
+            for key in list(pool.keys()):
+                if key in ack_keys:
+                    pool[key]["acknowledged"] = True
+        # Move acknowledged entries to a separate list (still
+        # accessible for audit but not surfaced as action candidates)
+        acknowledged: list[dict] = []
+        for pool in (skill_pool, project_pool):
+            for key, cand in list(pool.items()):
+                if cand.get("acknowledged"):
+                    acknowledged.append(cand)
+                    del pool[key]
+
     for pool in (skill_pool, project_pool):
         for cand in pool.values():
             if len(cand["sources"]) >= 2:
@@ -478,6 +508,7 @@ def _aggregate_signals(project_root: str, *, skip_self_analyze: bool = False, sk
     return {
         "skill_candidates": sorted(skill_pool.values(), key=lambda c: (-_priority_rank(c["priority"]), c["title"])),
         "project_signals": sorted(project_pool.values(), key=lambda c: (-_priority_rank(c["priority"]), c["title"])),
+        "acknowledged": acknowledged if ack_keys else [],
         "raw": raw,
     }
 
@@ -488,6 +519,36 @@ def _normalize_key(text: str) -> str:
 
 def _priority_rank(priority: str) -> int:
     return {"high": 3, "medium": 2, "low": 1}.get(priority, 0)
+
+
+def _load_acknowledged_candidates(project_root: str) -> set[str]:
+    """Load acknowledged candidate keys from .agents/.acknowledged-candidates.txt.
+
+    Returns a set of normalized keys. File format:
+        # Comments OK
+        evidence-not-reviewed
+        rule-taxonomy
+        some-other-key-2026-07-11
+
+    If the file doesn't exist or is empty, returns empty set
+    (no filtering). Used by _aggregate_signals to suppress
+    candidates the agent has already addressed.
+    """
+    path = os.path.join(project_root, ".agents", ".acknowledged-candidates.txt")
+    if not os.path.exists(path):
+        return set()
+    keys: set[str] = set()
+    try:
+        with open(path, encoding="utf-8") as fp:
+            for line in fp:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                # Normalize to match aggregator's key format
+                keys.add(_normalize_key(line))
+    except OSError:
+        return set()
+    return keys
 
 
 def _maybe_inject_governance_candidates(

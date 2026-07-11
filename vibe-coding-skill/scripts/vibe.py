@@ -134,6 +134,73 @@ Review-separation escape hatch (single-actor projects):
   feasible; reserve --force for emergencies and log --reason.
 """
 
+def _signal_ack(project_root: str, candidate_key: str) -> None:
+    """Append a candidate key to .acknowledged-candidates.txt."""
+    import re as _re
+    normalized = _re.sub(r"[^a-z0-9\\u4e00-\\u9fff]+", "-", candidate_key.lower()).strip("-")
+    path = os.path.join(project_root, ".agents", ".acknowledged-candidates.txt")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    existing: set = set()
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as fp:
+            for line in fp:
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    existing.add(_re.sub(r"[^a-z0-9\\u4e00-\\u9fff]+", "-", line.lower()).strip("-"))
+    if normalized in existing:
+        print(f"ℹ️  {normalized} 已在已确认列表中")
+        return
+    existing.add(normalized)
+    with open(path, "w", encoding="utf-8") as fp:
+        fp.write("# Acknowledged aggregator candidates (P1+ 2026-07-11)\n")
+        fp.write("# Agent has decided to dismiss these; they will not surface again.\n")
+        for k in sorted(existing):
+            fp.write(k + "\n")
+    print(f"✅ 已确认候选: {normalized}")
+    print(f"   下次 `vibe next` / `vibe retrospective` 不会再刷这条")
+
+
+def _signal_unack(project_root: str, candidate_key: str) -> None:
+    """Remove a candidate key from .acknowledged-candidates.txt."""
+    import re as _re
+    normalized = _re.sub(r"[^a-z0-9\\u4e00-\\u9fff]+", "-", candidate_key.lower()).strip("-")
+    path = os.path.join(project_root, ".agents", ".acknowledged-candidates.txt")
+    if not os.path.exists(path):
+        print(f"ℹ️  无 .acknowledged-candidates.txt 文件")
+        return
+    remaining: list = []
+    found = False
+    with open(path, encoding="utf-8") as fp:
+        for line in fp:
+            stripped = line.strip()
+            if stripped and not stripped.startswith("#"):
+                key_norm = _re.sub(r"[^a-z0-9\\u4e00-\\u9fff]+", "-", stripped.lower()).strip("-")
+                if key_norm == normalized:
+                    found = True
+                    continue
+            remaining.append(line)
+    if not found:
+        print(f"ℹ️  {normalized} 不在已确认列表中")
+        return
+    with open(path, "w", encoding="utf-8") as fp:
+        fp.writelines(remaining)
+    print(f"✅ 已恢复候选: {normalized} (下次 `vibe next` 会重新刷出)")
+
+
+def _signal_list(project_root: str) -> None:
+    """Print all acknowledged candidates."""
+    path = os.path.join(project_root, ".agents", ".acknowledged-candidates.txt")
+    if not os.path.exists(path):
+        print("ℹ️  无 .acknowledged-candidates.txt 文件 (没有已确认的候选)")
+        return
+    print("📋 已确认候选 (不会再刷出):")
+    with open(path, encoding="utf-8") as fp:
+        for line in fp:
+            stripped = line.strip()
+            if stripped and not stripped.startswith("#"):
+                print(f"   - {stripped}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Unified Vibe Coding workflow dispatcher")
     sub = parser.add_subparsers(dest="operation", required=True)
@@ -259,6 +326,29 @@ def main() -> None:
     self_analyze_cmd = sub.add_parser("self-analyze")
     self_analyze_cmd.add_argument("project_root")
     self_analyze_cmd.add_argument("--output", default="")
+
+    signal_cmd = sub.add_parser(
+        "signal",
+        help="Manage aggregator signal acknowledgment (P1+ 2026-07-11).",
+    )
+    signal_sub = signal_cmd.add_subparsers(dest="signal_op")
+    signal_ack = signal_sub.add_parser(
+        "ack",
+        help="Acknowledge a candidate so it stops surfacing.",
+    )
+    signal_ack.add_argument("project_root")
+    signal_ack.add_argument("candidate_key", help="Normalized candidate key (kebab-case)")
+    signal_unack = signal_sub.add_parser(
+        "unack",
+        help="Remove acknowledgment (candidate will surface again).",
+    )
+    signal_unack.add_argument("project_root")
+    signal_unack.add_argument("candidate_key")
+    signal_list = signal_sub.add_parser(
+        "list",
+        help="Show acknowledged candidates (audit trail).",
+    )
+    signal_list.add_argument("project_root")
 
     advance = sub.add_parser(
         "advance",
@@ -563,6 +653,16 @@ def main() -> None:
         if args.output:
             path = self_analyze.save_report(findings, args.output)
             print(f"\n📄 报告已保存: {path}")
+    elif args.operation == "signal":
+        if args.signal_op == "ack":
+            _signal_ack(root, args.candidate_key)
+        elif args.signal_op == "unack":
+            _signal_unack(root, args.candidate_key)
+        elif args.signal_op == "list":
+            _signal_list(root)
+        else:
+            print("❌ 请指定 signal 子命令: ack | unack | list")
+            raise SystemExit(1)
     elif args.operation == "advance":
         result = set_status.set_status(
             root, args.spec_name, args.status, args.force, args.reason,

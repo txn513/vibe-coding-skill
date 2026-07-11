@@ -11959,3 +11959,168 @@ class VibeNextFallbackTests(unittest.TestCase):
             text = output.getvalue()
             self.assertNotIn("Skill 候选 (P1+", text)
             self.assertNotIn("项目级信号 (P1+", text)
+
+
+class AggregatorAcknowledgedFilterTests(unittest.TestCase):
+    """Cover P1+ (2026-07-11): agent can acknowledge/dismiss candidates.
+
+    Real failure mode (2026-07-11 review): without a dismissal
+    mechanism, candidates accumulate and re-surface on every
+    `vibe next` and `vibe retrospective` call. Agent fatigues,
+    ignores them, and the auto-surface story degrades.
+
+    Contract:
+      - Agent writes a candidate's normalized key to
+        `.agents/.acknowledged-candidates.txt`
+      - Aggregator filters that key out of skill_candidates /
+        project_signals on subsequent runs
+      - Acknowledged candidates appear in a separate `acknowledged`
+        list (audit trail — agent / Skill maintainer can still see
+        what was filtered and why)
+    """
+
+    def test_acknowledged_key_filtered_out(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            proj = Path(tmp)
+            init_project.init_project(tmp, "web")
+            (proj / ".agents" / "retros").mkdir(parents=True, exist_ok=True)
+            for i in range(2):
+                (proj / ".agents" / "retros" / f"old-{i}.md").write_text(
+                    f"# old-{i}\n\n## 失败模式\n\n- **主失败模式**: evidence not reviewed\n## 目标回顾\n\n**最初意图**: x\n**实际交付**: y\n**差异分析**: z\n",
+                    encoding="utf-8",
+                )
+            # Acknowledge this candidate
+            (proj / ".agents" / ".acknowledged-candidates.txt").write_text(
+                "evidence-not-reviewed\n",
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "init", "-q"], cwd=tmp, check=True)
+
+            from scripts import project_status  # noqa: PLC0415
+            agg = project_status._aggregate_signals(tmp)
+            # Filtered out of skill_candidates
+            self.assertEqual(agg["skill_candidates"], [])
+            # But kept in acknowledged list (audit trail)
+            self.assertEqual(len(agg["acknowledged"]), 1)
+            self.assertEqual(agg["acknowledged"][0]["key"], "evidence-not-reviewed")
+
+    def test_acknowledged_file_missing_returns_empty(self) -> None:
+        """No .acknowledged-candidates.txt → no filtering."""
+        with tempfile.TemporaryDirectory() as tmp:
+            proj = Path(tmp)
+            init_project.init_project(tmp, "web")
+            (proj / ".agents" / "retros").mkdir(parents=True, exist_ok=True)
+            for i in range(2):
+                (proj / ".agents" / "retros" / f"old-{i}.md").write_text(
+                    f"# old-{i}\n\n## 失败模式\n\n- **主失败模式**: rule missing\n## 目标回顾\n\n**最初意图**: x\n**实际交付**: y\n**差异分析**: z\n",
+                    encoding="utf-8",
+                )
+            subprocess.run(["git", "init", "-q"], cwd=tmp, check=True)
+            from scripts import project_status  # noqa: PLC0415
+            agg = project_status._aggregate_signals(tmp)
+            self.assertGreaterEqual(len(agg["skill_candidates"]), 1)
+            self.assertEqual(agg["acknowledged"], [])
+
+    def test_acknowledged_file_with_comments_and_blanks(self) -> None:
+        """File parser ignores comments and blank lines."""
+        with tempfile.TemporaryDirectory() as tmp:
+            proj = Path(tmp)
+            init_project.init_project(tmp, "web")
+            (proj / ".agents" / "retros").mkdir(parents=True, exist_ok=True)
+            for i in range(2):
+                (proj / ".agents" / "retros" / f"old-{i}.md").write_text(
+                    f"# old-{i}\n\n## 失败模式\n\n- **主失败模式**: rule missing\n## 目标回顾\n\n**最初意图**: x\n**实际交付**: y\n**差异分析**: z\n",
+                    encoding="utf-8",
+                )
+            (proj / ".agents" / ".acknowledged-candidates.txt").write_text(
+                "# These candidates have been addressed\n\n"
+                "rule-missing\n"
+                "  # indented comment\n"
+                "another-key\n",
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "init", "-q"], cwd=tmp, check=True)
+            from scripts import project_status  # noqa: PLC0415
+            agg = project_status._aggregate_signals(tmp)
+            self.assertEqual(agg["skill_candidates"], [])
+            self.assertEqual(len(agg["acknowledged"]), 1)
+
+    def test_acknowledged_via_vibe_next_silences_summary(self) -> None:
+        """End-to-end: when agent acknowledges a candidate, vibe next
+        stops surfacing it in the inline summary."""
+        with tempfile.TemporaryDirectory() as tmp:
+            proj = Path(tmp)
+            init_project.init_project(tmp, "web")
+            (proj / ".agents" / "retros").mkdir(parents=True, exist_ok=True)
+            for i in range(2):
+                (proj / ".agents" / "retros" / f"old-{i}.md").write_text(
+                    f"# old-{i}\n\n## 失败模式\n\n- **主失败模式**: rule missing\n## 目标回顾\n\n**最初意图**: x\n**实际交付**: y\n**差异分析**: z\n",
+                    encoding="utf-8",
+                )
+            (proj / ".agents" / ".acknowledged-candidates.txt").write_text(
+                "rule-missing\n",
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "init", "-q"], cwd=tmp, check=True)
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                project_status.project_next(tmp, args=None)
+            text = output.getvalue()
+            # The acknowledged candidate is no longer in the summary
+            self.assertNotIn("rule missing", text)
+            self.assertNotIn("Skill 候选 (P1+", text)
+
+
+class SignalAckCLITests(unittest.TestCase):
+    """Cover `vibe signal ack/unack/list` (P1+ 2026-07-11).
+
+    Lightweight CLI for agent to acknowledge/dismiss candidates.
+    Without this, candidates accumulate forever and re-surface on
+    every vibe next / vibe retrospective call. Agent fatigues,
+    ignores them, and the auto-surface story degrades.
+
+    File format: .agents/.acknowledged-candidates.txt — one key per
+    line, comments start with #.
+    """
+
+    def test_signal_ack_creates_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            from scripts import vibe as _vibe  # noqa: PLC0415
+            _vibe._signal_ack(tmp, "manual-code-review-skipped")
+            path = Path(tmp) / ".agents" / ".acknowledged-candidates.txt"
+            self.assertTrue(path.exists())
+            content = path.read_text(encoding="utf-8")
+            self.assertIn("manual-code-review-skipped", content)
+
+    def test_signal_ack_idempotent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            from scripts import vibe as _vibe  # noqa: PLC0415
+            _vibe._signal_ack(tmp, "key-1")
+            _vibe._signal_ack(tmp, "key-1")  # second time
+            path = Path(tmp) / ".agents" / ".acknowledged-candidates.txt"
+            content = path.read_text(encoding="utf-8")
+            # key-1 appears exactly once
+            self.assertEqual(content.count("key-1"), 1)
+
+    def test_signal_unack_removes_key(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            from scripts import vibe as _vibe  # noqa: PLC0415
+            _vibe._signal_ack(tmp, "key-a")
+            _vibe._signal_ack(tmp, "key-b")
+            _vibe._signal_unack(tmp, "key-a")
+            path = Path(tmp) / ".agents" / ".acknowledged-candidates.txt"
+            content = path.read_text(encoding="utf-8")
+            self.assertNotIn("key-a", content)
+            self.assertIn("key-b", content)
+
+    def test_signal_list_shows_acked_keys(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            from scripts import vibe as _vibe  # noqa: PLC0415
+            _vibe._signal_ack(tmp, "first-key")
+            _vibe._signal_ack(tmp, "second-key")
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                _vibe._signal_list(tmp)
+            text = output.getvalue()
+            self.assertIn("first-key", text)
+            self.assertIn("second-key", text)
