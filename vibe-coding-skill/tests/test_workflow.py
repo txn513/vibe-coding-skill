@@ -12124,3 +12124,86 @@ class SignalAckCLITests(unittest.TestCase):
             text = output.getvalue()
             self.assertIn("first-key", text)
             self.assertIn("second-key", text)
+
+
+class VibeStatusAggregatorCountTests(unittest.TestCase):
+    """Cover P1+ (2026-07-11): vibe status shows aggregator candidate count.
+
+    Real gap found in 2026-07-11 review: `vibe status` showed retro
+    count but not candidate count. Agents running status to check
+    project health had to remember to run `vibe next` /
+    `vibe self-analyze` to see what upgrades are pending — violates
+    "if it requires manual trigger, it's as good as not built".
+
+    Now `vibe status` includes a one-line hint showing Skill-level +
+    project-level candidate counts plus next-action commands.
+    Silent when aggregator pool is empty (no spam).
+    """
+
+    def test_status_shows_skill_and_project_counts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            proj = Path(tmp)
+            init_project.init_project(tmp, "web")
+            subprocess.run(["git", "init", "-q"], cwd=tmp, check=True)
+            (proj / ".agents" / "retros").mkdir(parents=True, exist_ok=True)
+            for i in range(2):
+                (proj / ".agents" / "retros" / f"old-{i}.md").write_text(
+                    f"# old-{i}\n\n## 失败模式\n\n- **主失败模式**: evidence not reviewed\n## 目标回顾\n\n**最初意图**: x\n**实际交付**: y\n**差异分析**: z\n",
+                    encoding="utf-8",
+                )
+            (proj / ".agents" / "skill-upgrade-candidates-2026-07-08.md").write_text(
+                "# Project-level: 补充 Implementation Checklist 的边界条件项\n\n"
+                "**状态**: proposed\n",
+                encoding="utf-8",
+            )
+
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                project_status.project_status(tmp)
+            text = output.getvalue()
+            self.assertIn("升级候选", text)
+            self.assertIn("1 条 Skill", text)
+            self.assertIn("2 条项目级", text)
+            self.assertIn("vibe:aggregator_count:", text)
+
+    def test_status_silent_when_no_candidates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            init_project.init_project(tmp, "web")
+            subprocess.run(["git", "init", "-q"], cwd=tmp, check=True)
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                project_status.project_status(tmp)
+            text = output.getvalue()
+            self.assertNotIn("升级候选", text)
+
+    def test_status_reflects_acknowledgment(self) -> None:
+        """After agent acks a candidate, status shows the new (lower) count."""
+        with tempfile.TemporaryDirectory() as tmp:
+            proj = Path(tmp)
+            init_project.init_project(tmp, "web")
+            subprocess.run(["git", "init", "-q"], cwd=tmp, check=True)
+            (proj / ".agents" / "retros").mkdir(parents=True, exist_ok=True)
+            for i in range(2):
+                (proj / ".agents" / "retros" / f"old-{i}.md").write_text(
+                    f"# old-{i}\n\n## 失败模式\n\n- **主失败模式**: evidence not reviewed\n## 目标回顾\n\n**最初意图**: x\n**实际交付**: y\n**差异分析**: z\n",
+                    encoding="utf-8",
+                )
+            # Pre-ack
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                project_status.project_status(tmp)
+            self.assertIn("1 条 Skill", output.getvalue())
+            # Ack
+            from scripts import vibe as _vibe  # noqa: PLC0415
+            _vibe._signal_ack(tmp, "evidence-not-reviewed")
+            # Post-ack
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                project_status.project_status(tmp)
+            text2 = output.getvalue()
+            # Skill count drops to 0 (project-level "rule taxonomy"
+            # advisory from self_analyze.suggestions may remain, that's
+            # expected — the test verifies the acked Skill candidate is
+            # no longer counted, not that all buckets are empty).
+            self.assertIn("0 条 Skill", text2)
+            self.assertNotIn("1 条 Skill", text2)

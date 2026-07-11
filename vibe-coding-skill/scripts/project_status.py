@@ -141,6 +141,12 @@ def project_status(project_root: str) -> None:
             print(f"   → 可以运行 self_analyze 检查改进机会")
         print()
 
+    # P1+ (2026-07-11): surface unaddressed aggregator candidate counts
+    # in `vibe status`. Without this hint, agent has to remember to run
+    # `vibe next` / `vibe self-analyze` to see what upgrades are pending.
+    # Lightweight one-liner — full details still in vibe next.
+    _print_aggregator_count_hint(project_root)
+
     # Reviews pending
     reviews_dir = os.path.join(agents_dir, "reviews")
     review_count = _count_pending_reviews(reviews_dir)
@@ -328,6 +334,37 @@ def _print_version_drift_hint(project_root: str) -> None:
     # Also emit a dedicated marker so parsers can distinguish "drift
     # present, project records are stale" from a generic version print.
     print("<!-- vibe:skill_drift: action_required -->")
+
+
+def _print_aggregator_count_hint(project_root: str) -> None:
+    """One-line aggregator candidate count summary for vibe status.
+
+    P1+ (2026-07-11): closes the gap where `vibe status` showed
+    retro count but not candidate count. Agents running status to
+    check project health should see "X Skill + Y 项目级 待评审"
+    as a single line — no need to remember to run `vibe next` /
+    `vibe self-analyze` to discover pending upgrades.
+
+    Silent when aggregator pool is empty.
+    """
+    try:
+        aggregated = _aggregate_signals(project_root)
+    except Exception:  # noqa: BLE001 — never break vibe status
+        return
+    skill = len(aggregated.get("skill_candidates", []))
+    project_n = len(aggregated.get("project_signals", []))
+    if skill == 0 and project_n == 0:
+        return
+    print(
+        f"📚 升级候选: {skill} 条 Skill + {project_n} 条项目级 (待评审)"
+    )
+    print(
+        f"   → 查看详情: vibe next | ack: vibe signal ack <key> | "
+        f"列表: vibe signal list"
+    )
+    print(
+        f"<!-- vibe:aggregator_count: skill={skill} project={project_n} -->"
+    )
 
 
 def _print_proposed_rules_hint(project_root: str) -> None:
