@@ -1546,7 +1546,7 @@ def recommend_next(project_root: str, specs: list[dict] | None = None) -> dict:
         evidence_ready = (
             set_status._has_bug_evidence(
                 project_root, name, content, profile, workflow
-            )
+            )[0]  # 2026-07-12d: _has_bug_evidence returns (bool, str)
             if metadata.get("spec_type") == "bug"
             else set_status._has_current_evidence(
                 project_root, name, content, "verify", profile, workflow

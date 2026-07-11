@@ -188,14 +188,16 @@ def set_status(
     if new_status == "review" and not force:
         if profile["require_verify"]:
             if metadata_fields.get("spec_type") == "bug":
-                if not _has_bug_evidence(
+                bug_ok, bug_reason = _has_bug_evidence(
                     project_root, spec_name, content, profile, workflow
-                ):
-                    print("❌ Bug 进入审查前需要 reproduction 与 fix-regression 双向证据")
-                    print("   💡 标准顺序: in-progress → review → released → done")
-                    print("   💡 修复: 用 `vibe evidence . <spec-name> verify passed --configured` 重新记录")
-                    print("           (--configured 让 evidence 抓 workflow.json verify 命令 digest)")
-                    print("           若只想先记录不抓 digest: 去掉 --configured 即可,但 advance 仍会被挡")
+                )
+                if not bug_ok:
+                    if bug_reason:
+                        # 2026-07-12d: precise diagnostic (missing vs out-of-order)
+                        print(f"❌ Bug 进入审查前证据不完整: {bug_reason}")
+                    else:
+                        print("❌ Bug 进入审查前需要 reproduction 与 fix-regression 双向证据")
+                    print("   💡 标准顺序: in-progress → record reproduction → 修复 bug → record fix-regression → review")
                     return None
                 _emit_fix_state_advisory(project_root, spec_name)
             elif not _has_current_evidence(
@@ -1015,7 +1017,13 @@ def _has_bug_evidence(
     spec_content: str,
     profile: dict,
     workflow: dict,
-) -> bool:
+) -> tuple[bool, str | None]:
+    """Return (ok, reason) where reason is None when ok, or a diagnostic string.
+
+    2026-07-12d: changed from bool-only to (bool, str) so callers can surface
+    precise error messages (missing vs out-of-order) instead of a single
+    catch-all "need dual evidence" message.
+    """
     evidence_dir = os.path.join(project_root, ".agents", "evidence", spec_name)
     reproduction_path = os.path.join(evidence_dir, "verify-reproduction.md")
     fixed_path = os.path.join(evidence_dir, "verify-fix-regression.md")
@@ -1060,7 +1068,19 @@ def _has_bug_evidence(
                 ordered = os.path.getmtime(reproduction_path) <= os.path.getmtime(fixed_path)
         except OSError:
             ordered = True  # If we can't read, assume ordered
-    return reproduction and fixed and ordered
+    if not reproduction:
+        return False, "缺少 verify-reproduction.md 证据 (reproduction 场景)"
+    if not fixed:
+        return False, "缺少 verify-fix-regression.md 证据 (修复后回归测试)"
+    if not ordered:
+        return False, (
+            "reproduction 必须在 fix-regression 之前 record (repro_dt <= fix_dt 失败).\n"
+            "   根因: fix-regression 的 Created-At 早于 reproduction, 说明先修了 bug 后补 reproduction.\n"
+            "   修法: 删除 verify-fix-regression.md 重新 record 让时间戳更晚,\n"
+            "         或删除 verify-reproduction.md 重新 record 让时间戳更早.\n"
+            "   标准顺序: in-progress → record reproduction → 修复 bug → record fix-regression → review"
+        )
+    return True, None
 
 
 def _dependencies_done(project_root: str, dependencies: list[str]) -> bool:
