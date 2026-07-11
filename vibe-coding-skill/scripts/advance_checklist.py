@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import os
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -222,6 +223,58 @@ def _check_release_evidence_pre_done(
     )
 
 
+# 2026-07-12c 候选 1 方案 A: evidence record 后还没 commit, advance 之前提示
+# "record → commit → snapshot stale → fail → re-record" 死循环路径。
+# 配套 set_status._snapshot_recent_enough (1800s 容差) 工作: gate 已放宽,
+# hint 在前端提醒 agent 避免 evidence record 完先 commit 再 advance 的踩坑。
+# 仅 advisory, 不阻塞 advance gate; 用 --no-checklist 跳过。
+_RECENT_EVIDENCE_WINDOW_SECONDS = 1800
+
+
+def _check_recent_evidence_pending_commit(
+    project_root: str, spec_name: str, target_status: str,
+) -> str | None:
+    """Advisory: 必填 evidence 在 30 分钟内 record 且工作区 dirty。
+
+    提示 "先 commit 再 advance 会让 Snapshot stale 触发 snapshot 不匹配
+    gate fail; 直接 advance 会过 (gate 已放宽 30 分钟 recency 容差)"。
+    """
+    phase_required = _TARGET_REQUIRES_EVIDENCE.get(target_status, set())
+    if not phase_required:
+        return None
+    if _worktree_state(project_root) != "dirty":
+        return None
+    for phase in sorted(phase_required):
+        evidence_path = _evidence_file(project_root, spec_name, phase)
+        if not os.path.exists(evidence_path):
+            continue
+        try:
+            with open(evidence_path, encoding="utf-8") as handle:
+                text = handle.read()
+        except OSError:
+            continue
+        match = re.search(r">\s*Created-At:\s*(\S+)", text)
+        if not match:
+            continue
+        raw = match.group(1).strip()
+        iso = raw.replace("Z", "+00:00") if raw.endswith("Z") else raw
+        try:
+            created_dt = datetime.fromisoformat(iso)
+        except ValueError:
+            continue
+        if created_dt.tzinfo is None:
+            created_dt = created_dt.replace(tzinfo=timezone.utc)
+        age = (datetime.now(timezone.utc) - created_dt).total_seconds()
+        if age > _RECENT_EVIDENCE_WINDOW_SECONDS or age < 0:
+            continue
+        return (
+            f"advance 前确认: {phase} 证据在 {int(age)}秒前 record，"
+            f"工作区 dirty —— 若先 `vibe commit` 再 advance，"
+            f"Snapshot 字段会 stale 触发 snapshot 不匹配 gate fail。\n"
+            f"   路径 A (推荐): 直接 advance (gate 已放宽 30 分钟 recency 容差, 会接受)\n"
+            f"   路径 B: 先 commit, 再 record 一份新 evidence 让 Snapshot 跟上 HEAD, 再 advance"
+        )
+    return None
 # Frontend / browser-affecting spec detection (advisory, R55 form-pass-safe).
 # Real bug retro: fix-membership-tier-stale-cache 是 localStorage + DOM bug,
 # verify 阶段只跑 pytest 1674 pass, 没浏览器实测 → 误判已覆盖。
@@ -332,6 +385,15 @@ def build_advance_checklist(
     # 6. Frontend / browser smoke coverage (advisory, 2026-07-10 retro).
     hint = _check_frontend_browser_test(
         project_root, spec_name, spec_content, target_status,
+    )
+    if hint:
+        hints.append(hint)
+
+    # 7. Recent evidence pending commit (2026-07-12c 候选 1 方案 A).
+    #    Advisory only — 配套 set_status._snapshot_recent_enough 30 分钟容差,
+    #    提醒 agent "evidence record → commit → snapshot stale → fail" 死循环路径。
+    hint = _check_recent_evidence_pending_commit(
+        project_root, spec_name, target_status,
     )
     if hint:
         hints.append(hint)

@@ -12828,3 +12828,154 @@ class ObserveEvidenceDigestHintTests(unittest.TestCase):
             self.assertIn("Missing Command-Digests", text)
             self.assertIn(expected_digest, text)
             self.assertIn("--configured", text)
+
+
+class RecentEvidencePendingCommitTests(unittest.TestCase):
+    """Cover the 2026-07-12c 候选 1 方案 A advisory:
+
+    evidence record 后工作区 dirty 时, advance checklist 提示 agent
+    "先 commit 再 advance 会让 Snapshot stale 触发 snapshot 不匹配",
+    并给出"路径 A 直接 advance"或"路径 B 先 commit 再 record 新 evidence"二选一。
+
+    配套 set_status._snapshot_recent_enough 30 分钟 recency 容差
+    (commit c0ac886) 工作: gate 已放宽, hint 在前端防御死循环路径。
+    """
+
+    _GIT_ENV = {
+        "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+        "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t",
+        "PATH": "/usr/bin:/bin:/usr/local/bin",
+        "HOME": "/tmp",
+        "LANG": "C", "LC_ALL": "C",
+    }
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name)
+        init_project.init_project(str(self.project), "web")
+        # Baseline commit so subsequent dirty state is observable.
+        # Without this, every untracked init_project file would already
+        # make _worktree_state return "dirty" — not the clean baseline
+        # we need to test "clean worktree → no hint".
+        subprocess.run(["git", "init", "-q", str(self.project)],
+                       check=False, capture_output=True, env=self._GIT_ENV)
+        subprocess.run(["git", "-C", str(self.project), "add", "-A"],
+                       check=False, capture_output=True, env=self._GIT_ENV)
+        subprocess.run(["git", "-C", str(self.project),
+                        "-c", "user.email=t@t", "-c", "user.name=t",
+                        "commit", "-q", "-m", "init"],
+                       check=False, capture_output=True)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _write_spec(self, name: str) -> Path:
+        path = self.project / ".agents" / "specs" / f"{name}.md"
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        path.write_text(
+            f"# {name}\n\n"
+            f"> 状态: in-progress | 创建: {now} | 更新: {now}\n"
+            f"> 类型: feature\n> 风险: medium\n",
+            encoding="utf-8",
+        )
+        return path
+
+    def _write_verify_evidence(self, spec_name: str, age_seconds: int) -> Path:
+        created = datetime.now(timezone.utc) - timedelta(seconds=age_seconds)
+        ts = created.strftime("%Y-%m-%dT%H:%M:%SZ")
+        path = self.project / ".agents" / "evidence" / spec_name / "verify.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            f"> Snapshot: dummy\n> Created-At: {ts}\nverify passed\n",
+            encoding="utf-8",
+        )
+        return path
+
+    def _capture(self, func, *args, **kwargs) -> str:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            func(*args, **kwargs)
+        return buf.getvalue()
+
+    def _make_dirty(self) -> None:
+        """Mark worktree dirty by adding an untracked file."""
+        (self.project / "untracked.txt").write_text("dirty marker", encoding="utf-8")
+
+    def _checklist_for(self, spec_name: str,
+                       current: str = "in-progress", target: str = "review",
+                       profile: dict | None = None) -> str:
+        spec_path = self.project / ".agents" / "specs" / f"{spec_name}.md"
+        spec_content = spec_path.read_text(encoding="utf-8")
+        return self._capture(
+            advance_checklist.print_advance_checklist,
+            str(self.project), spec_name, spec_content,
+            current, target, profile or {"require_verify": True}, {},
+        )
+
+    def test_fresh_evidence_and_dirty_worktree_emits_hint(self) -> None:
+        """核心场景: evidence 刚 record + 工作区 dirty → 输出死循环预警。"""
+        self._write_spec("recent-feat")
+        self._write_verify_evidence("recent-feat", age_seconds=60)
+        self._make_dirty()
+        output = self._checklist_for("recent-feat")
+        self.assertIn("recency 容差", output)
+        self.assertIn("工作区 dirty", output)
+        self.assertIn("verify 证据", output)
+        self.assertIn("路径 A (推荐)", output)
+
+    def test_old_evidence_and_dirty_worktree_no_hint(self) -> None:
+        """evidence 2 小时前 record → 已被 recency 容差窗口排除, 不应再预警。"""
+        self._write_spec("stale-feat")
+        self._write_verify_evidence("stale-feat", age_seconds=7200)
+        self._make_dirty()
+        output = self._checklist_for("stale-feat")
+        self.assertNotIn("recency 容差", output)
+        self.assertNotIn("路径 A (推荐)", output)
+
+    def test_fresh_evidence_and_clean_worktree_no_hint(self) -> None:
+        """evidence 新但工作区 clean → agent 已 commit 完, 不应再预警。"""
+        self._write_spec("clean-feat")
+        self._write_verify_evidence("clean-feat", age_seconds=60)
+        # Commit evidence + spec so worktree is truly clean (agent already committed).
+        subprocess.run(["git", "-C", str(self.project), "add", "-A"],
+                       check=False, capture_output=True, env=self._GIT_ENV)
+        subprocess.run(["git", "-C", str(self.project),
+                        "-c", "user.email=t@t", "-c", "user.name=t",
+                        "commit", "-q", "-m", "evidence"],
+                       check=False, capture_output=True)
+        output = self._checklist_for("clean-feat")
+        self.assertNotIn("recency 容差", output)
+        self.assertNotIn("路径 A (推荐)", output)
+
+    def test_no_evidence_and_dirty_worktree_no_hint(self) -> None:
+        """没有 evidence file → 现有 evidence-phase check 会另发提示, 此 hint 不重复。"""
+        self._write_spec("no-ev-feat")
+        self._make_dirty()
+        # Don't write any evidence.
+        output = self._checklist_for("no-ev-feat")
+        self.assertNotIn("recency 容差", output)
+
+    def test_target_with_no_required_phase_no_hint(self) -> None:
+        """draft → spec-ready 不需要 evidence, 即使 worktree dirty 也不应输出此 hint。"""
+        self._write_spec("draft-feat")
+        # Even if evidence exists, target=spec-ready doesn't require it.
+        self._write_verify_evidence("draft-feat", age_seconds=60)
+        self._make_dirty()
+        output = self._checklist_for("draft-feat", current="draft", target="spec-ready")
+        self.assertNotIn("recency 容差", output)
+
+    def test_iso_offset_format_accepted(self) -> None:
+        """非 Z 后缀 (+00:00) 的 ISO 8601 Created-At 也要被识别。"""
+        from datetime import timedelta as _td
+        created = datetime.now(timezone.utc) - _td(seconds=120)
+        ts = created.strftime("%Y-%m-%dT%H:%M:%S+00:00")
+        self._write_spec("iso-feat")
+        ev_path = self.project / ".agents" / "evidence" / "iso-feat" / "verify.md"
+        ev_path.parent.mkdir(parents=True, exist_ok=True)
+        ev_path.write_text(
+            f"> Snapshot: dummy\n> Created-At: {ts}\nverify passed\n",
+            encoding="utf-8",
+        )
+        self._make_dirty()
+        output = self._checklist_for("iso-feat")
+        self.assertIn("recency 容差", output)
