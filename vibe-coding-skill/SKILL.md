@@ -952,6 +952,32 @@ Run `doctor` before resuming an old or migrated workflow. Use migration rather
 than inventing missing project decisions. Keep the Skill baseline generic and
 compact.
 
+### Plan Header Digest Placeholder Format
+
+When `vibe plan` auto-generates a plan, the header lines `规格摘要:` and
+`上下文摘要:` are written with real 16-hex digests computed from spec
+content and project-context respectively. **When an Agent manually drafts
+a plan file** (using `apply_patch_add_file` etc.), the placeholder MUST be
+a 16-character lowercase hex string — `generate_plan.py:200` regex is
+strict `[0-9a-f]{16}` and any non-hex placeholder (e.g. `待生成`, `TBD`,
+`TBD-on-spec-load`) silently fails to match on `--refresh-digest-only`.
+
+Use these placeholders for manual drafts:
+
+- ✅ `规格摘要: 0000000000000000` (16 zeros)
+- ✅ `上下文摘要: 0000000000000000` (16 zeros)
+- ❌ `规格摘要: 待生成` (regex fails)
+- ❌ `规格摘要: TBD-on-spec-load` (regex fails)
+
+After drafting, run `vibe plan <project_root> <spec_name>
+--refresh-digest-only` to replace the placeholder with the real digest.
+
+Why this matters: spec content is hashed (`common.spec_digest`) into a
+16-hex digest; any spec change invalidates the plan digest and forces a
+re-evidence / re-plan cycle on the next advance. A non-hex placeholder
+breaks `refresh` silently — the agent believes the plan was refreshed
+but the header still reads `待生成`, which advances fail to detect.
+
 ## apply_patch Tool Selection
 
 When editing files, choose the tool by target-content shape. Wrong selection

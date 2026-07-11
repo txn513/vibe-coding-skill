@@ -91,10 +91,16 @@ _TARGET_REQUIRES_EVIDENCE = {
 
 def _check_evidence_phase(
     project_root: str, spec_name: str, phase: str, profile: dict,
-    target: str,
+    target: str, spec_type: str = "",
 ) -> str | None:
     """Return a checklist hint if `phase` is required for the target status
-    but no evidence file exists for it. Returns None otherwise."""
+    but no evidence file exists for it. Returns None otherwise.
+
+    `spec_type="bug"` switches the verify hint to require the dual
+    reproduction + fix-regression evidence files (mirrors set_status
+    `_has_bug_evidence` logic). Other spec types keep the standard
+    single verify.md hint.
+    """
     if phase not in _TARGET_REQUIRES_EVIDENCE.get(target, set()):
         return None
     # Phases have a 1:1 mapping to risk-profile require_* flags.
@@ -106,6 +112,35 @@ def _check_evidence_phase(
     flag = phase_to_flag.get(phase)
     if not flag or not profile.get(flag, False):
         return None
+
+    # Bug spec needs dual evidence at verify gate: reproduction + fix-regression.
+    # Mirrors set_status._has_bug_evidence — single verify.md is not enough.
+    if phase == "verify" and spec_type == "bug":
+        reproduction_path = os.path.join(
+            project_root, ".agents", "evidence", spec_name,
+            "verify-reproduction.md",
+        )
+        fixed_path = os.path.join(
+            project_root, ".agents", "evidence", spec_name,
+            "verify-fix-regression.md",
+        )
+        missing = []
+        if not os.path.exists(reproduction_path):
+            missing.append("reproduction")
+        if not os.path.exists(fixed_path):
+            missing.append("fix-regression")
+        if not missing:
+            return None
+        missing_list = " + ".join(missing)
+        return (
+            f"advance 前确认: bug spec verify 双向证据缺失 ({missing_list}); "
+            f"需要 `verify-reproduction.md` + `verify-fix-regression.md` 双文件 — "
+            f"记录命令: `vibe evidence {project_root} {spec_name} verify passed "
+            f"--purpose reproduction --configured` + "
+            f"`vibe evidence {project_root} {spec_name} verify passed "
+            f"--purpose fix-regression --configured`"
+        )
+
     if _has_evidence_file(project_root, spec_name, phase):
         return None
     role = _PHASE_TO_ROLE[phase]
@@ -248,6 +283,7 @@ def build_advance_checklist(
     workflow: dict,
     actor: str = "",
     role: str = "",
+    spec_type: str = "",
 ) -> list[str]:
     """Return a list of soft reminder strings, in priority order.
 
@@ -260,7 +296,10 @@ def build_advance_checklist(
     #    agent may have forgotten to record evidence for a phase that was
     #    already enforced by the previous gate.
     for phase in ("verify", "release", "observe"):
-        hint = _check_evidence_phase(project_root, spec_name, phase, profile, target_status)
+        hint = _check_evidence_phase(
+            project_root, spec_name, phase, profile, target_status,
+            spec_type=spec_type,
+        )
         if hint:
             hints.append(hint)
 
@@ -310,11 +349,12 @@ def print_advance_checklist(
     workflow: dict,
     actor: str = "",
     role: str = "",
+    spec_type: str = "",
 ) -> int:
     """Print the checklist; return the hint count (0 means no checklist)."""
     hints = build_advance_checklist(
         project_root, spec_name, spec_content, current_status, target_status,
-        profile, workflow, actor, role,
+        profile, workflow, actor, role, spec_type=spec_type,
     )
     if not hints:
         return 0

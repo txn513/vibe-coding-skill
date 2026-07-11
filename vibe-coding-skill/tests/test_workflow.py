@@ -8749,6 +8749,112 @@ class AdvanceChecklistTests(unittest.TestCase):
         self.assertNotIn("<!-- vibe:advance_checklist:", out)
 
 
+class AdvanceChecklistBugSpecTests(unittest.TestCase):
+    """Bug spec needs dual reproduction + fix-regression evidence at
+    verify gate. The checklist hint must mirror set_status._has_bug_evidence
+    semantics — a single standard verify.md is NOT enough.
+
+    Regression: fix-dlink-test-coverage trace (2026-07-11e) showed the
+    checklist telling the agent to record verify.md, which the agent did,
+    but the bug spec required purpose-specific evidence (--purpose
+    reproduction / --purpose fix-regression). Agent wasted a round.
+    """
+
+    def setUp(self) -> None:
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.project = Path(self.tempdir.name)
+        init_project.init_project(str(self.project), "web")
+        self._write_bug_spec("in-progress", "medium")
+
+    def tearDown(self) -> None:
+        self.tempdir.cleanup()
+
+    def _write_bug_spec(self, status: str = "in-progress", risk: str = "medium") -> None:
+        # Write a bug spec with `> 类型: bug` so advance_checklist receives
+        # spec_type=bug via set_status wiring.
+        content = VALID_SPEC.format(status=status) + "\n"
+        # Inject `> 类型: bug` near the top so spec_metadata parses it.
+        content = content.replace(
+            "## 意图 (Intent)",
+            f"> 类型: bug\n> 风险: {risk}\n\n## 意图 (Intent)",
+            1,
+        )
+        (self.project / ".agents" / "specs" / "demo.md").write_text(content, encoding="utf-8")
+
+    def _hint(self, target: str, spec_type: str = "bug") -> str:
+        spec_content = (self.project / ".agents" / "specs" / "demo.md").read_text(encoding="utf-8")
+        workflow, _ = ensure_workflow(str(self.project))
+        profile = risk_profile(str(self.project), spec_content)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            advance_checklist.print_advance_checklist(
+                str(self.project), "demo", spec_content, "in-progress", target,
+                profile, workflow, "", "", spec_type=spec_type,
+            )
+        return buf.getvalue()
+
+    def test_bug_spec_missing_reproduction_hint(self) -> None:
+        """Bug spec without reproduction evidence → checklist asks for the
+        dual reproduction+fix-regression pair, NOT a single verify.md.
+
+        The regression trace (2026-07-11e fix-dlink-test-coverage): agent
+        was told to record verify.md, did so, but the spec still gated on
+        reproduction+fix-regression. Agent wasted a round. After this fix,
+        the hint must reference the dual evidence path instead.
+        """
+        out = self._hint("review")
+        self.assertIn("bug spec verify 双向证据", out)
+        self.assertIn("verify-reproduction.md", out)
+        self.assertIn("verify-fix-regression.md", out)
+        self.assertIn("--purpose reproduction", out)
+        self.assertIn("--purpose fix-regression", out)
+        # Standard verify.md hint signature: `期望 role=\`builder\``
+        # Bug spec must NOT emit that legacy phrasing — it confuses the agent.
+        self.assertNotIn("期望 role=`builder`", out)
+
+    def test_bug_spec_partial_evidence_only_lists_missing(self) -> None:
+        """If only reproduction exists, hint should mention only fix-regression."""
+        ev_dir = self.project / ".agents" / "evidence" / "demo"
+        ev_dir.mkdir(parents=True, exist_ok=True)
+        # Reproduction exists, fix-regression missing
+        (ev_dir / "verify-reproduction.md").write_text(
+            "# demo — verify-reproduction\n\n> 结果: passed\n", encoding="utf-8",
+        )
+        out = self._hint("review")
+        # Should still fire — fix-regression missing
+        self.assertIn("bug spec verify 双向证据", out)
+        self.assertIn("fix-regression", out)
+        # Should NOT list reproduction in the missing set anymore
+        self.assertNotIn("reproduction + ", out)
+
+    def test_bug_spec_both_evidence_passes(self) -> None:
+        """Bug spec with both reproduction and fix-regression → no verify hint."""
+        ev_dir = self.project / ".agents" / "evidence" / "demo"
+        ev_dir.mkdir(parents=True, exist_ok=True)
+        (ev_dir / "verify-reproduction.md").write_text(
+            "# demo — verify-reproduction\n\n> 结果: passed\n", encoding="utf-8",
+        )
+        (ev_dir / "verify-fix-regression.md").write_text(
+            "# demo — verify-fix-regression\n\n> 结果: passed\n", encoding="utf-8",
+        )
+        out = self._hint("review")
+        self.assertNotIn("bug spec verify 双向证据", out)
+        self.assertNotIn("verify 证据", out)
+
+    def test_enhancement_spec_still_uses_single_verify_md(self) -> None:
+        """Enhancement / feature / refactor spec keeps the original single
+        verify.md hint when spec_type != bug. Backward compatibility."""
+        out = self._hint("review", spec_type="feature")
+        self.assertIn("verify 证据", out)
+        self.assertNotIn("bug spec verify 双向证据", out)
+
+    def test_release_evidence_hint_unchanged_for_bug_spec(self) -> None:
+        """Release evidence hint must still fire for bug spec → done (not
+        affected by spec_type branching)."""
+        out = self._hint("done")
+        self.assertIn("release 证据", out)
+
+
 class CodePatternGateAsyncSessionTests(unittest.TestCase):
     """Cover the Rule 64 advisory gate: `asyncio.create_task` + shared
     AsyncSession commit is a deterministic race. The gate is advisory

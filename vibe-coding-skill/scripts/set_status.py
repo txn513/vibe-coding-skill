@@ -108,6 +108,7 @@ def set_status(
         advance_checklist.print_advance_checklist(
             project_root, spec_name, content, current_status, new_status,
             profile, workflow, actor, role,
+            spec_type=metadata_fields.get("spec_type", ""),
         )
 
     if force and not (force_reason or "").strip():
