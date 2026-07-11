@@ -11015,3 +11015,64 @@ class AdvanceReviewDecisionFieldsRemindTests(unittest.TestCase):
             # Recommended command shape present
             self.assertIn("vibe review-decision", text)
             self.assertIn("--reviewer", text)
+
+
+class EvidenceHelpPositionOrderEpilogTests(unittest.TestCase):
+    """Cover 2026-07-11 candidate 1 (fix-baidu-dlink-token-leak retro):
+    `vibe evidence --help` epilog surfaces the position-order trap
+    (phase → result → purpose). Real failure mode: agent wrote
+    `verify fix-regression passed --configured` instead of
+    `verify passed --purpose fix-regression --configured` and had to
+    retry. Same pattern as commit (4c21e48) and advance (5ecb84b) epilogs.
+    """
+
+    def test_evidence_help_epilog_shows_phase_result_order(self) -> None:
+        """`vibe evidence --help` must contain the position-order
+        trap so agents see it before running the command."""
+        proc = subprocess.run(
+            [sys.executable, str(SCRIPTS_DIR / "vibe.py"),
+             "evidence", "--help"],
+            capture_output=True, text=True, timeout=10,
+        )
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+        out = proc.stdout
+        # Position-order section title present
+        self.assertIn("参数位置", out)
+        # Phase / result choices surfaced
+        self.assertIn("observe | release | verify", out)
+        self.assertIn("passed | failed | not-applicable", out)
+        # --purpose is a flag, not a positional
+        self.assertIn("--purpose 标志", out)
+
+    def test_evidence_help_epilog_shows_wrong_correct_examples(self) -> None:
+        """The contrast (❌ → ✅) for the most common evidence CLI
+        mistake must be visible at --help time."""
+        proc = subprocess.run(
+            [sys.executable, str(SCRIPTS_DIR / "vibe.py"),
+             "evidence", "--help"],
+            capture_output=True, text=True, timeout=10,
+        )
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+        out = proc.stdout
+        # Wrong invocation (purpose value in result position)
+        self.assertIn("vibe evidence . my-spec verify fix-regression passed --configured", out)
+        # Correct invocation (purpose as flag)
+        self.assertIn("--purpose fix-regression --configured", out)
+        # Both ❌ and ✅ markers present for contrast
+        self.assertIn("❌", out)
+        self.assertIn("✅", out)
+
+    def test_evidence_help_does_not_break_existing_examples(self) -> None:
+        """The expanded epilog must preserve the previous bash/pipe/AC
+        examples that landed in the earlier session (no regression)."""
+        proc = subprocess.run(
+            [sys.executable, str(SCRIPTS_DIR / "vibe.py"),
+             "evidence", "--help"],
+            capture_output=True, text=True, timeout=10,
+        )
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+        out = proc.stdout
+        # Pre-existing epilog sections still present
+        self.assertIn("bash -c", out)
+        self.assertIn("AC reference format", out)
+        self.assertIn("troubleshooting:", out)

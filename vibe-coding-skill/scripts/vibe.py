@@ -76,6 +76,23 @@ AC reference format (verify phase 必须):
   区间写法会被打回, 然后每个 AC 重写一次。Retro: fix-membership-tier-stale-cache
   advance to review 第一次报 "缺少验收标准引用: AC2-AC7", 根因是 description
   写 "AC1-7" — AC1 匹配了, AC2-7 没匹配。
+
+参数位置 (2026-07-11 候选 1):
+  vibe evidence <project_root> <spec_name> <phase> <result> [--purpose P] [--configured]
+
+  phase:    observe | release | verify       (位置 3, 必填)
+  result:   passed | failed | not-applicable (位置 4, 必填)
+  purpose:  --purpose 标志                  (默认 standard, 不是位置参数)
+
+常见错误:
+  ❌ vibe evidence . my-spec verify fix-regression passed --configured
+     (把 --purpose 值写到 <result> 位置, argparse 报 invalid choice: 'fix-regression')
+  ✅ vibe evidence . my-spec verify passed --purpose fix-regression --configured
+
+  ❌ vibe evidence . my-spec verify passed
+     (缺 non-empty evidence 描述, gate 报 "证据说明不能为空")
+  ✅ vibe evidence . my-spec verify passed "ran pytest tests/ -v"
+  ✅ vibe evidence . my-spec verify passed --command "pytest tests/ -v"
 """
 
 import refresh_context

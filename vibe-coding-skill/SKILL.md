@@ -952,6 +952,30 @@ Run `doctor` before resuming an old or migrated workflow. Use migration rather
 than inventing missing project decisions. Keep the Skill baseline generic and
 compact.
 
+## apply_patch Tool Selection
+
+When editing files, choose the tool by target-content shape. Wrong selection
+causes patch metadata to leak into structured files and breaks `spec_digest`
+eviction (re-evidence required).
+
+| Tool | Use for | Avoid for |
+|---|---|---|
+| `apply_patch_replace_file` | Structured text (plan / spec / frontmatter / review / retro / templates / docs that get re-parsed) | None — always safe, just re-types the whole file |
+| `apply_patch_update_file` | Business code (`.py` / `.js` / `.ts` / `src/` / `tests/` / single-line tweaks) | Files whose top half is YAML frontmatter (a hunk that crosses `---` will misalign) |
+| `apply_patch_batch` | Multiple independent file edits in one call | Single-file edits (use `update_file`); do NOT use to emit raw `*** Begin Patch` blocks into target files — `apply_patch` is parsed by the agent runtime, not stored |
+
+Default selection:
+
+- Plan / spec / spec-status / frontmatter / review / retro → `replace_file`
+- Source code under `src/`, `tests/`, `frontend/`, `backend/` → `update_file`
+- Bulk operations (clear old evidence + write new evidence across files) → `batch`
+
+Failure mode: writing `*** Begin Patch` and `*** End Patch` literal lines into
+a `.md` file via `apply_patch_*` — the agent runtime parses these as patch
+metadata, but they end up as visible content. Always review the rendered file
+post-patch; if patch metadata appears in the body, re-emit the content via
+`replace_file`.
+
 ## Suite Architecture
 
 This Skill is the **core** of a suite. Auxiliary Skills (e.g. `vibe-coding-reviewer`)
