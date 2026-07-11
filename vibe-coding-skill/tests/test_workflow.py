@@ -12530,3 +12530,166 @@ class EvidenceCommandPositionOrderTests(unittest.TestCase):
         src = open(vibe.__file__, encoding="utf-8").read()
         # metavar appears in the add_argument call for --command
         self.assertIn('metavar="CMD"', src)
+
+
+
+class CommitPathTruncationFallbackTests(unittest.TestCase):
+    """Cover the 2026-07-12b R53 missing_file_review gate fix: when git
+    diff --stat truncates long paths (inserts leading `...`), the gate
+    must fall back to git diff --numstat which never truncates.
+
+    Without this fix, agents committing ≥ 8 long-path files (e.g.
+    many `.agents/reports/*.md` untracked reports) hit a false-positive
+    "missing file review" gate and have to use --no-verify to escape.
+    """
+
+    def test_short_path_no_truncation_returns_basename(self) -> None:
+        """Short paths: --stat output parsed normally (no fallback)."""
+        import commit
+        stat = " src/example.py | 5 ++"
+        files = commit._extract_changed_files_from_stat(stat)
+        self.assertEqual(files, ["src/example.py"])
+
+    def test_truncated_path_returns_empty_signals_fallback(self) -> None:
+        """Long path with `...` prefix: helper returns [] to signal
+        caller that --numstat fallback is needed (basename on
+        '...reports/foo.md' returns the literal string with `...`
+        attached, which would mis-match the review-summary entry)."""
+        import commit
+        stat = (
+            " ...reports/retrospective-extend-cloud-sanitize-coverage.md | 33 ++++++++\n"
+            " ...reports/retrospective-feat-bookmark-lazy-load.md | 33 ++++++++\n"
+            " new.txt | 1 +"
+        )
+        files = commit._extract_changed_files_from_stat(stat)
+        # Returns [] sentinel → caller re-runs --numstat
+        self.assertEqual(files, [])
+
+
+class NoVerifyReasonAuditTests(unittest.TestCase):
+    """Cover the 2026-07-12b --no-verify audit-trail improvement.
+
+    `--no-verify "<reason>"` carries the reason into the Vibe-Commit
+    trailer so admins auditing `git log | grep Vibe-Commit` can see
+    why each bypass was used. Bare `--no-verify` (no reason) remains
+    valid for backward compatibility but emits an advisory hint to
+    nudge toward the reason form.
+    """
+
+    def test_no_verify_with_reason_appears_in_trailer(self) -> None:
+        """--no-verify "R53 bug" trailer is `Vibe-Commit=no-verify: R53 bug`."""
+        from commit import _parse_manual_argv
+        cleaned, state = _parse_manual_argv(["proj", "-m", "x",
+                                              "--no-verify", "R53 basename truncation bug"])
+        self.assertTrue(state["no_verify"])
+        self.assertEqual(state["no_verify_reason"], "R53 basename truncation bug")
+
+    def test_no_verify_without_reason_keeps_advisory_compatible(self) -> None:
+        """Bare `--no-verify` (no token after) — backward compat: boolean True,
+        no_verify_reason empty, so the commit.py trailer logic emits the
+        audit advisory hint instead of denying the commit."""
+        from commit import _parse_manual_argv
+        cleaned, state = _parse_manual_argv(["proj", "-m", "x", "--no-verify"])
+        self.assertTrue(state["no_verify"])
+        self.assertEqual(state["no_verify_reason"], "")
+
+    def test_no_verify_followed_by_flag_no_reason(self) -> None:
+        """`--no-verify -m "msg"` — next token starts with `-`, treat as
+        no-reason (boolean form), don't consume `-m` as reason."""
+        from commit import _parse_manual_argv
+        cleaned, state = _parse_manual_argv(["proj", "--no-verify", "-m", "x"])
+        self.assertTrue(state["no_verify"])
+        self.assertEqual(state["no_verify_reason"], "")
+        # `-m x` must be in cleaned (passed through to git commit)
+        self.assertEqual(cleaned, ["proj", "-m", "x"])
+
+
+class ReviewMarkerTTLTests(unittest.TestCase):
+    """Cover the 2026-07-12b step 2 marker TTL upgrade.
+
+    Markers written by step 1 now carry `created_at` (timestamp) and
+    `project_root` (abs path). Step 2 enforces a 10-minute TTL window
+    so agents that ran step 1 → fail → fix → step 2 within the window
+    don't trip the "step 1 skipped" gate. Old plain-text markers
+    remain valid (immediate-use) for backward compatibility.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name)
+        import subprocess
+        init_project.init_project(str(self.project), "web")
+        subprocess.run(["git", "init", "-q"], cwd=str(self.project), check=True)
+        subprocess.run(["git", "config", "user.email", "t@e"], cwd=str(self.project), check=True)
+        subprocess.run(["git", "config", "user.name", "T"], cwd=str(self.project), check=True)
+        (self.project / ".gitignore").write_text(
+            ".agents/.vibe-review-pending\n", encoding="utf-8",
+        )
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_marker_within_ttl_accepted(self) -> None:
+        """JSON marker written 5 minutes ago is accepted by step 2."""
+        import json as _json
+        import time as _time
+        import commit as commit_mod
+        marker = self.project / ".agents" / ".vibe-review-pending"
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(_json.dumps({
+            "step1": "diff shown",
+            "created_at": _time.time() - 300,  # 5 min ago
+            "project_root": str(self.project.resolve()),
+        }), encoding="utf-8")
+        result = commit_mod._read_and_clear_review_marker(str(self.project))
+        self.assertIsNotNone(result)
+        self.assertFalse(marker.exists(), "marker removed after read")
+
+    def test_marker_outside_ttl_rejected(self) -> None:
+        """JSON marker written 15 minutes ago (>TTL) is rejected."""
+        import json as _json
+        import time as _time
+        import commit as commit_mod
+        marker = self.project / ".agents" / ".vibe-review-pending"
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(_json.dumps({
+            "step1": "diff shown",
+            "created_at": _time.time() - 900,  # 15 min ago, > TTL
+            "project_root": str(self.project.resolve()),
+        }), encoding="utf-8")
+        result = commit_mod._read_and_clear_review_marker(str(self.project))
+        self.assertIsNone(result)
+        self.assertFalse(marker.exists(), "stale marker removed")
+
+    def test_old_format_plain_text_marker_backward_compat(self) -> None:
+        """Plain-text marker (pre-TTL upgrade format) is accepted as
+        immediate-use (no TTL applied)."""
+        import commit as commit_mod
+        marker = self.project / ".agents" / ".vibe-review-pending"
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text("step1 ok\n", encoding="utf-8")
+        result = commit_mod._read_and_clear_review_marker(str(self.project))
+        self.assertIsNotNone(result)
+        self.assertIn("step1", result)
+
+    def test_marker_cross_project_rejected(self) -> None:
+        """JSON marker with project_root != current is rejected and cleared."""
+        import json as _json
+        import time as _time
+        import commit as commit_mod
+        marker = self.project / ".agents" / ".vibe-review-pending"
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(_json.dumps({
+            "step1": "diff shown",
+            "created_at": _time.time() - 30,
+            "project_root": "/some/other/project",
+        }), encoding="utf-8")
+        result = commit_mod._read_and_clear_review_marker(str(self.project))
+        self.assertIsNone(result)
+        self.assertFalse(marker.exists(), "wrong-project marker removed")
+
+    def test_marker_missing_returns_none(self) -> None:
+        """No marker file present → None (gate prompts user to re-run step 1)."""
+        import commit as commit_mod
+        result = commit_mod._read_and_clear_review_marker(str(self.project))
+        self.assertIsNone(result)

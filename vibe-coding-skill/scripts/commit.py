@@ -113,6 +113,13 @@ def _is_auto_generated_path(filepath: str) -> bool:
     return any(filepath.startswith(p) for p in AUTO_GENERATED_PATH_PREFIXES)
 
 
+# 2026-07-12b: step 2 (vibe commit --reviewed) accepts a marker that
+# was written within this many seconds. After the window, the agent
+# must re-run step 1 — protects against crashes / Ctrl-C / mid-flow
+# distraction leaving a stale marker.
+REVIEW_MARKER_TTL_SECONDS = 600
+
+
 def _review_marker_path(project_root: str) -> str:
     """Path to the marker file that records "step 1 (diff shown) was run".
 
@@ -129,11 +136,24 @@ def _write_review_marker(project_root: str) -> None:
 
     Also ensures `.gitignore` (at the project root) ignores the marker,
     so `git add -A` during commit does not pick it up. Idempotent.
+
+    2026-07-12b: marker now carries `created_at` (timestamp) and
+    `project_root` (abs path) — step 2 enforces a TTL window so
+    agents that step 1 → fail → fix → step 2 within 10 minutes don't
+    trip the "step 1 skipped" gate. `project_root` survives cross-project
+    marker confusion (agent switches mid-flow).
     """
+    import json as _json
+    import time as _time
     path = _review_marker_path(project_root)
     os.makedirs(os.path.dirname(path), exist_ok=True)
+    payload = {
+        "step1": "diff shown, ready for step2 (vibe commit --reviewed)",
+        "created_at": _time.time(),
+        "project_root": os.path.realpath(project_root),
+    }
     with open(path, "w", encoding="utf-8") as handle:
-        handle.write("step1: diff shown, ready for step2 (vibe commit --reviewed)")
+        handle.write(_json.dumps(payload, ensure_ascii=False))
     # Ensure .gitignore covers the marker so `git add -A` doesn't include it.
     gitignore = os.path.join(project_root, ".gitignore")
     marker_relpath = ".agents/.vibe-review-pending"
@@ -149,9 +169,52 @@ def _write_review_marker(project_root: str) -> None:
 
 
 def _read_and_clear_review_marker(project_root: str) -> str | None:
-    """Read and remove the marker. Returns its content or None."""
+    """Read and remove the marker. Returns its content or None.
+
+    2026-07-12b (TTL window + cross-project guard): marker payload is
+    JSON with created_at + project_root. Step 2 considers the marker
+    valid only when:
+      - created_at within REVIEW_MARKER_TTL_SECONDS (default 600s = 10min)
+      - project_root matches abs path of current project (prevents
+        cross-project marker confusion when agent switches mid-flow)
+      - JSON parseable (older plain-text markers fall through to
+        stale-rebuild path; do NOT crash)
+    Returns the JSON string (for the `<!-- ... -->` marker in step 2
+    output) when accepted, None otherwise.
+    """
+    import json as _json
+    import time as _time
     path = _review_marker_path(project_root)
     if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            raw = handle.read()
+        payload = _json.loads(raw)
+    except (ValueError, OSError):
+        # Old-format marker (plain text written before the TTL upgrade)
+        # — accept it as immediate-use. Path is project-local
+        # (`.agents/.vibe-review-pending`) so cross-project confusion
+        # is impossible: project A's marker never appears under B's root.
+        # Returning the raw bytes is enough for the gate to proceed.
+        os.remove(path)
+        return raw
+    # Cross-project guard (only when JSON carries a project_root)
+    marker_proj = payload.get("project_root", "")
+    if marker_proj and marker_proj != os.path.realpath(project_root):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        return None
+    # TTL check
+    created_at = payload.get("created_at", 0)
+    age = _time.time() - float(created_at)
+    if age > REVIEW_MARKER_TTL_SECONDS:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
         return None
     with open(path, "r", encoding="utf-8") as handle:
         content = handle.read()
@@ -204,8 +267,27 @@ def _run(argv: list[str], cwd: str) -> tuple[int, str, str]:
 
 
 def _extract_changed_files_from_stat(stat: str) -> list[str]:
-    """Extract file paths from git diff --stat output."""
+    """Extract file paths from git diff --stat output.
+
+    Git truncates long paths in --stat output (default terminal-width,
+    typically 80 columns), inserting a leading `...` or `.../`. The
+    truncated form breaks basename matching in the Rule 53 review gate
+    because `os.path.basename('...path/to/file.md')` returns the literal
+    string with `...` still attached — the review-summary entry won't
+    match and the gate reports false-missing files.
+
+    2026-07-12b retro: 27 untracked reports (paths >60 chars) tripped
+    this gate and forced the agent to use --no-verify.
+
+    Detection: any line whose first column starts with `...` is a
+    truncation marker. In that case the function returns the raw
+    `git diff --numstat` form (which never truncates) so the gate can
+    match real full paths against the review-summary entries.
+
+    Short-path commits keep the existing basename-friendly behaviour.
+    """
     files = []
+    truncated = False
     for line in stat.splitlines():
         line = line.strip()
         if not line or '|' not in line:
@@ -215,6 +297,15 @@ def _extract_changed_files_from_stat(stat: str) -> list[str]:
             filepath = parts[0].strip()
             if filepath:
                 files.append(filepath)
+                # Truncated paths: leading `...` or `.../` after stripping.
+                # os.path.basename on e.g. "...reports/foo.md" still
+                # returns "...reports/foo.md" because git inlines parent
+                # directories into the basename.
+                first_token = filepath.split(" ", 1)[0]
+                if first_token.startswith("..."):
+                    truncated = True
+    if truncated:
+        return []  # signal to caller: re-run via _numstat path
     return files
 
 
@@ -525,6 +616,19 @@ def commit(
         stat_text = _git_diff_stat(project_root, staged_only=True)
         if stat_text and stat_text != "(no tracked changes)":
             changed_files = _extract_changed_files_from_stat(stat_text)
+            if changed_files == []:
+                # 2026-07-12b: --stat truncated at least one path, fall
+                # back to --numstat which never truncates. We re-derive
+                # numstat and parse it ad-hoc (3-column format: add	del	path).
+                numstat_rc, numstat_out, _ = _run(
+                    ["git", "diff", "--numstat", "--cached"], project_root
+                )
+                if numstat_rc == 0:
+                    changed_files = []
+                    for nl in numstat_out.splitlines():
+                        cols = nl.split("\t")
+                        if len(cols) >= 3 and cols[2].strip():
+                            changed_files.append(cols[2].strip())
             missing_files = []
             for filepath in changed_files:
                 basename = os.path.basename(filepath)
@@ -957,14 +1061,17 @@ def _print_paths_logical_unit_warnings(paths):
     print("<!-- vibe:commit_logical_unit_advisory: surfaced -->")
 
 
-def run(argv: list[str]) -> int:
-    """Entry point used by both the CLI and the vibe.py dispatcher.
+def _parse_manual_argv(argv: list[str]) -> tuple[list[str], dict]:
+    """Pull vibe-specific flags out of the argv list.
 
     Manual argv parsing: argparse.REMAINDER swallows --no-verify into
     git_args, so we cannot rely on argparse for the flag. Same applies
     to --staged and --paths.
+
+    Returns (cleaned_argv, state_dict). Tests exercise this directly.
     """
     no_verify = False
+    no_verify_reason = ""
     no_async_gate = False
     staged_only = False
     full_verify = False
@@ -979,6 +1086,14 @@ def run(argv: list[str]) -> int:
         if a == "--no-verify":
             no_verify = True
             i += 1
+            # 2026-07-12b: optional inline reason for audit trail. Bare
+            # `--no-verify` (no reason) remains valid for backward compat
+            # but emits an advisory hint pointing to the audit-friendly
+            # `--no-verify "<reason>"` form below. Consume the next
+            # token only if it doesn't look like a flag.
+            if i < len(argv) and not argv[i].startswith("-"):
+                no_verify_reason = argv[i]
+                i += 1
             continue
         if a == "--no-async-gate":
             no_async_gate = True
@@ -1022,14 +1137,40 @@ def run(argv: list[str]) -> int:
             continue
         cleaned.append(a)
         i += 1
-    argv = cleaned
+    state = {
+        "no_verify": no_verify,
+        "no_verify_reason": no_verify_reason,
+        "no_async_gate": no_async_gate,
+        "staged_only": staged_only,
+        "full_verify": full_verify,
+        "reviewed": reviewed,
+        "quick": quick,
+        "paths": paths,
+        "review_summary": review_summary,
+    }
+    return cleaned, state
+
+
+def run(argv: list[str]) -> int:
+    """Entry point used by both the CLI and the vibe.py dispatcher.
+
+    Thin wrapper: extract flag state via _parse_manual_argv() and hand
+    off to commit(). Keeping parser isolated lets tests exercise argv
+    handling without spinning up a full commit flow.
+    """
+    argv, state = _parse_manual_argv(argv)
+    no_verify = state["no_verify"]
+    no_verify_reason = state["no_verify_reason"]
+    no_async_gate = state["no_async_gate"]
+    staged_only = state["staged_only"]
+    full_verify = state["full_verify"]
+    reviewed = state["reviewed"]
+    quick = state["quick"]
+    paths = state["paths"]
+    review_summary = state["review_summary"]
+
+
     if not argv:
-        # Note: review-summary template used to live here, but this
-        # branch is unreachable through `vibe commit` because argparse
-        # in scripts/vibe.py requires `project_root`. The template now
-        # lives in `commit.REVIEW_SUMMARY_TEMPLATE` and is surfaced
-        # via the commit subparser epilog (`vibe commit --help`) and
-        # via the line-ref hard-gate failure message.
         print("Usage: vibe commit <project_root> [--staged | --paths p1,p2] "
               "[--no-verify] [--no-async-gate] [--full-verify] "
               "[--reviewed --review-summary '<text>'] [--quick] [git commit args...]")
@@ -1051,6 +1192,12 @@ def run(argv: list[str]) -> int:
         # this the audit trail is broken (Agent "reviewed" but the claim
         # is invisible in git history). Vibe-Commit=no-verify distinguishes
         # this from a normal commit so doctor can detect the bypass.
+        #
+        # 2026-07-12b: --no-verify "<reason>" carries the reason into
+        # the trailer so `git log | grep Vibe-Commit` exposes why each
+        # bypass was used (audit completeness). Bare `--no-verify` is
+        # still allowed (backward compat) but the gate below emits an
+        # advisory hint to nudge toward the reason form.
         project_root = os.path.abspath(project_root)
         if not _is_git_repo(project_root):
             print("❌ 当前项目不是 git 仓库")
@@ -1058,7 +1205,17 @@ def run(argv: list[str]) -> int:
         if paths:
             _run(["git", "reset", "HEAD"], project_root)
             _run(["git", "add", "--"] + paths, project_root)
-        augmented_argv = [*git_args, "--trailer", "Vibe-Commit=no-verify"]
+        if no_verify_reason:
+            trailer_value = f"Vibe-Commit=no-verify: {no_verify_reason}"
+        else:
+            trailer_value = "Vibe-Commit=no-verify"
+            print(
+                "⚠️  --no-verify used without reason: `git log | grep Vibe-Commit` "
+                "won't show why this commit skipped review. Pass reason: "
+                "`vibe commit --no-verify 'R53 bug short-name' ...` (advisory, "
+                "不阻塞 commit)."
+            )
+        augmented_argv = [*git_args, "--trailer", trailer_value]
         if reviewed and review_summary.strip():
             augmented_argv.extend([
                 "--trailer", f"Review-Summary={review_summary.strip()}",
