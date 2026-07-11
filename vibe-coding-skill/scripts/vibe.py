@@ -145,6 +145,11 @@ def main() -> None:
             command.add_argument("--apply", action="store_true")
         if name == "doctor":
             command.add_argument("--smoke", action="store_true")
+        # P1+ (2026-07-11): escape hatch for self_analyze auto-fire
+        # in `vibe next` — when test environments or batch jobs need to
+        # bypass the analyzer (eg, freeze retros to compare scan output,
+        # or sandbox without .agents/retros/ written yet).
+        command.add_argument("--skip-self-analyze", action="store_true")
 
     install_aux = sub.add_parser("install-auxiliary")
     install_aux.add_argument("name", nargs="?", default="")
@@ -458,7 +463,7 @@ def main() -> None:
     if args.operation == "status":
         project_status.project_status(root)
     elif args.operation == "next":
-        project_status.project_next(root)
+        project_status.project_next(root, args=args)
     elif args.operation == "migrate":
         migrate_project.migrate_project(root, args.apply)
     elif args.operation == "specs":

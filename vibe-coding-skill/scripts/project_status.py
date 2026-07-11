@@ -173,8 +173,13 @@ def project_status(project_root: str) -> None:
     print(f"<!-- vibe:status_summary: {summary} -->")
 
 
-def project_next(project_root: str) -> dict:
-    """Print only the highest-priority governed next action."""
+def project_next(project_root: str, args=None) -> dict:
+    """Print only the highest-priority governed next action.
+
+    Auto-fires self_analyze (P1+, 2026-07-11). Pass `args` with a
+    truthy `--skip-self-analyze` to bypass the analyzer side-channel
+    for tests / emergency speed.
+    """
     project_root = os.path.abspath(project_root)
     print(f"📍 项目: {project_root}")
     if not os.path.exists(os.path.join(project_root, ".agents")):
@@ -194,7 +199,20 @@ def project_next(project_root: str) -> dict:
         recommendation = recommend_next(project_root, specs)
     recommendation = _apply_commit_prereq(project_root, recommendation)
     _apply_model_mapping(project_root, recommendation)
+    # P1+ (2026-07-11): auto-fire self_analyze on every `vibe next`.
+    # Before this hook, self_analyze only ran inside `vibe retrospective`,
+    # so any session that skipped retro silently lost governance signals.
+    # Now per-call: read retros, surface governance candidates, persist
+    # full report. Cheap (~50ms for typical projects), bypassable via
+    # `--skip-self-analyze`. Same audit pattern as the doctor hooks
+    # (Rule 50 machine marker on every auto-fired audit).
+    skip_flag = bool(args and getattr(args, "skip_self_analyze", False))
+    if not skip_flag:
+        recommendation = _maybe_inject_governance_candidates(
+            project_root, recommendation, specs,
+        )
     _print_recommendation(recommendation)
+    _print_self_analyze_summary(project_root, skip=skip_flag)
     _print_stale_archive_hint(project_root)
     _print_stale_action_items_hint(project_root)
     _print_version_drift_hint(project_root)
@@ -346,6 +364,125 @@ def _print_proposed_rules_hint(project_root: str) -> None:
         print(f"   ... 还有 {len(proposed) - 10} 条")
     print("   决策: `vibe rule-status <project> <stem> adopted` 或 `abandoned`")
     print(f"<!-- vibe:proposed_rules: {len(proposed)} -->")
+
+
+def _maybe_inject_governance_candidates(
+    project_root: str,
+    recommendation: dict,
+    specs: list[dict] | None = None,
+) -> dict:
+    """P1+ (2026-07-11): weave governance candidates into next action.
+
+    Auto-fires self_analyze on every `vibe next`. When unaddressed
+    governance candidates exist AND the current recommendation is not
+    already about governance (drift / freshness / proposed rules /
+    stalled specs), promote the top candidate into the recommendation
+    so the agent has to actively choose to skip it rather than simply
+    never see it.
+
+    Without this, self_analyze findings only surface inside
+    `vibe retrospective`, which most agents skip. This hook guarantees
+    governance signals are visible at the canonical decision point.
+    """
+    try:
+        import self_analyze
+    except Exception:  # noqa: BLE001
+        return recommendation
+    try:
+        findings = self_analyze.analyze(project_root)
+    except Exception:  # noqa: BLE001
+        return recommendation
+    if "error" in findings:
+        return recommendation
+    candidates = findings.get("governance_candidates", [])
+    if not candidates:
+        return recommendation
+    # Persist the report so the agent can query it later (cheap write).
+    try:
+        os.makedirs(
+            os.path.join(project_root, ".agents", "reports"),
+            exist_ok=True,
+        )
+        self_analyze.save_report(
+            findings,
+            os.path.join(project_root, ".agents", "reports", "self-analyze.md"),
+        )
+    except Exception:  # noqa: BLE001
+        pass
+    current_action = recommendation.get("action", "")
+    already_governance = any(
+        kw in current_action
+        for kw in (
+            "Skill 候选", "规则", "proposed", "Skill 版本", "Skill drift",
+            "复盘", "反模式",
+        )
+    )
+    if already_governance:
+        return recommendation
+    top = candidates[0]
+    recommendation["alternative"] = {
+        "action": f"先评审 N={len(candidates)} 条 self_analyze governance 候选",
+        "reason": (
+            f"现成候选 (top-1: {top['failure_mode']}): {top['issue']}"
+        ),
+    }
+    if recommendation.get("why_not"):
+        recommendation["why_not"] += (
+            f"; 同时 {len(candidates)} 条 governance 候选待评审"
+        )
+    else:
+        recommendation["why_not"] = (
+            f"另: {len(candidates)} 条 governance 候选待评审 (top: {top['failure_mode']})"
+        )
+    recommendation["governance_candidates_count"] = len(candidates)
+    return recommendation
+
+
+def _print_self_analyze_summary(project_root: str, skip: bool = False) -> None:
+    """P1+ (2026-07-11): surface self_analyze governance candidates inline.
+
+    Called from project_next() (after gate_verdict). Persists full
+    report to .agents/reports/self-analyze.md for query by downstream
+    tools / agent re-read. Top 3 candidates printed; full list
+    accessible via `vibe self-analyze <project>`.
+
+    Pass `skip=True` to bypass when caller has already invoked the
+    report persist (e.g. for `--skip-self-analyze` batch use).
+    """
+    if skip:
+        return
+    try:
+        import self_analyze
+    except Exception:  # noqa: BLE001
+        return
+    try:
+        findings = self_analyze.analyze(project_root)
+    except Exception:  # noqa: BLE001
+        return
+    if "error" in findings:
+        # self_analyze requires >= 2 retros; silent when not enough.
+        return
+    candidates = findings.get("governance_candidates", [])
+    if not candidates:
+        return
+    print()
+    print(
+        f"📚 self_analyze (P1+): {len(candidates)} 条 governance 候选"
+        " —— 跨项目可复用 / 抽象治理规则的发现:"
+    )
+    for cand in candidates[:3]:
+        mode = cand.get("failure_mode", "?")
+        issue = cand.get("issue", "")
+        print(f"   - {mode}: {issue[:120]}{'...' if len(issue) > 120 else ''}")
+    if len(candidates) > 3:
+        print(f"   ... 还有 {len(candidates) - 3} 条")
+    print(
+        f"   命令: vibe self-analyze {project_root} | "
+        f"报告: .agents/reports/self-analyze.md"
+    )
+    print(
+        f"<!-- vibe:self_analyze_summary: count={len(candidates)} -->"
+    )
 
 
 def _print_missing_retro_hint(project_root: str) -> None:

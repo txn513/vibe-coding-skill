@@ -11270,3 +11270,123 @@ class AdvanceDoneRetroReminderTests(unittest.TestCase):
             self.assertIn("✅ demo: released → done", text)
             self.assertNotIn("下一步建议: 写 retro", text)
             self.assertNotIn("retro_reminder:", text)
+
+
+class NextAutoFireSelfAnalyzeTests(unittest.TestCase):
+    """Cover P1+ (2026-07-11): `vibe next` auto-fires self_analyze and
+    surfaces governance candidates inline. Before this hook,
+    self_analyze only ran inside `vibe retrospective`; sessions that
+    skipped retro silently lost governance signals.
+
+    Real failure mode (multi-project session): agents never invoke
+    `vibe self-analyze`, so Skill-level recurring failure modes stay
+    invisible. Hook into vibe next guarantees visibility at the
+    canonical decision point — every time the agent asks 'next', it
+    also asks 'what recurring patterns exist across retros'.
+    """
+
+    def _setup_with_retros(self, tmp: str, retro_count: int, *, recurring_failure_mode: str = ""):
+        """Init project + write N retros with recurring failure mode.
+
+        self_analyze._is_unfilled_retro() requires the retro to have
+        at least 2 meaningful fields from its required-fields list
+        (最初意图 / 实际交付 / 差异分析 / 擅长 / 反复出错 /
+         需要补充的规则 / 发现的真实问题 / 漏掉的问题 /
+         AGENTS.md 是否准确 / Agent 是否理解了项目结构). The list
+        does NOT include "主失败模式" — populating only that field
+        causes self_analyze to silently skip the retro. Tests must
+        fill 2+ required fields with real content.
+        """
+        from pathlib import Path as _Path
+        proj = _Path(tmp)
+        init_project.init_project(tmp, "web")
+        # init_project does not create retros/ — make it explicitly so
+        # .agents/retros/spec-i.md can be written.
+        (proj / ".agents" / "retros").mkdir(parents=True, exist_ok=True)
+        for i in range(retro_count):
+            (proj / ".agents" / "retros" / f"spec-{i}.md").write_text(
+                f"# spec-{i} retro\n\n"
+                "## 失败模式\n\n"
+                f"- **主失败模式**: {recurring_failure_mode or 'manual code review skipped'}\n"
+                "## 目标回顾\n\n"
+                "**最初意图**: 实现该功能的关键路径\n"
+                "**实际交付**: 已落地核心实现并通过测试\n"
+                "**差异分析**: 与计划一致，无范围偏差\n"
+                "## Agent 表现评估\n\n"
+                "### 实现 Agent\n"
+                "- **擅长**: 快速完成主路径\n"
+                "- **反复出错**: 边界条件覆盖不全\n"
+                "### Review Agent\n"
+                "- **漏掉的问题**: diff 审查不严\n"
+                "## 沉淀落点\n\n"
+                "- **是否形成 Skill 治理候选**: 形成\n"
+                "- **如果形成，候选摘要是什么**: needs cross-project abstraction\n",
+                encoding="utf-8",
+            )
+        # Init git for worktree cleanliness
+        subprocess.run(["git", "init", "-q"], cwd=tmp, check=True)
+
+    def test_vibe_next_emits_self_analyze_summary_when_candidates_exist(self) -> None:
+        """When retros yield recurring failure modes, `vibe next`
+        auto-surfaces them inline (no separate `vibe self-analyze`
+        call needed). The agent sees governance signals every run."""
+        with tempfile.TemporaryDirectory() as tmp:
+            self._setup_with_retros(tmp, retro_count=3,
+                                    recurring_failure_mode="manual code review skipped")
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                project_status.project_next(tmp, args=None)
+            text = output.getvalue()
+            # Auto-fired summary header
+            self.assertIn("self_analyze (P1+):", text)
+            self.assertIn("governance 候选", text)
+            # Failure mode surfaced (top candidate)
+            self.assertIn("manual code review", text)
+            # Marker tag present (Rule 50 machine-readable)
+            self.assertIn("vibe:self_analyze_summary:", text)
+            # Inline alternative offered
+            self.assertIn("governance 候选待评审", text)
+
+    def test_vibe_next_silent_when_no_retros(self) -> None:
+        """When retros/ dir doesn't exist or has <2 retros, self_analyze
+        has no signal → no advisory noise (Rule 50: gate only fires
+        when findings exist)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            init_project.init_project(tmp, "web")
+            subprocess.run(["git", "init", "-q"], cwd=tmp, check=True)
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                project_status.project_next(tmp, args=None)
+            text = output.getvalue()
+            # No self_analyze header when no signal
+            self.assertNotIn("self_analyze (P1+):", text)
+
+    def test_skip_self_analyze_bypasses(self) -> None:
+        """The --skip-self-analyze CLI flag passes args object through
+        to project_next, suppressing the auto-bind for test/batch use."""
+        with tempfile.TemporaryDirectory() as tmp:
+            self._setup_with_retros(tmp, retro_count=2,
+                                    recurring_failure_mode="budget overrun")
+            args = type("Args", (), {"skip_self_analyze": True})()
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                project_status.project_next(tmp, args=args)
+            text = output.getvalue()
+            # With skip flag, the summary advisory must NOT fire
+            self.assertNotIn("self_analyze (P1+):", text)
+
+    def test_self_analyze_report_persisted_to_disk(self) -> None:
+        """Each `vibe next` run persists the full self_analyze report
+        to .agents/reports/self-analyze.md for downstream tooling
+        and agent re-read. Confirms the report is queryable."""
+        with tempfile.TemporaryDirectory() as tmp:
+            self._setup_with_retros(tmp, retro_count=2,
+                                    recurring_failure_mode="missing test coverage")
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                project_status.project_next(tmp, args=None)
+            report = Path(tmp) / ".agents" / "reports" / "self-analyze.md"
+            self.assertTrue(report.exists(),
+                            msg=f"self-analyze.md not written; output was: {output.getvalue()[:500]}")
+            content = report.read_text(encoding="utf-8")
+            self.assertIn("missing test coverage", content)
