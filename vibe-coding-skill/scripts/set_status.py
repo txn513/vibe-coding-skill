@@ -291,6 +291,24 @@ def set_status(
                 project_root, spec_name, content, "observe", profile, workflow
             ):
                 print("❌ 标记 done 前需要当前版本的上线观察证据")
+                # 2026-07-12c: same digest-mismatch diagnostic as the
+                # verify path (ab02457) — surface missing Command-Digests
+                # and the --configured retry template so the agent self-
+                # corrects instead of reading retro observe-profile output.
+                missing_digests, _configured = _missing_command_digests(
+                    project_root, spec_name, "observe", workflow,
+                    purpose="standard",
+                )
+                if missing_digests:
+                    print(
+                        f"   💡 Missing Command-Digests: "
+                        f"{', '.join(missing_digests)}"
+                    )
+                    print(
+                        f"   💡 修复: 重跑 `vibe evidence {project_root} "
+                        f"{spec_name} observe passed <...> --configured` "
+                        f"自动抓 workflow.json observe 命令 digest"
+                    )
                 return None
 
     if not force and new_status not in ALLOWED_TRANSITIONS.get(current_status, set()):
@@ -675,6 +693,40 @@ def _allowed_result_for_purpose(purpose: str) -> str:
     return "passed|not-applicable"
 
 
+def _snapshot_recent_enough(evidence: str, max_age_seconds: int = 1800) -> bool:
+    """Return True if the evidence's Created-At is within `max_age_seconds`.
+
+    2026-07-12c snapshot-staleness-after-commit fix: when an agent
+    records evidence and then commits (e.g. commit `.agents/evidence/`
+    files), the git HEAD SHA moves but the evidence file content —
+    including the captured Created-At and Snapshot fields —
+    remains valid evidence. Forcing the agent to re-record evidence
+    just to refresh the Snapshot line wastes a round and creates a
+    loop (re-recorded evidence → re-commit → snapshot moves again).
+
+    The 30-minute default is intentionally generous: a single
+    evidence-record → commit → advance cycle fits well within
+    30 minutes, while cross-session stale evidence (>30 min old)
+    still triggers the hard gate. Returns False on parse failure
+    so callers fall through to the strict equality branch.
+    """
+    from datetime import datetime, timezone
+    match = re.search(r"Created-At:\s*(\S+)", evidence)
+    if not match:
+        return False
+    raw = match.group(1).strip()
+    # Accept both 2026-07-12T18:34:21Z and 2026-07-12T18:34:21+00:00
+    iso = raw.replace("Z", "+00:00") if raw.endswith("Z") else raw
+    try:
+        dt = datetime.fromisoformat(iso)
+    except ValueError:
+        return False
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    age = (datetime.now(timezone.utc) - dt).total_seconds()
+    return 0 <= age <= max_age_seconds
+
+
 def _missing_command_digests(
     project_root: str,
     spec_name: str,
@@ -741,6 +793,14 @@ def _has_current_evidence(
     snapshot_ok = (
         not require_current_snapshot
         or f"Snapshot: {git.get('snapshot', 'N/A')}" in evidence
+        # 2026-07-12c: accept evidence written within the last 30 min
+        # even when current git HEAD differs. Solves the
+        # "record evidence → commit → snapshot stale → re-record → loop"
+        # failure mode where the only thing that changed is the commit
+        # SHA itself (not the spec / evidence content). Beyond 30 min
+        # the gate still rejects — strong consistency is preserved for
+        # genuine staleness cases.
+        or _snapshot_recent_enough(evidence, max_age_seconds=1800)
     )
     clean_ok = not profile["require_clean_worktree"] or git["worktree"] == "clean"
     actor_match = re.search(r"Actor:\s*([^|\n]+)", evidence)
