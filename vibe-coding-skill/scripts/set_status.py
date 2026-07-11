@@ -318,6 +318,16 @@ def set_status(
 
     transition = f"{current_status} → {new_status}"
     print(f"✅ {spec_name}: {transition}")
+    # Post-advance retro reminder. Lifecycle complete (done is the final
+    # stage), so this is the natural moment to nudge the agent to write
+    # retro. Without this nudge, agents walk from done back to next-spec
+    # and only discover missing retro when `vibe status` lists them via
+    # `<!-- vibe:missing_retros: N -->`. Pushing the nudge here keeps the
+    # retro writing in the same cognitive context as the just-finished
+    # work. Mirrors _print_commit_reminder_at_transition pattern (soft
+    # advisory, machine marker, no gate interference). 2026-07-11.
+    if new_status == "done" and not force:
+        _print_retro_reminder_at_done(project_root, spec_name)
     # Rule 50: machine-readable gate verdict.
     verdict = "pass"
     if force:
@@ -352,6 +362,30 @@ def set_status(
             print(f"⚠️  自动 changelog 失败（状态已推进）: {exc}", file=__import__("sys").stderr)
 
     return new_status
+
+
+def _print_retro_reminder_at_done(project_root: str, spec_name: str) -> None:
+    """Surface retro writing as the natural next step after spec=done.
+
+    Soft advisory that fires on the done transition (not force). Goal
+    is reminder, not gate — agent can still go straight to next spec
+    if appropriate. Tied to the new Skill-候选 categorization in
+    retrospective.run_retrospective which surfaces 沉淀落点 → Skill
+    候选 vs 项目沉淀 decision right at retro-writing time.
+    """
+    retro_path = os.path.join(
+        project_root, ".agents", "retros", f"{spec_name}.md"
+    )
+    if os.path.exists(retro_path):
+        # Retro already written; nothing to nudge.
+        return
+    print()
+    print("📝 下一步建议: 写 retro (Rule 54)")
+    print(f"   spec 已完成 lifecycle, 现在是复盘时机:")
+    print(f'   vibe retrospective {project_root} {spec_name}')
+    print("   (会自动跑 self_analyze 找跨项目失败模式 + 列出 Skill 候选 vs 项目沉淀)")
+    print("   (advisory: 跳过也可以, 但下次 vibe status 会再次提醒这个 spec 缺 retro)")
+    print(f"<!-- vibe:retro_reminder: spec={spec_name} transition=done -->")
 
 
 def _print_commit_reminder_at_transition(

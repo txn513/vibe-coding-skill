@@ -11187,3 +11187,86 @@ class RetrospectiveSkillCandidateCategorizationTests(unittest.TestCase):
             text = buf.getvalue()
             self.assertIn("✅ retro Skill 候选栏已填", text)
             self.assertIn("形成 (governance 级)", text)
+
+
+class AdvanceDoneRetroReminderTests(unittest.TestCase):
+    """Cover 2026-07-11 follow-up: `vibe advance ... done` success
+    print fires a soft retro reminder. Real failure mode: agent walks
+    from done back to next-spec, never thinks about retro, and only
+    discovers missing retros via `vibe status` missing_retros hint
+    later. Pushing the nudge at the done transition keeps retro
+    writing in the same cognitive context.
+    """
+
+    def _ready_at_released(self, tmp: str):
+        """Set up project at released→done gate (all evidence + review
+        approved). Returns the project path. Does NOT write retro.
+        Follows the working test_done_requires_approved_review_and_retro_requires_done
+        pattern."""
+        from pathlib import Path as _Path
+        proj = _Path(tmp)
+        init_project.init_project(tmp, "web")
+        spec = proj / ".agents" / "specs" / "demo.md"
+        spec.write_text(VALID_SPEC.format(status="released"), encoding="utf-8")
+        record_evidence.record_evidence(
+            tmp, "demo", "verify", "passed",
+            f"project checks passed, 覆盖 {VALID_SPEC_AC_ALL}",
+        )
+        set_status.set_status(tmp, "demo", "review")
+        generate_review.generate_review(tmp, "demo")
+        record_review.record_review(
+            tmp, "demo", "approved",
+            "scope and behavior reviewed at api.py:343 (final-fix path, see .agents/reviews/review.md)",
+            "project checks passed",
+            "reviewer-a",
+        )
+        record_evidence.record_evidence(
+            tmp, "demo", "release", "not-applicable",
+            "this project has no separate release step",
+        )
+        set_status.set_status(tmp, "demo", "released")
+        return tmp
+
+    def test_done_advance_emits_retro_reminder_when_no_retro(self) -> None:
+        """vibe advance done (no retro yet) → success print followed
+        by retro reminder with command + Rule 54 + machine marker."""
+        with tempfile.TemporaryDirectory() as tmp:
+            self._ready_at_released(tmp)
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                set_status.set_status(tmp, "demo", "done")
+            text = output.getvalue()
+            self.assertIn("✅ demo: released → done", text)
+            # Retro reminder block fired
+            self.assertIn("下一步建议: 写 retro", text)
+            self.assertIn("Rule 54", text)
+            self.assertIn("vibe retrospective", text)
+            self.assertIn("demo", text)
+            # Marker tag
+            self.assertIn("retro_reminder:", text)
+            self.assertIn("transition=done", text)
+            # Reminder references the categorization hook
+            self.assertIn("Skill 候选", text)
+
+    def test_done_advance_silent_when_retro_exists(self) -> None:
+        """When retro file already exists for the spec, the reminder
+        must NOT fire (already-done case should not be noisy)."""
+        from pathlib import Path as _Path
+        with tempfile.TemporaryDirectory() as tmp:
+            self._ready_at_released(tmp)
+            # Pre-create retro so the silent branch fires
+            retro_dir = _Path(tmp) / ".agents" / "retros"
+            retro_dir.mkdir(parents=True, exist_ok=True)
+            (retro_dir / "demo.md").write_text(
+                "# demo retro\n\n## 沉淀落点\n\n"
+                "- **是否形成 Skill 治理候选**: 否\n"
+                "- **如果形成，候选摘要是什么**: 不形成\n",
+                encoding="utf-8",
+            )
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                set_status.set_status(tmp, "demo", "done")
+            text = output.getvalue()
+            self.assertIn("✅ demo: released → done", text)
+            self.assertNotIn("下一步建议: 写 retro", text)
+            self.assertNotIn("retro_reminder:", text)
