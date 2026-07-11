@@ -52,6 +52,17 @@ def run_retrospective(project_root: str, spec_name: str = "") -> dict | None:
         project_root, spec_name, retro_file, findings, governance_candidates
     )
 
+    # P1+ (2026-07-11): "after completing a feature, see upgrade
+    # candidates". Aggregated signals (Skill + project-level) get
+    # surfaced right after retro is written, so the agent has the
+    # complete picture in the same cognitive context as just-finished
+    # work. Real failure mode (before this hook): agents wrote retro,
+    # got pre-filled Skill 候选 suggestion, but never realized the
+    # OTHER candidates that already existed in the aggregator pool —
+    # because the next command they'd run would be `vibe next` for
+    # a new spec, and old signals would get diluted.
+    _print_aggregated_signals_after_retro(project_root)
+
     print()
     print("🧭 复盘动作")
     print(f"   目标 spec: {spec_name}")
@@ -254,6 +265,66 @@ def _print_skill_candidate_field_status(project_root: str, spec_name: str) -> No
         print("   ℹ️  retro Skill 候选栏已决策: 不形成 (项目级规则已足够)")
     else:
         print(f"   ✅ retro Skill 候选栏已填: {skill_field[:60]}{'...' if len(skill_field) > 60 else ''}")
+
+
+
+
+def _print_aggregated_signals_after_retro(project_root: str) -> None:
+    """Surface aggregated upgrade signals right after retro write.
+
+    Fires once per `vibe retrospective` call. This is the "after
+    completing a feature" moment — the agent has just closed the
+    lifecycle loop on a spec, written the retro, and now needs to
+    see what upgrade candidates exist across the project before
+    moving on to the next spec.
+
+    Output style: same as `vibe next`'s aggregator hint, but
+    terser (no recommendation.alternative weaving — this is a
+    summary block, not a planning prompt). Soft advisory; no gate.
+    """
+    try:
+        from scripts import project_status  # type: ignore[import-not-found]
+        aggregated = project_status._aggregate_signals(project_root)
+    except Exception:  # noqa: BLE001 — aggregator failure must not break retro
+        return
+
+    skill_candidates = aggregated.get("skill_candidates", [])
+    project_signals = aggregated.get("project_signals", [])
+
+    if not skill_candidates and not project_signals:
+        return
+
+    print()
+    print("📚 完成本功能后 — 当前累积的升级候选（aggregator）:")
+    if skill_candidates:
+        print(f"   🔴 Skill 级候选 (待管理员评审): {len(skill_candidates)} 条")
+        for cand in skill_candidates[:5]:
+            sources_str = ",".join(cand.get("sources", []))
+            print(
+                f"      - [{cand['priority']}] {cand['title']} "
+                f"(来源: {sources_str})"
+            )
+        if len(skill_candidates) > 5:
+            print(f"      ... 还有 {len(skill_candidates) - 5} 条")
+    if project_signals:
+        print(f"   📂 项目级信号 (待沉淀): {len(project_signals)} 条")
+        for sig in project_signals[:5]:
+            sources_str = ",".join(sig.get("sources", []))
+            title = sig["title"]
+            print(
+                f"      - [{sig['priority']}] {title} "
+                f"(来源: {sources_str})"
+            )
+        if len(project_signals) > 5:
+            print(f"      ... 还有 {len(project_signals) - 5} 条")
+    print(
+        f"   查看全部: vibe self-analyze {project_root} | "
+        f"详细报告: .agents/reports/self-analyze.md"
+    )
+    print(
+        "   <!-- vibe:aggregator_post_retro: skill="
+        f"{len(skill_candidates)} project={len(project_signals)} -->"
+    )
 
 
 def _prefill_skill_candidate_fields(

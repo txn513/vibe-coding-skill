@@ -11796,3 +11796,93 @@ class AggregatorPoolRoutingTests(unittest.TestCase):
                 if "upgrade_signals" in c["sources"]
             ]
             self.assertEqual(len(skill_only), 1)
+
+
+class AggregatorPostRetroTests(unittest.TestCase):
+    """Cover P1+ (2026-07-11): aggregated signals surface after retro write.
+
+    User principle (2026-07-11 review): "agent normally walks through
+    a flow, after completing a feature it should trigger". The natural
+    "completion" moment is right after `vibe retrospective` writes the
+    retro file. Without this hint, agents see the pre-filled Skill
+    候选 suggestion but miss the OTHER candidates already in the
+    aggregator pool from prior retros / proposal files.
+
+    The hook fires once per `vibe retrospective` call, surfaces both
+    Skill-level (admin-review) and project-level (agent-actionable)
+    candidates, and exits silently if the aggregator pool is empty.
+    """
+
+    def test_post_retro_surfaces_skill_and_project_signals(self) -> None:
+        """Both Skill and project-level candidates appear in output."""
+        with tempfile.TemporaryDirectory() as tmp:
+            proj = Path(tmp)
+            init_project.init_project(tmp, "web")
+            (proj / ".agents" / "retros").mkdir(parents=True, exist_ok=True)
+            # 3 retros with same Skill-level failure mode
+            for i in range(3):
+                (proj / ".agents" / "retros" / f"spec-{i}.md").write_text(
+                    f"# spec-{i}\n\n## 失败模式\n\n- **主失败模式**: evidence not reviewed\n## 目标回顾\n\n**最初意图**: x\n**实际交付**: y\n**差异分析**: z\n",
+                    encoding="utf-8",
+                )
+            # Project-level proposal file
+            (proj / ".agents" / "skill-upgrade-candidates-2026-07-08.md").write_text(
+                "# Project-level: 补充 Implementation Checklist 的边界条件项\n\n"
+                "**状态**: proposed\n",
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "init", "-q"], cwd=tmp, check=True)
+
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                from scripts import retrospective as _retro
+                _retro._print_aggregated_signals_after_retro(tmp)
+            text = output.getvalue()
+            self.assertIn("完成本功能后", text)
+            self.assertIn("Skill 级候选", text)
+            self.assertIn("项目级信号", text)
+            self.assertIn("evidence not reviewed", text)
+            self.assertIn("补充 Implementation Checklist", text)
+            # Machine marker
+            self.assertIn("vibe:aggregator_post_retro:", text)
+
+    def test_post_retro_silent_when_aggregator_empty(self) -> None:
+        """No candidates → no output. Don't spam the agent with
+        'nothing to see' messages."""
+        with tempfile.TemporaryDirectory() as tmp:
+            init_project.init_project(tmp, "web")
+            subprocess.run(["git", "init", "-q"], cwd=tmp, check=True)
+
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                from scripts import retrospective as _retro
+                _retro._print_aggregated_signals_after_retro(tmp)
+            self.assertEqual(output.getvalue(), "")
+
+    def test_post_retro_does_not_crash_on_aggregator_failure(self) -> None:
+        """If aggregator raises (corrupt retros etc), post-retro print
+        must not break the retro write flow."""
+        with tempfile.TemporaryDirectory() as tmp:
+            init_project.init_project(tmp, "web")
+            subprocess.run(["git", "init", "-q"], cwd=tmp, check=True)
+
+            # Patch project_status._aggregate_signals to raise
+            import sys as _sys
+            from scripts import project_status  # noqa: PLC0415
+            for modname in ("scripts.project_status", "project_status"):
+                mod = _sys.modules.get(modname)
+                if mod is not None and hasattr(mod, "_aggregate_signals"):
+                    orig = mod._aggregate_signals
+                    mod._aggregate_signals = lambda *a, **kw: (_ for _ in ()).throw(
+                        RuntimeError("simulated aggregator failure")
+                    )
+                    try:
+                        output = io.StringIO()
+                        with contextlib.redirect_stdout(output):
+                            from scripts import retrospective as _retro
+                            _retro._print_aggregated_signals_after_retro(tmp)
+                        # Should silently exit, not crash
+                        self.assertEqual(output.getvalue(), "")
+                    finally:
+                        mod._aggregate_signals = orig
+                    break
