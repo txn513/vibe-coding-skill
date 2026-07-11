@@ -11344,8 +11344,11 @@ class NextAutoFireSelfAnalyzeTests(unittest.TestCase):
             self.assertIn("manual code review", text)
             # Marker tag present (Rule 50 machine-readable)
             self.assertIn("vibe:self_analyze_summary:", text)
-            # Inline alternative offered
-            self.assertIn("governance 候选待评审", text)
+            # Aggregator output includes both Skill-level + project-level signals
+            # (project-level "项目级信号" comes from self_analyze.suggestions on
+            # the same 3 retros — see _aggregate_signals dedup behavior).
+            self.assertIn("Skill 候选", text)
+            self.assertIn("项目级信号", text)
 
     def test_vibe_next_silent_when_no_retros(self) -> None:
         """When retros/ dir doesn't exist or has <2 retros, self_analyze
@@ -11390,3 +11393,201 @@ class NextAutoFireSelfAnalyzeTests(unittest.TestCase):
                             msg=f"self-analyze.md not written; output was: {output.getvalue()[:500]}")
             content = report.read_text(encoding="utf-8")
             self.assertIn("missing test coverage", content)
+
+
+class UpgradeSignalsAggregatorTests(unittest.TestCase):
+    """Cover P1+ architecture (2026-07-11): multi-source signal aggregator.
+
+    `_aggregate_signals` is the single fan-out point for skill-level
+    AND project-level upgrade candidates. It must:
+      - call both self_analyze and upgrade_signals
+      - dedupe by stable key (so the same candidate from both sources
+        appears once with both sources listed)
+      - keep modules interface-isolated (upgrade_signals must accept
+        self_analyze_findings=None and still work)
+
+    Real failure mode (before this hook): each module surfaced its
+    own findings independently with no coordination; the same
+    failure_mode could appear in `vibe next` output twice if both
+    retros AND a project proposal file pointed at it.
+    """
+
+    def test_aggregator_returns_empty_when_no_sources(self) -> None:
+        """No retros + no upgrade-candidate files -> empty pools."""
+        with tempfile.TemporaryDirectory() as tmp:
+            init_project.init_project(tmp, "web")
+            subprocess.run(["git", "init", "-q"], cwd=tmp, check=True)
+            from scripts import project_status  # noqa: PLC0415
+            agg = project_status._aggregate_signals(tmp)
+            self.assertEqual(agg["skill_candidates"], [])
+            self.assertEqual(agg["project_signals"], [])
+
+    def test_aggregator_dedupes_skill_candidate_across_sources(self) -> None:
+        """When self_analyze + upgrade_signals both surface the same
+        failure_mode, it appears ONCE in skill_candidates with both
+        source names listed (key='manual-code-review-skipped')."""
+        with tempfile.TemporaryDirectory() as tmp:
+            proj = Path(tmp)
+            init_project.init_project(tmp, "web")
+            (proj / ".agents" / "retros").mkdir(parents=True, exist_ok=True)
+            for i in range(3):
+                (proj / ".agents" / "retros" / f"spec-{i}.md").write_text(
+                    f"# spec-{i} retro\n\n"
+                    "## 失败模式\n\n"
+                    "- **主失败模式**: manual code review skipped\n"
+                    "## 目标回顾\n\n"
+                    "**最初意图**: 实现该功能\n"
+                    "**实际交付**: 已落地\n"
+                    "**差异分析**: 一致\n",
+                    encoding="utf-8",
+                )
+            # upgrade-candidate file mentions the same failure_mode
+            (proj / ".agents" / "skill-upgrade-candidates-2026-07-11.md").write_text(
+                "# Skill upgrade: manual code review skipped\n\n"
+                "**状态**: 待评审\n\n"
+                "manual code review skipped appears across retros.\n",
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "init", "-q"], cwd=tmp, check=True)
+
+            from scripts import project_status  # noqa: PLC0415
+            agg = project_status._aggregate_signals(tmp)
+            self.assertGreaterEqual(len(agg["skill_candidates"]), 1)
+            # The dedup target: a single entry with both sources
+            deduped = [
+                c for c in agg["skill_candidates"]
+                if "self_analyze" in c["sources"]
+                and "upgrade_signals" in c["sources"]
+            ]
+            self.assertEqual(
+                len(deduped), 1,
+                msg=f"expected 1 deduped entry, got {len(deduped)}: "
+                    f"{[c['sources'] for c in agg['skill_candidates']]}"
+            )
+
+    def test_upgrade_signals_standalone_runs_without_self_analyze(self) -> None:
+        """Pattern A: upgrade_signals.analyze(..., self_analyze_findings=None)
+        must work independently — modules are interface-isolated."""
+        with tempfile.TemporaryDirectory() as tmp:
+            proj = Path(tmp)
+            init_project.init_project(tmp, "web")
+            (proj / ".agents" / "skill-upgrade-candidates-2026-07-11.md").write_text(
+                "# Skill upgrade: spec drift auto-detection\n\n"
+                "**状态**: proposed\n",
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "init", "-q"], cwd=tmp, check=True)
+
+            from scripts import upgrade_signals  # noqa: PLC0415
+            findings = upgrade_signals.analyze(tmp, self_analyze_findings=None)
+            self.assertEqual(findings["self_analyze_used"], False)
+            self.assertGreaterEqual(len(findings["signals"]), 1)
+            # Key is derived from title text (semantic identity) so the
+            # aggregator can dedup against self_analyze failure_modes.
+            keys = [s["key"] for s in findings["signals"]]
+            self.assertIn("skill-upgrade-spec-drift-auto-detection", keys)
+
+    def test_upgrade_signals_records_receipt_of_self_analyze(self) -> None:
+        """Pattern A: when self_analyze_findings is provided, the
+        `self_analyze_used` flag must reflect that — even though
+        enrichment is TODO. This is the contract for future
+        cooperation without breaking the public interface."""
+        with tempfile.TemporaryDirectory() as tmp:
+            proj = Path(tmp)
+            init_project.init_project(tmp, "web")
+            subprocess.run(["git", "init", "-q"], cwd=tmp, check=True)
+
+            from scripts import upgrade_signals  # noqa: PLC0415
+            findings = upgrade_signals.analyze(
+                tmp,
+                self_analyze_findings={"governance_candidates": [], "suggestions": []},
+            )
+            self.assertEqual(findings["self_analyze_used"], True)
+            # Enrichment is still TODO — enriched list must remain empty
+            self.assertEqual(findings["enriched"], [])
+
+    def test_aggregator_handles_missing_modules_gracefully(self) -> None:
+        """If self_analyze raises (e.g. corrupt retro), aggregator
+        must still return upgrade_signals findings — not crash."""
+        with tempfile.TemporaryDirectory() as tmp:
+            proj = Path(tmp)
+            init_project.init_project(tmp, "web")
+            (proj / ".agents" / "skill-upgrade-candidates-x.md").write_text(
+                "# missing rule stems proposal\n\n"
+                "**状态**: proposed\n",
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "init", "-q"], cwd=tmp, check=True)
+
+            # Force-raise in self_analyze. Patch BOTH the relative import
+            # path (used inside project_status.py `import self_analyze`)
+            # and the absolute path (used by tests).
+            import sys as _sys
+            from scripts import project_status  # noqa: PLC0415
+            patches = []
+            for modname in ("scripts.self_analyze", "self_analyze"):
+                mod = _sys.modules.get(modname)
+                if mod is not None and hasattr(mod, "analyze"):
+                    patches.append((mod, mod.analyze))
+                    mod.analyze = lambda *a, **kw: (_ for _ in ()).throw(
+                        RuntimeError("corrupt retro simulated")
+                    )
+            try:
+                agg = project_status._aggregate_signals(tmp)
+                # self_analyze path failed silently; upgrade_signals path
+                # must still produce findings (in either pool, depending
+                # on the heuristic level inference).
+                total = len(agg["skill_candidates"]) + len(agg["project_signals"])
+                self.assertGreaterEqual(
+                    total, 1,
+                    msg=f"expected upgrade_signals findings to survive "
+                        f"self_analyze crash; got skill={agg['skill_candidates']}, "
+                        f"project={agg['project_signals']}"
+                )
+            finally:
+                for mod, orig in patches:
+                    mod.analyze = orig
+
+
+class SkipUpgradeSignalsFlagTests(unittest.TestCase):
+    """Cover --skip-upgrade-signals CLI flag (P1+ architecture 2026-07-11).
+
+    Symmetric to --skip-self-analyze: batch jobs or test fixtures
+    sometimes need to bypass the upgrade_signals fan-out (e.g., when
+    `.agents/skill-upgrade-candidates*.md` files in the test tmpdir
+    pollute the aggregator output). Flag must propagate from args
+    through project_next down to _aggregate_signals.
+    """
+
+    def test_skip_upgrade_signals_silences_aggregator(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            proj = Path(tmp)
+            init_project.init_project(tmp, "web")
+            (proj / ".agents" / "retros").mkdir(parents=True, exist_ok=True)
+            for i in range(3):
+                (proj / ".agents" / "retros" / f"spec-{i}.md").write_text(
+                    f"# spec-{i} retro\n\n"
+                    "## 失败模式\n\n"
+                    "- **主失败模式**: manual code review skipped\n"
+                    "## 目标回顾\n\n"
+                    "**最初意图**: x\n**实际交付**: y\n**差异分析**: z\n",
+                    encoding="utf-8",
+                )
+            (proj / ".agents" / "skill-upgrade-candidates-x.md").write_text(
+                "# Skill upgrade: noise\n\n**状态**: proposed\n",
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "init", "-q"], cwd=tmp, check=True)
+
+            args = type("Args", (), {
+                "skip_self_analyze": False,
+                "skip_upgrade_signals": True,
+            })()
+            from scripts import project_status  # noqa: PLC0415
+            agg = project_status._aggregate_signals(
+                tmp, skip_self_analyze=False, skip_upgrade_signals=True,
+            )
+            # self_analyze findings still present
+            self.assertGreaterEqual(len(agg["skill_candidates"]), 1)
+            # upgrade_signals path was bypassed
+            self.assertEqual(agg["raw"].get("upgrade_signals", {}).get("signals", []), [])

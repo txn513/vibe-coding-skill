@@ -150,6 +150,10 @@ def main() -> None:
         # bypass the analyzer (eg, freeze retros to compare scan output,
         # or sandbox without .agents/retros/ written yet).
         command.add_argument("--skip-self-analyze", action="store_true")
+        # P1+ architecture (2026-07-11): escape hatch for upgrade_signals
+        # auto-fire — when batch jobs want only retros-based signals and
+        # don't want proposal-file scans polluting the aggregator output.
+        command.add_argument("--skip-upgrade-signals", action="store_true")
 
     install_aux = sub.add_parser("install-auxiliary")
     install_aux.add_argument("name", nargs="?", default="")

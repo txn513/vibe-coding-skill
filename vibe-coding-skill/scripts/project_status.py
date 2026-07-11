@@ -207,9 +207,12 @@ def project_next(project_root: str, args=None) -> dict:
     # `--skip-self-analyze`. Same audit pattern as the doctor hooks
     # (Rule 50 machine marker on every auto-fired audit).
     skip_flag = bool(args and getattr(args, "skip_self_analyze", False))
+    skip_us_flag = bool(args and getattr(args, "skip_upgrade_signals", False))
     if not skip_flag:
         recommendation = _maybe_inject_governance_candidates(
             project_root, recommendation, specs,
+            skip_self_analyze=skip_flag,
+            skip_upgrade_signals=skip_us_flag,
         )
     _print_recommendation(recommendation)
     _print_self_analyze_summary(project_root, skip=skip_flag)
@@ -366,49 +369,183 @@ def _print_proposed_rules_hint(project_root: str) -> None:
     print(f"<!-- vibe:proposed_rules: {len(proposed)} -->")
 
 
+def _aggregate_signals(project_root: str, *, skip_self_analyze: bool = False, skip_upgrade_signals: bool = False) -> dict:
+    """P1+ architecture (2026-07-11): multi-source signal aggregator.
+
+    Calls each signal-producing module in turn (self_analyze for
+    retros, upgrade_signals for cross-source proposal files), then
+    dedupes by stable key so the same upgrade candidate never appears
+    twice in `vibe next` output even when multiple sources point at it.
+
+    Architecture pattern (2026-07-11 review):
+      - each module is interface-isolated (no import-time deps)
+      - modules may optionally consume each other via keyword args
+        (Pattern A: upgrade_signals accepts self_analyze_findings=None)
+      - aggregator is the only place dedup happens
+      - new modules can be added without touching existing ones
+    """
+    raw: dict = {}
+    sa_findings: dict = {}
+    us_findings: dict = {}
+
+    if not skip_self_analyze:
+        try:
+            import self_analyze
+            sa_findings = self_analyze.analyze(project_root)
+            raw["self_analyze"] = sa_findings
+        except Exception:
+            pass
+
+    if not skip_upgrade_signals:
+        try:
+            import upgrade_signals as _us
+            us_findings = _us.analyze(project_root, self_analyze_findings=sa_findings or None)
+            raw["upgrade_signals"] = us_findings
+        except Exception:
+            pass
+
+    skill_pool: dict = {}
+    project_pool: dict = {}
+
+    for cand in sa_findings.get("governance_candidates", []):
+        mode = cand.get("failure_mode", "?")
+        key = _normalize_key(mode)
+        if key not in skill_pool:
+            skill_pool[key] = {"key": key, "title": mode, "issue": cand.get("issue", ""), "action": cand.get("action", ""), "priority": cand.get("priority", "medium"), "sources": ["self_analyze"], "level": "skill"}
+        elif "self_analyze" not in skill_pool[key]["sources"]:
+            skill_pool[key]["sources"].append("self_analyze")
+
+    for sug in sa_findings.get("suggestions", []):
+        target = sug.get("target", "?")
+        key = _normalize_key(target)
+        if key not in project_pool:
+            project_pool[key] = {"key": key, "title": f"{sug.get('type', '?')}: {target}", "issue": sug.get("issue", ""), "action": sug.get("action", ""), "priority": sug.get("priority", "medium"), "sources": ["self_analyze"], "level": "project"}
+        elif "self_analyze" not in project_pool[key]["sources"]:
+            project_pool[key]["sources"].append("self_analyze")
+
+    for sig in us_findings.get("signals", []):
+        level = sig.get("level", "mixed")
+        key = sig.get("key", "?")
+        title = sig.get("title", "?")
+        resolved_level = level if level in ("skill", "project") else "project"
+        entry = {
+            "key": key,
+            "title": title,
+            "issue": "",
+            "action": "",
+            "priority": "medium",
+            "sources": ["upgrade_signals"],
+            "level": resolved_level,
+            "source_file": sig.get("source_file", ""),
+            "status": sig.get("status", "unknown"),
+        }
+        # For mixed-level signals probe both pools; for explicit levels
+        # probe only the matching pool. Allows substring dedup against
+        # self_analyze failure_modes regardless of which pool they live in.
+        probe_pools = (
+            [skill_pool, project_pool]
+            if resolved_level == "project" and level == "mixed"
+            else [skill_pool if resolved_level == "skill" else project_pool]
+        )
+        merged = False
+        for pool in probe_pools:
+            if key in pool:
+                if "upgrade_signals" not in pool[key]["sources"]:
+                    pool[key]["sources"].append("upgrade_signals")
+                merged = True
+                break
+            for existing_key in list(pool.keys()):
+                if len(existing_key) < 6 or len(key) < 6:
+                    continue
+                if key in existing_key or existing_key in key:
+                    if "upgrade_signals" not in pool[existing_key]["sources"]:
+                        pool[existing_key]["sources"].append("upgrade_signals")
+                    merged = True
+                    break
+            if merged:
+                break
+        if not merged:
+            probe_pools[0][key] = entry
+
+    for pool in (skill_pool, project_pool):
+        for cand in pool.values():
+            if len(cand["sources"]) >= 2:
+                cand["priority"] = "high" if cand["priority"] != "high" else "high"
+
+    return {
+        "skill_candidates": sorted(skill_pool.values(), key=lambda c: (-_priority_rank(c["priority"]), c["title"])),
+        "project_signals": sorted(project_pool.values(), key=lambda c: (-_priority_rank(c["priority"]), c["title"])),
+        "raw": raw,
+    }
+
+
+def _normalize_key(text: str) -> str:
+    return re.sub(r"[^a-z0-9一-鿿]+", "-", text.lower()).strip("-")
+
+
+def _priority_rank(priority: str) -> int:
+    return {"high": 3, "medium": 2, "low": 1}.get(priority, 0)
+
+
 def _maybe_inject_governance_candidates(
     project_root: str,
     recommendation: dict,
     specs: list[dict] | None = None,
+    *,
+    skip_self_analyze: bool = False,
+    skip_upgrade_signals: bool = False,
 ) -> dict:
-    """P1+ (2026-07-11): weave governance candidates into next action.
+    """P1+ (2026-07-11): weave aggregated signals into next action.
 
-    Auto-fires self_analyze on every `vibe next`. When unaddressed
-    governance candidates exist AND the current recommendation is not
-    already about governance (drift / freshness / proposed rules /
-    stalled specs), promote the top candidate into the recommendation
-    so the agent has to actively choose to skip it rather than simply
-    never see it.
+    Calls _aggregate_signals (which fans out to self_analyze +
+    upgrade_signals, then dedupes by stable key). When unaddressed
+    signals exist AND the current recommendation is not already
+    governance-related (drift / freshness / proposed rules / stalled
+    specs), promote the top signal into recommendation.alternative so
+    the agent has to actively choose to skip it rather than never
+    see it.
 
-    Without this, self_analyze findings only surface inside
-    `vibe retrospective`, which most agents skip. This hook guarantees
-    governance signals are visible at the canonical decision point.
+    Without this hook, self_analyze findings only surface inside
+    `vibe retrospective`, which most agents skip. upgrade_signals
+    findings live in `.agents/skill-upgrade-candidates*.md` files
+    which are never read by any lifecycle command. Both are now
+    guaranteed visibility at the canonical decision point.
     """
-    try:
-        import self_analyze
-    except Exception:  # noqa: BLE001
+    aggregated = _aggregate_signals(project_root, skip_self_analyze=skip_self_analyze, skip_upgrade_signals=skip_upgrade_signals)
+    skill_candidates = aggregated["skill_candidates"]
+    project_signals = aggregated["project_signals"]
+    if not skill_candidates and not project_signals:
         return recommendation
-    try:
-        findings = self_analyze.analyze(project_root)
-    except Exception:  # noqa: BLE001
-        return recommendation
-    if "error" in findings:
-        return recommendation
-    candidates = findings.get("governance_candidates", [])
-    if not candidates:
-        return recommendation
-    # Persist the report so the agent can query it later (cheap write).
+
+    # Persist the aggregated report (cheap write).
     try:
         os.makedirs(
             os.path.join(project_root, ".agents", "reports"),
             exist_ok=True,
         )
-        self_analyze.save_report(
-            findings,
-            os.path.join(project_root, ".agents", "reports", "self-analyze.md"),
-        )
+        # self_analyze full report (kept under same path for back-compat)
+        if aggregated["raw"].get("self_analyze"):
+            try:
+                import self_analyze as _sa
+                _sa.save_report(
+                    aggregated["raw"]["self_analyze"],
+                    os.path.join(project_root, ".agents", "reports", "self-analyze.md"),
+                )
+            except Exception:  # noqa: BLE001
+                pass
+        # upgrade_signals full report
+        if aggregated["raw"].get("upgrade_signals"):
+            try:
+                import upgrade_signals as _us
+                _us.save_report(
+                    aggregated["raw"]["upgrade_signals"],
+                    os.path.join(project_root, ".agents", "reports", "upgrade-signals.md"),
+                )
+            except Exception:  # noqa: BLE001
+                pass
     except Exception:  # noqa: BLE001
         pass
+
     current_action = recommendation.get("action", "")
     already_governance = any(
         kw in current_action
@@ -419,22 +556,34 @@ def _maybe_inject_governance_candidates(
     )
     if already_governance:
         return recommendation
-    top = candidates[0]
-    recommendation["alternative"] = {
-        "action": f"先评审 N={len(candidates)} 条 self_analyze governance 候选",
-        "reason": (
-            f"现成候选 (top-1: {top['failure_mode']}): {top['issue']}"
-        ),
-    }
-    if recommendation.get("why_not"):
-        recommendation["why_not"] += (
-            f"; 同时 {len(candidates)} 条 governance 候选待评审"
-        )
+
+    top = skill_candidates[0] if skill_candidates else None
+    parts: list[str] = []
+    if skill_candidates:
+        parts.append(f"N={len(skill_candidates)} 条 Skill 候选")
+    if project_signals:
+        parts.append(f"M={len(project_signals)} 条项目级信号")
+    summary = " + ".join(parts) if parts else "0 条候选"
+
+    if top:
+        recommendation["alternative"] = {
+            "action": f"先评审 {summary}",
+            "reason": (
+                f"现成候选 (top-1: {top['title']}): {top.get('issue', '')}"
+            ),
+        }
     else:
-        recommendation["why_not"] = (
-            f"另: {len(candidates)} 条 governance 候选待评审 (top: {top['failure_mode']})"
-        )
-    recommendation["governance_candidates_count"] = len(candidates)
+        recommendation["alternative"] = {
+            "action": f"先评审 {summary}",
+            "reason": "项目级沉淀信号待评估",
+        }
+    if recommendation.get("why_not"):
+        recommendation["why_not"] += f"; 同时 {summary} 待评审"
+    else:
+        recommendation["why_not"] = f"另: {summary} 待评审"
+    recommendation["governance_candidates_count"] = (
+        len(skill_candidates) + len(project_signals)
+    )
     return recommendation
 
 
