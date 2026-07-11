@@ -10818,3 +10818,200 @@ class ValidateSpecScopeMultilineTests(unittest.TestCase):
             "## 验收标准 (Acceptance Criteria)\n\n- [ ] AC1\n"
         )
         self.assertEqual(self._scope_warning(), [])
+
+
+class CommitExpectedFileListPrePrintTests(unittest.TestCase):
+    """Cover 2026-07-11 candidate 1: `vibe commit` pre-prints the
+    expected file list (modified + untracked) before the review gate so
+    the agent's review-summary covers all auto-included files in one
+    shot. Without this, agents discover untracked files were silently
+    added only AFTER the missing_file_review gate rejects (exit 8).
+    """
+
+    def test_no_untracked_silent(self) -> None:
+        """Common case (no untracked) → no advisory output."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            from commit import _print_expected_file_list
+            # Capture stdout; should be empty for clean repo
+            proc = subprocess.run(
+                [sys.executable, "-c",
+                 "import sys, tempfile; sys.path.insert(0, 'scripts'); "
+                 "from commit import _print_expected_file_list; "
+                 "_print_expected_file_list(tempfile.mkdtemp())"],
+                cwd=".",
+                capture_output=True, text=True, timeout=10,
+            )
+            self.assertEqual(proc.stdout.strip(), "")
+
+    def test_untracked_files_listed(self) -> None:
+        """When untracked files exist, list them under the expected
+        file banner — agent can use it as anchor for review-summary."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            subprocess.run(["git", "init", "-q"], cwd=tmp, check=True)
+            # Create an untracked file (after .gitignore or simply
+            # new file)
+            (Path(tmp) / "untracked-x.md").write_text("hello", encoding="utf-8")
+            from commit import _print_expected_file_list
+            import io, contextlib
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                _print_expected_file_list(tmp)
+            out = buf.getvalue()
+            self.assertIn("本次 commit 预期文件清单", out)
+            self.assertIn("待自动 stage (untracked, 1)", out)
+            self.assertIn("untracked-x.md", out)
+            # Marker tag included for downstream tooling
+            self.assertIn("vibe:commit_expected_files:", out)
+
+
+class FixRegressionDigestSubsetAdvisoryTests(unittest.TestCase):
+    """Cover 2026-07-11 candidate 2: bug-spec fix-regression evidence
+    records emit a Command-Digests subset advisory when the agent used
+    --command instead of --configured. Advance gate (`_has_current_evidence`
+    purpose=fix-regression, require_configured_commands=True) requires
+    digests ⊇ configured verify digests; without this advisory, agents
+    discover the gap only when `vibe advance review` rejects.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name)
+        init_project.init_project(str(self.project), "web")
+        self.write_spec(status="in-progress")
+        self._configure_verify_command()
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def write_spec(self, name: str = "example", status: str = "draft") -> Path:
+        spec = self.project / ".agents" / "specs" / f"{name}.md"
+        spec.write_text(
+            VALID_SPEC.format(status=status)
+            + "\n> 类型: bug\n> 风险: low\n",
+            encoding="utf-8",
+        )
+        return spec
+
+    def _configure_verify_command(self) -> None:
+        wf_path = self.project / ".agents" / "workflow.json"
+        wf = json.loads(wf_path.read_text(encoding="utf-8"))
+        wf.setdefault("commands", {})["verify"] = [
+            ["echo", "configured-verify"],
+        ]
+        wf_path.write_text(json.dumps(wf), encoding="utf-8")
+
+    def test_fix_regression_with_custom_command_emits_advisory(self) -> None:
+        """Recording fix-regression with --command (custom digest only)
+        → advisory lists missing configured digest(s)."""
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            record_evidence.record_evidence(
+                str(self.project),
+                "example",
+                "verify",
+                "passed",
+                "sqlite3 confirms fix",
+                actor="lance",
+                role="builder",
+                command=["echo", "agent-custom"],
+                purpose="fix-regression",
+            )
+        text = output.getvalue()
+        # Advisory block fired
+        self.assertIn("Command-Digests 子集提示", text)
+        self.assertIn("configured verify digests", text)
+        # Both configured and actual digests surfaced
+        self.assertIn("missing", text)
+        # Marker tag included for downstream tooling
+        self.assertIn("fix_regression_digest_subset:", text)
+
+    def test_fix_regression_with_configured_no_advisory(self) -> None:
+        """Recording fix-regression with --configured (catches
+        configured digests automatically) → no subset advisory."""
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            record_evidence.record_evidence(
+                str(self.project),
+                "example",
+                "verify",
+                "passed",
+                "ran configured verify",
+                actor="lance",
+                role="builder",
+                configured=True,
+                purpose="fix-regression",
+            )
+        text = output.getvalue()
+        # No subset advisory when configured supplies the digest
+        self.assertNotIn("Command-Digests 子集提示", text)
+
+    def test_standard_purpose_no_advisory(self) -> None:
+        """Standard verify purpose (not bug fix-regression) doesn't
+        need subset check → no advisory, even with custom command."""
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            record_evidence.record_evidence(
+                str(self.project),
+                "example",
+                "verify",
+                "passed",
+                "ran custom command",
+                actor="lance",
+                role="builder",
+                command=["echo", "custom"],
+                purpose="standard",
+            )
+        text = output.getvalue()
+        self.assertNotIn("Command-Digests 子集提示", text)
+
+
+class AdvanceReviewDecisionFieldsRemindTests(unittest.TestCase):
+    """Cover 2026-07-11 candidate 3: when `vibe advance ... released/done`
+    rejects for missing approved review, the error message lists the 5
+    required review-decision fields (Decision-Record marker / 结论 /
+    结论依据 / 已核对的验证证据 / Reviewer identity). Without this,
+    agents retry the wrong call path multiple times before realising
+    record_review.py needs all 5 fields.
+    """
+
+    def test_advance_to_done_missing_approved_review_lists_fields(self) -> None:
+        """advance done triggers generic missing-review message AND
+        the new 5-field reminder block (with marker tag)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            proj = Path(tmp)
+            init_project.init_project(tmp, "web")
+            spec = proj / ".agents" / "specs" / "example.md"
+            spec.write_text(VALID_SPEC.format(status="review"), encoding="utf-8")
+            # No review file generated — gate fires missing-review
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                set_status.set_status(tmp, "example", "done")
+            text = output.getvalue()
+            self.assertIn("结论为 approved", text)
+            # New advisory: list the 5 required fields
+            self.assertIn("Decision-Record:", text)
+            self.assertIn("结论依据:", text)
+            self.assertIn("已核对的验证证据:", text)
+            self.assertIn("Reviewer:", text)
+            self.assertIn("记录", text)
+            # Marker for downstream tooling
+            self.assertIn("review_decision_fields_remind:", text)
+
+    def test_advance_message_includes_full_command_suggestion(self) -> None:
+        """The reminder surfaces the actual `vibe review-decision`
+        command shape (positional args + --reviewer flag) so the agent
+        doesn't have to guess the CLI."""
+        with tempfile.TemporaryDirectory() as tmp:
+            proj = Path(tmp)
+            init_project.init_project(tmp, "web")
+            spec = proj / ".agents" / "specs" / "example.md"
+            spec.write_text(VALID_SPEC.format(status="review"), encoding="utf-8")
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                set_status.set_status(tmp, "example", "done")
+            text = output.getvalue()
+            # Recommended command shape present
+            self.assertIn("vibe review-decision", text)
+            self.assertIn("--reviewer", text)

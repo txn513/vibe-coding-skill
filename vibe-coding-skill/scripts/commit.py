@@ -321,6 +321,38 @@ def _list_untracked(project_root: str) -> list[str]:
     return [line for line in out.splitlines() if line.strip()]
 
 
+def _print_expected_file_list(project_root: str) -> None:
+    """Pre-print the file list that the next commit will include.
+
+    Acts as a prevention signal for R53 missing_file_review gate: the
+    existing gate catches omission AFTER commit (exit 8 retry). Printing
+    the list before review-summary writing lets the agent cover all files
+    in one shot. Only emits when there ARE untracked files about to be
+    auto-staged; otherwise stays silent (no noise for the common case).
+    2026-07-11 candidate 1 (commit expected-file-list pre-print).
+    """
+    untracked = _list_untracked(project_root)
+    if not untracked:
+        return
+    staged = _staged_files(project_root)
+    print()
+    print("📋 本次 commit 预期文件清单 (Step 1 锚点 — 写 review-summary 时覆盖):")
+    if staged:
+        print(f"   已 stage ({len(staged)}):")
+        for path in staged[:15]:
+            print(f"     - {path}")
+        if len(staged) > 15:
+            print(f"     ... 还有 {len(staged) - 15} 个")
+    print(f"   待自动 stage (untracked, {len(untracked)}):")
+    for path in untracked[:15]:
+        print(f"     - {path}")
+    if len(untracked) > 15:
+        print(f"     ... 还有 {len(untracked) - 15} 个")
+    print("   (Review 时确认无意外文件; 用 `vibe commit --paths <csv>` 可精细拆分)")
+    print("<!-- vibe:commit_expected_files: staged="
+          f"{len(staged)} untracked={len(untracked)} -->")
+
+
 def _is_git_repo(project_root: str) -> bool:
     rc, _, _ = _run(["git", "rev-parse", "--git-dir"], project_root)
     return rc == 0
@@ -431,6 +463,15 @@ def commit(
     # This is the lowest-cost, highest-value enhancement — it
     # doesn't block the commit, just highlights risk areas.
     _print_evidence_grep(project_root, full_diff)
+    # Pre-print expected file list (Rule 53 prevention layer):
+    # when this commit will auto-include untracked files, surface
+    # them BEFORE the review gate so the agent's review-summary
+    # covers all of them in one shot. Without this, the existing
+    # "missing_file_review" gate (exit 8) only catches the omission
+    # AFTER commit lands, costing the agent a full retry.
+    # 2026-07-11 candidate 1.
+    if not paths and not staged_only:
+        _print_expected_file_list(project_root)
     # Rule 64 advisory runs at diff_shown so the agent sees the
     # anti-pattern alongside the diff. Position rationale: if the
     # advisory only fires after the review gate, the agent is already
@@ -623,14 +664,6 @@ def commit(
         print("<!-- vibe:commit_review: marker_written -->")
         print("<!-- vibe:commit_review: blocked_pending_review -->")
         return 5
-    untracked = _list_untracked(project_root)
-    if untracked:
-        print()
-        print(f"   + {len(untracked)} 个未跟踪文件 (需 `git add` 后再 commit):")
-        for path in untracked[:10]:
-            print(f"     - {path}")
-        if len(untracked) > 10:
-            print(f"     ... 还有 {len(untracked) - 10} 个")
     print()
 
     # 2. Verify — select verify tier based on flags and config.
