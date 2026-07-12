@@ -234,7 +234,7 @@ def _audit_agents_outdated(project_root: str, warnings: list[str]) -> None:
     if "## 阶段级约束" not in content:
         warnings.append(
             "AGENTS.md 模板已过期 (2026-07-12): 缺少 '阶段级约束' 章节。"
-            "建议: 对比 `vibe-coding-skill/templates/agents-phase-gates.md` "
+            "建议: 运行 `vibe upgrade-agents <project> --dry-run` 预览合并（保留用户内容） "
             "手动更新 AGENTS.md，或重新初始化项目。"
         )
     elif "禁止直接使用 `git commit`" not in content:

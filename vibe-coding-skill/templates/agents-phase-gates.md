@@ -71,6 +71,7 @@ Discovery → Spec → Plan → Execute → Verify → Review → Release → Ob
 - 当用户说 `Vibe 复盘这个问题` 时，Agent 必须在当前项目内执行一次复盘：优先更新本项目的规则、文档、retro、testing 策略；仅把抽象后的治理结论作为 Skill 升级候选
 - 当 Agent 发现 Skill 升级候选时，可以主动询问 `发现 N 条可能的 Skill 治理升级候选，是否应用？`，但在用户明确确认前，不得修改 Skill 核心
 - 如果项目规则与 Skill 默认规则冲突，项目规则优先，但必须记录冲突原因
+- **AGENTS.md 模板升级**: 运行 `vibe upgrade-agents /path/to/project --dry-run` 预览合并最新模板（保留用户内容）
 
 ## 技术栈
 
