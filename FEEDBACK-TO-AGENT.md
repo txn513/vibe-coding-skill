@@ -1,49 +1,65 @@
 # 给 Agent 的反馈 — Skill 升级已完成（2026-07-13）
 
-管理员已完成两项 Skill 升级，提交 commit `a8bc97b`，VERSION 已 bump。
-
-## 升级 1：vibe next 自动触发 vibe doctor（方案 A）
-
-**效果：**
-- 每次运行 `vibe next` 前，系统**自动**跑一遍 `vibe doctor` 
-- 如果有问题/警告，会先打印出来，再输出下一步建议
-- 缓存 60 秒，连续调用不会重复跑
-- 支持 `VIBE_QUIET_AUTO_DOCTOR=1` 静默模式（测试/CI 用）
-
-**对 Agent 的影响：**
-- 你不再需要手动跑 `vibe doctor` 来确认项目健康度
-- 如果 doctor 报了 warning，你会在 `vibe next` 输出里直接看到
-- 但不能因为 doctor 报 advisory 就跳过 `vibe next` 的建议——两者是串联关系
+管理员已完成 3 项 Skill 升级，提交 commits `a8bc97b` + `d12d433`，VERSION 已 bump。
 
 ---
 
-## 升级 2：commit-msg hook 修复（测试级修复）
+## 升级 1：vibe next 自动触发 vibe doctor
 
-**问题：** 之前 vibe init 安装的 hook 类型错误（pre-commit → commit-msg），导致所有 `git commit` 被错误拦截。
-
-**修复：**
-- 现在安装为正确的 `commit-msg` hook（检查 commit message 里的 `Vibe-Commit:` trailer）
-- 新增环境变量 `VIBE_SKIP_COMMIT_MSG_HOOK=1`，测试/CI 可以跳过此检查
-
-**对 Agent 的影响：**
-- 新项目 init 后，`git commit` 不会触发 pre-commit hook 误报
-- 但你仍然**必须用** `vibe commit` 提交代码（Rule 53 未变）
-- 只有 `vibe commit` 写的 commit message 会带 `Vibe-Commit:` trailer
+每次 `vibe next` 前自动跑 doctor，结果缓存 60 秒。有 violation 时先打印再输出建议。
 
 ---
 
-## 你现在的标准操作（更新后）
+## 升级 2：commit-msg hook 修复
 
-| 场景 | 操作 |
-|------|------|
-| 初始化新项目 | `vibe init <path>` → 自动装 commit-msg hook |
-| 看下一步做什么 | `vibe next <project>` → **自动**跑 doctor |
-| 提交代码 | 两步：`vibe commit`（看 diff）→ `vibe commit --reviewed`（verify + commit） |
-| 跳过 commit hook | `VIBE_SKIP_COMMIT_MSG_HOOK=1 git commit ...`（仅测试/紧急用） |
+vibe init 自动安装正确的 `commit-msg` hook（检查 `Vibe-Commit:` trailer）。
+raw `git commit` 会被阻止，正确走 `vibe commit` 两步流程。
 
 ---
 
-## 注意
+## 升级 3：spec amend 后自动检测 evidence digest 过期
 
-- 老项目的 commit-msg hook 不会自动更新，如需修复请手动：`rm .git/hooks/pre-commit && vibe install-precommit-hook .`
-- 589 个测试全部通过，升级安全
+**触发场景**：你修改 spec（review feedback 后 amend）后，已记录的 evidence 的 spec digest 不再匹配当前 spec，导致 `vibe advance` 报"缺少 evidence"。
+
+**效果**：
+- 现在 `vibe amend <project> <spec> "..." --apply` 执行完后，自动扫描关联 evidence
+- 如果有 evidence 的 digest 已过期，输出 advisory：
+  ```
+  ⚠️  spec 'xxx' 已修改，以下 evidence 的 spec digest 已过期:
+     - .agents/evidence/xxx/verify.md
+     如果 evidence 内容仍然有效，请重新记录以刷新 digest
+  ```
+- 不影响流程（advisory only），只是提醒你
+
+**对 Agent 的影响**：
+- amend 后看到 advisory → 检查 evidence 是否仍有效
+- 如果有效 → 重新 `vibe evidence ...` 记录一次（刷新 digest）
+- 如果因 spec 修改已失效 → 修正后再记录
+- 不用自己手动检查 digest 是否过期了
+
+---
+
+## 当前标准操作
+
+```bash
+# 初始化项目（自动装 commit-msg hook）
+vibe init <path>
+
+# 查看下一步（自动跑 doctor）
+vibe next <project>
+
+# 修改 spec（自动检测 evidence digest 过期）
+vibe amend <project> <spec> "变更描述" --apply
+
+# 提交代码（两步）
+vibe commit <project>              # 看 diff
+vibe commit --reviewed <project>   # verify + commit
+```
+
+---
+
+## 已知限制
+
+- evidence digest 过期只检测 `vibe amend`，不检测直接编辑 spec 文件的情况
+- 只提示、不自动刷新（防止掩盖 evidence 失效问题）
+- 592 个测试全部通过，升级安全
