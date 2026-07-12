@@ -214,6 +214,36 @@ def _audit_raw_git_commits(project_root: str, warnings: list[str]) -> None:
         return
 
 
+def _audit_agents_outdated(project_root: str, warnings: list[str]) -> None:
+    """Detect if project's AGENTS.md is outdated (missing per-stage constraints).
+
+    2026-07-12: the template now includes a per-stage constraint section.
+    Existing projects may still have the old template without these checks.
+    Advisory only — the agent decides when to migrate.
+    """
+    agents_path = os.path.join(project_root, "AGENTS.md")
+    if not os.path.exists(agents_path):
+        return
+    try:
+        with open(agents_path, encoding="utf-8") as f:
+            content = f.read()
+    except OSError:
+        return
+
+    # Heuristic: check for the presence of key new sections
+    if "## 阶段级约束" not in content:
+        warnings.append(
+            "AGENTS.md 模板已过期 (2026-07-12): 缺少 '阶段级约束' 章节。"
+            "建议: 对比 `vibe-coding-skill/templates/agents-phase-gates.md` "
+            "手动更新 AGENTS.md，或重新初始化项目。"
+        )
+    elif "禁止直接使用 `git commit`" not in content:
+        warnings.append(
+            "AGENTS.md 模板已过期: 缺少 '禁止直接使用 git commit' 约束。"
+            "建议: 手动添加或更新 AGENTS.md。"
+        )
+
+
 def _audit_inbox_drift(project_root: str, warnings: list[str]) -> None:
     """Detect done spec with open inbox bug (Rule 65, opt-in).
 
@@ -309,6 +339,12 @@ def doctor(project_root: str) -> dict:
     skill_drift = check_skill_version_drift(SKILL_DIR)
     if skill_drift:
         warnings.append(skill_drift)
+
+    # 2026-07-12: detect if project's AGENTS.md is outdated (per-stage
+    # constraints missing). When the template evolves, existing projects
+    # silently miss new constraints until init_project --force is run.
+    # Advisory only — agent can decide to migrate manually.
+    _audit_agents_outdated(project_root, warnings)
 
     if workflow.get("schema_version") != SCHEMA_VERSION:
         issues.append("workflow schema is outdated")
