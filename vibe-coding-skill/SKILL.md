@@ -727,14 +727,17 @@ artifacts merely because a template exists.
 
     `vibe commit --no-verify` is provided as a documented escape
     hatch (e.g. for docs-only commits where the verify phase would
-    be wasteful, or for emergency hotfixes that need a fast path).
-    It bypasses steps 1 and 2 and runs `git commit` directly. The
-    escape hatch is intentionally an explicit flag, not a default
-    behaviour, so casual use of `vibe commit` does not silently skip
-    the gate. A user who wants strict enforcement can install a
-    git pre-commit hook that runs `vibe commit --verify-only` (the
-    Skill ships a one-liner install command); the hook then blocks
-    raw `git commit` for everyone working in the project.
+    be wasteful). Emergency is not a reason to skip review — if
+    speed matters, the review should be faster (parallel prep), not
+    absent. Every `--no-verify` usage must carry a reason via the
+    `--no-verify "<reason>"` form and that reason must be
+    acknowledged in the spec's retro. The escape hatch is
+    intentionally an explicit flag, not a default behaviour, so
+    casual use of `vibe commit` does not silently skip the gate. A
+    user who wants strict enforcement can install a git pre-commit
+    hook that runs `vibe commit --verify-only` (the Skill ships a
+    one-liner install command); the hook then blocks raw `git
+    commit` for everyone working in the project.
 
     A project that has not configured `workflow.json.commands.verify`
     cannot use `vibe commit` at all — the wrapper refuses with a

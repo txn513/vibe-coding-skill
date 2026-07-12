@@ -585,7 +585,7 @@ def commit(
             print("   `--reviewed` 需要在一次 `vibe commit`（不传 --reviewed）之后执行。")
             print("   上一次 `vibe commit` 在哪个项目跑的？是否跟当前项目不一致？")
             print("   如果确实要先看 diff: 先跑 `vibe commit`（不带 --reviewed），再跑 `vibe commit --reviewed`。")
-            print("   如果要跳过 review gate: 用 `--quick`（docs-only）或 `--no-verify`（紧急）。")
+            print("   如果要跳过 review gate: 用 `--quick`（docs-only）或 `--no-verify`（需说明理由）。")
             print("<!-- vibe:commit_review_gate: skipped_step1 -->")
             return 6
         else:
@@ -601,7 +601,7 @@ def commit(
             print("   `--reviewed` 必须配 `--review-summary '<text>'`，描述你读 diff 时实际发现了什么。")
             print("   例: --review-summary '确认只改了 commit.py + tests；无意外文件'")
             print("   如果只是文档/chore 改动: 用 `--quick` 跳过 review gate 但保留 verify。")
-            print("   如果是紧急绕过: 用 `--no-verify`（会同时跳过 verify）。")
+            print("   如果必须跳过 review + verify: 用 `--no-verify`（会同时跳过 verify，需在 retro 中说明理由）。")
             print("<!-- vibe:commit_review_gate: missing_summary -->")
             return 7
         snippet = summary[:60] + ("..." if len(summary) > 60 else "")
