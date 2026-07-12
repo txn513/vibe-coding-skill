@@ -2,6 +2,7 @@
 """Initialize a project for Vibe Coding — creates AGENTS.md and .agents/rules/."""
 
 import argparse
+import subprocess
 import os
 import re
 from datetime import datetime, timezone
@@ -109,6 +110,21 @@ def init_project(path: str, project_type: str = "generic", force: bool = False) 
     for d in [specs_dir, plans_dir, reviews_dir]:
         atomic_write(os.path.join(d, ".gitkeep"), "")
 
+    # Create .gitignore for vibe-generated files (2026-07-12)
+    gitignore_path = os.path.join(path, ".gitignore")
+    if not os.path.exists(gitignore_path):
+        gitignore_content = """# Vibe Coding generated files
+.agents/.skill-version
+.agents/archive/
+.agents/evidence/*/verify-reproduction.md
+.agents/evidence/*/verify-fix-regression.md
+"""
+        with open(gitignore_path, "w", encoding="utf-8") as f:
+            f.write(gitignore_content)
+        print(f"   .gitignore — 已创建（忽略 vibe 生成文件）")
+    else:
+        print(f"   .gitignore — 已存在，跳过")
+
     # Record the Skill version that initialised this project (Rule 52).
     _record_skill_version(agents_dir)
     workflow, _ = ensure_workflow(path)
@@ -139,6 +155,17 @@ def init_project(path: str, project_type: str = "generic", force: bool = False) 
         else:
             print(f"   ⚠️  bugs.inbox=true 但 templates/bug-inbox.md 不存在")
 
+    # Auto git init if not a repo (2026-07-12: many agents forget this step)
+    git_dir = os.path.join(path, ".git")
+    if not os.path.isdir(git_dir):
+        try:
+            subprocess.run(["git", "init", "-q", path], check=True, capture_output=True)
+            print(f"   git init — 已初始化仓库")
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            print(f"   ⚠️  git init 失败（git 未安装或非 git 项目），跳过")
+    else:
+        print(f"   git init — 已存在，跳过")
+
     # Install pre-commit hook if inside a git repo (Rule 53 enforcement)
     git_dir = os.path.join(path, ".git")
     if os.path.isdir(git_dir):
@@ -157,6 +184,13 @@ def init_project(path: str, project_type: str = "generic", force: bool = False) 
         print(f"      如需安装：cd {path} && git init && vibe install-precommit-hook {path}")
 
     print(f"✅ 项目初始化完成: {path}")
+    print()
+    print(f"📋 下一步做什么？")
+    print(f"   1. 填写 AGENTS.md（技术栈、架构约束、安全要求等）")
+    print(f"   2. 运行 `vibe next {path}` 查看当前推荐")
+    print(f"   3. 如果有需求，运行 `vibe intent {path} <需求名称>` 开始 Discovery")
+    print()
+    print(f"📂 已创建：")
     print(f"   AGENTS.md     — Agent 上下文文件（含阶段强制规范）")
     print(f"   .agents/rules/ — 编码规范 (api, db, error, security, frontend)")
     print(f"   .agents/specs/ — 功能规格")
@@ -164,6 +198,8 @@ def init_project(path: str, project_type: str = "generic", force: bool = False) 
     print(f"   .agents/reviews/ — 审查记录")
     print(f"   .agents/policy-sources.json — 规范来源与冲突记录")
     print(f"   .agents/policy-differences.md — 待确认规范差异摘要 ({len(policy_manifest.get('review_items', []))} 项)")
+    print(f"   .git/hooks/pre-commit — 阻止 raw git commit（Rule 53）")
+    print(f"   .gitignore — 忽略 vibe 生成文件")
 
 
 def _read(name: str) -> str:

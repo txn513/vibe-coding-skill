@@ -224,6 +224,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Unified Vibe Coding workflow dispatcher")
     sub = parser.add_subparsers(dest="operation", required=True)
 
+    # init — must be before the generic commands so it's discoverable
+    init_cmd = sub.add_parser("init", help="初始化项目 Vibe Coding 结构")
+    init_cmd.add_argument("project_root", nargs="?", default=".", help="项目路径 (默认: 当前目录)")
+    init_cmd.add_argument("--type", choices=["generic", "web", "api", "cli"], default="generic")
+    init_cmd.add_argument("--force", action="store_true", help="覆盖现有 AGENTS.md")
+
     for name in ("status", "next", "migrate", "doctor", "context-refresh"):
         command = sub.add_parser(name)
         command.add_argument("project_root")
@@ -582,6 +588,11 @@ def main() -> None:
     # version-bump is self-maintenance; doesn't need a project_root.
     if args.operation == "version-bump":
         raise SystemExit(version_bump.bump())
+
+    if args.operation == "init":
+        import init_project
+        init_project.init_project(args.project_root, args.type, args.force)
+        return
 
     root = os.path.abspath(args.project_root)
     if args.operation == "status":
