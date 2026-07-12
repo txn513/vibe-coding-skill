@@ -1,127 +1,101 @@
 # 给 Agent 的反馈 — Skill 升级已完成（2026-07-13）
 
-管理员已完成 4 项 Skill 升级，commits `a8bc97b` → `d12d433` → `365025e`。
+管理员已评审候选：`skill-upgrade-candidate-20260713.md`（Rule 53 step 1 active inspection 机械检查缺口）
+
+**候选已归档**: `.agents/archive/skill-upgrade-candidates/skill-upgrade-candidate-20260713.md`
 
 ---
 
-## 升级 1：vibe next 自动触发 vibe doctor
+## 候选处理结果
 
-**效果：**
-- 每次运行 `vibe next` 前，系统**自动**跑一遍 `vibe doctor`
-- 如果有问题/警告，会先打印出来，再输出下一步建议
-- 缓存 60 秒，连续调用不会重复跑
-- 支持 `VIBE_QUIET_AUTO_DOCTOR=1` 静默模式（测试/CI 用）
+**状态**: 已采纳 ✅（轻量方案）
 
----
-
-## 升级 2：commit-msg hook 修复
-
-vibe init 自动安装正确的 `commit-msg` hook（检查 `Vibe-Commit:` trailer）。
-raw `git commit` 会被阻止，正确走 `vibe commit` 两步流程。
+**Commit**: `e8a6b9e` — feat(skill): R53 active inspection advisory on review gate block
+**VERSION**: `e8a6b9e-r53-active-inspection-advisory`
 
 ---
 
-## 升级 3：spec amend 后自动检测 evidence digest 过期
+## 为什么选轻量方案，不选强方案
 
-**效果：**
-- `vibe amend <project> <spec> "..." --apply` 执行完后，自动扫描关联 evidence
-- 如果有 evidence 的 digest 已过期，输出 advisory：
-  ```
-  ⚠️  spec 'xxx' 已修改，以下 evidence 的 spec digest 已过期:
-     - .agents/evidence/xxx/verify.md
-     如果 evidence 内容仍然有效，请重新记录以刷新 digest
-  ```
-- advisory only，不阻塞流程
+| 方案 | 做法 | 不选原因 |
+|------|------|---------|
+| **强方案** | 门禁拦截后，下次提交要求 review-summary 必须包含"已重读 <file>: <具体观察>" | Agent 可以编造观察，机械检查无法验证。新增硬 gate 增加规则臃肿，绕过激励更强 |
+| **轻量方案** ✅ | 门禁拦截后输出 advisory，提醒 Agent"你真的重读了 diff，不是只补格式" | 不阻塞流程，但形成心理提醒。retro 模板新增自检项，促进 retro 阶段反思 |
+
+**核心原则**: 形式合规 ≠ 实质审查。硬 gate 只能管格式，管不了 Agent 是否真读。advisory + retro 自检是更务实的方式。
 
 ---
 
-## 升级 4：Skill 升级候选提案标准化工作流（**重点**）
+## 改了什么
 
-### 问题
-之前 Agent 不知道把跨项目的治理改进写到哪，导致 retro 里提了很多 Skill 候选但没有统一归档。
+### 1. commit.py — 门禁拦截后输出 advisory
 
-### 解决方案
-**新增 `vibe propose-skill-upgrade` 命令**，标准化提案创建 + 检测 + 归档流程。
+当 review-summary 被 `missing_file_review` 或 `missing_line_refs` 门禁拦截时，现在会输出：
 
-### 标准操作
-
-```bash
-# 发现可跨项目复用的治理改进 → 创建提案
-vibe propose-skill-upgrade <project> "<标题>"
-# 例：vibe propose-skill-upgrade . "evidence digest stale auto-detection"
-
-# 会自动创建 .agents/skill-upgrade-candidates/skill-upgrade-candidate-YYYYMMDD.md
-# 同一天多个提案自动加后缀 b, c, d
-
-# 填好提案内容（问题/方案/通用性审计）后提交给管理员
-
-# 管理员评审后归档
-mv .agents/skill-upgrade-candidates/xxx.md \
-   .agents/archive/skill-upgrade-candidates/
+```
+💡 拦截提醒 — 你被拦了，但门禁只检查格式
+   请确认你真的重读了 diff 内容，不是只补文件名引用。
+   review-summary 必须包含对 diff 的实际观察（如行号、代码片段），
+   不能只是列出文件名。
 ```
 
-### vibe next 自动检测
-- 如果项目有未归档的提案，`vibe next` 会输出 advisory 提醒管理员评审
-- 归档后自动静默
-
-### retro.md 模板已更新
-"沉淀落点"段新增指引：
-> 如果 retro 发现可跨项目复用的治理改进，**必须**写入 `.agents/skill-upgrade-candidates/`
-
-### 提案文件模板结构
-
-```markdown
-# Skill 升级候选 — YYYYMMDD
-
-来源: （retro 文件名）
-日期: 
-标题: 
-状态: proposed
-
----
-
-## 候选 1: （标题）
-
-**分类**: governance / project
-
-**问题**: （现象 + 引用 retro/实际案例）
-
-**建议方案**: （Skill 规则变更 / 新增命令 / 流程调整）
-
-**通用性审计**:
-- 通用: （是/否，跨项目适用？）
-- 不含项目知识: （是/否）
-- 失败模式: （"rule exists but not bound to a gate" 等）
-
-**影响范围**: （哪些 agent 行为会受影响）
-
-**实施复杂度**: 低 / 中 / 高
-
-**预期收益**: 
-
----
-
-## 评估
-
-| 候选 | 紧急程度 | 实施复杂度 | 预计收益 |
-|------|---------|-----------|---------|
-| 候选 1 | 高/中/低 | 低/中/高 | ... |
-
-建议优先级: （排序）
-
----
-
-## 管理员反馈
-
-（待管理员评审后填写）
 ```
+💡 拦截提醒 — 你被拦了，但门禁只检查行号引用格式
+   请确认你真的重读了 diff 内容，不是只补行号/反引号。
+   review-summary 必须包含基于 diff 观察的业务结论，
+   不能只是形式合规（如 'L25 重命名，语义等价' 但没有真的看每个调用点）
+```
+
+### 2. retro.md — Review Agent 段新增 review quality 自检
+
+```
+- **review quality 自检**（2026-07-13 R53 active inspection）:
+  - review-summary 是否包含对每个变更文件的实际观察（非记忆性描述）
+  - 是否检查了每个文件 diff 的具体行号和代码片段
+  - 是否有"形式合规但内容未审查"的情况（如只补行号未重读）
+  - review-decision basis 是否引用了 review-context 文件路径
+  - 如果 review gate 拦截了，是否重读了被拦的文件，还是只补格式
+```
+
+### 3. 测试覆盖
+
+- `test_active_inspection_advisory_on_missing_file_block` — missing_file_review 拦截时 advisory 输出
+- `test_active_inspection_advisory_on_line_ref_block` — missing_line_refs 拦截时 advisory 输出
+
+---
+
+## 对 Agent 的影响
+
+**当 review gate 拦截你时**：
+
+1. 你会看到 advisory 提醒"请确认你真的重读了 diff"
+2. 不要只是补格式（加文件名、行号、反引号）就重试
+3. 真正重新读一遍 diff，然后写基于观察的 review-summary
+4. retro 阶段检查 review quality 自检项
+
+**写 retro 时**：
+- Review Agent 段新增了 5 条自检项
+- 如实填写"是否有形式合规但内容未审查的情况"
+- 如果 review gate 拦截了，说明 retro 里要写清楚"被拦了几次，是否重读了"
+
+---
+
+## 今日全部 5 项升级汇总
+
+| # | 升级 | Commit | 说明 |
+|---|------|--------|------|
+| 1 | vibe next 自动 doctor | `a8bc97b` | 每次 `vibe next` 前自动跑 doctor |
+| 2 | commit-msg hook 修复 | `a8bc97b` | 修正 hook 类型 + 测试绕过 |
+| 3 | evidence digest 过期检测 | `d12d433` | amend 后自动检测并提示 |
+| 4 | Skill 升级提案标准化 | `365025e` | 新增 `vibe propose-skill-upgrade` 命令 + 自动检测未归档提案 |
+| 5 | **R53 active inspection advisory** | `e8a6b9e` | 门禁拦截后提醒 Agent 重读 diff，不补格式 |
 
 ---
 
 ## 当前完整标准操作
 
 ```bash
-# 初始化项目（自动装 commit-msg hook）
+# 初始化项目
 vibe init <path>
 
 # 查看下一步（自动跑 doctor + 检测未归档提案）
@@ -134,13 +108,16 @@ vibe propose-skill-upgrade <project> "<标题>"
 vibe amend <project> <spec> "变更描述" --apply
 
 # 提交代码（两步）
-vibe commit <project>              # 看 diff
+vibe commit <project>              # 看 diff，被拦时读 advisory
 vibe commit --reviewed <project>   # verify + commit
+
+# 写 retro（Review Agent 段新增 review quality 自检）
+vibe retro <project> <spec>
 ```
 
 ---
 
 ## 测试状态
 
-- 595 个测试全部通过
-- VERSION: `365025e-propose-skill-upgrade-command`
+- 597 个测试全部通过
+- VERSION: `e8a6b9e-r53-active-inspection-advisory`

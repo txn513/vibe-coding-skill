@@ -13151,3 +13151,69 @@ class UpgradeAgentsTests(unittest.TestCase):
         template = "## A\ncontent"
         merged, changes = upgrade_agents.merge_agents(existing, template)
         self.assertIn("## Custom", merged)
+
+
+class SecurityScanTests(unittest.TestCase):
+    """Cover OAuth credential-in-URL detection (RFC 6749 §2.3.1)."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name)
+        init_project.init_project(str(self.project), "web")
+        subprocess.run(["git", "init", "-q"], cwd=str(self.project), check=True,
+                       capture_output=True)
+        subprocess.run(["git", "config", "user.email", "t@t.com"],
+                       cwd=str(self.project), check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "t"],
+                       cwd=str(self.project), check=True, capture_output=True)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_detects_sensitive_params_in_url_query(self) -> None:
+        import security_scan
+        (self.project / "test_oauth.py").write_text(
+            'import httpx\n'
+            'httpx.get("https://example.com", params={"client_secret": "x", "code": "y"})\n',
+            encoding="utf-8",
+        )
+        findings = security_scan.scan_project(str(self.project))
+        self.assertEqual(len(findings), 1)
+        self.assertIn("client_secret", findings[0]["matches"][0]["sensitive_keys"])
+        self.assertIn("code", findings[0]["matches"][0]["sensitive_keys"])
+
+    def test_allows_client_id_in_url_query(self) -> None:
+        import security_scan
+        (self.project / "test_oauth.py").write_text(
+            'import httpx\n'
+            'httpx.get("https://example.com", params={"client_id": "x"})\n',
+            encoding="utf-8",
+        )
+        findings = security_scan.scan_project(str(self.project))
+        self.assertEqual(len(findings), 0, "client_id should not trigger violation")
+
+    def test_ignores_data_post_body(self) -> None:
+        import security_scan
+        (self.project / "test_oauth.py").write_text(
+            'import httpx\n'
+            'httpx.post("https://example.com", data={"client_secret": "x"})\n',
+            encoding="utf-8",
+        )
+        findings = security_scan.scan_project(str(self.project))
+        self.assertEqual(len(findings), 0, "data= in POST body should not trigger")
+
+    def test_main_exits_zero_when_clean(self) -> None:
+        import security_scan
+        (self.project / "clean.py").write_text("print('hello')\n", encoding="utf-8")
+        rc = security_scan.main(str(self.project))
+        self.assertEqual(rc, 0)
+
+    def test_main_exits_one_when_violation(self) -> None:
+        import security_scan
+        (self.project / "bad.py").write_text(
+            'import httpx\n'
+            'httpx.get("https://example.com", params={"client_secret": "x"})\n',
+            encoding="utf-8",
+        )
+        rc = security_scan.main(str(self.project))
+        self.assertEqual(rc, 1)

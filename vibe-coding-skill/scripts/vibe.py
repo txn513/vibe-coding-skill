@@ -119,6 +119,7 @@ import rule_status
 import set_status
 import self_analyze
 import propose_skill_upgrade
+import security_scan
 import spec_amend
 import retrospective
 import update_agents
@@ -409,6 +410,15 @@ def main() -> None:
     )
     propose_skill.add_argument("project_root")
     propose_skill.add_argument("title", help="提案短标题")
+
+    # security-scan — detect OAuth credential leakage and other security issues
+    _security_scan_parser = sub.add_parser(
+        "security-scan",
+        help="安全扫描: 检测 OAuth credential 泄露等安全问题",
+    )
+    _security_scan_parser.add_argument("project_root")
+    _security_scan_parser.add_argument("--fix", action="store_true",
+                                   help="自动修复（如可用）")
 
     evidence = sub.add_parser("evidence")
     evidence.add_argument("project_root")
@@ -747,6 +757,9 @@ def main() -> None:
         propose_skill_upgrade.propose_skill_upgrade(
             root, args.title,
         )
+
+    elif args.operation == "security-scan":
+        raise SystemExit(security_scan.main(root, fix=args.fix))
 
     elif args.operation == "evidence":
         misplaced = record_evidence.misplaced_vibe_options(args.exec_command)
