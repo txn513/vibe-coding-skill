@@ -444,6 +444,10 @@ def main() -> None:
     upgrade_cmd = sub.add_parser("upgrade")
     upgrade_cmd.add_argument("project_root", help="Project root to upgrade")
 
+    upgrade_agents_cmd = sub.add_parser("upgrade-agents")
+    upgrade_agents_cmd.add_argument("project_root", help="Project root to upgrade AGENTS.md for")
+    upgrade_agents_cmd.add_argument("--dry-run", action="store_true", help="Preview changes without writing")
+
     version_bump_cmd = sub.add_parser(
         "version-bump",
         help="Skill self-maintenance: write VERSION = <HEAD>-<feat-slug> and land a chore commit. "
@@ -768,6 +772,9 @@ def main() -> None:
         confirm_risk.confirm_risk(root, args.spec_name, args.risk, args.reason)
     elif args.operation == "upgrade":
         raise SystemExit(upgrade.upgrade(args.project_root))
+    elif args.operation == "upgrade-agents":
+        import upgrade_agents
+        raise SystemExit(upgrade_agents.upgrade_agents(args.project_root, dry_run=getattr(args, "dry_run", False)))
     elif args.operation == "version-bump":
         raise SystemExit(version_bump.bump())
     elif args.operation == "verify":

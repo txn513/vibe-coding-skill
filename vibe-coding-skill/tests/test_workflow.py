@@ -12979,3 +12979,41 @@ class RecentEvidencePendingCommitTests(unittest.TestCase):
         self._make_dirty()
         output = self._checklist_for("iso-feat")
         self.assertIn("recency 容差", output)
+
+
+class UpgradeAgentsTests(unittest.TestCase):
+    """Cover upgrade_agents merge logic."""
+
+    def test_merge_preserves_existing_sections(self) -> None:
+        from scripts import upgrade_agents
+        existing = "## A\nuser content\n\n## B\nuser content 2"
+        template = "## A\ntemplate\n\n## C\nnew section"
+        merged, changes = upgrade_agents.merge_agents(existing, template)
+        self.assertIn("## A", merged)
+        self.assertIn("user content", merged)  # preserved
+        self.assertIn("## C", merged)
+        self.assertIn("new section", merged)
+        self.assertNotIn("template", merged)  # template A is ignored
+
+    def test_merge_appends_new_sections(self) -> None:
+        from scripts import upgrade_agents
+        existing = "## A\nuser"
+        template = "## B\nnew"
+        merged, changes = merge = upgrade_agents.merge_agents(existing, template)
+        self.assertIn("## A", merged)
+        self.assertIn("## B", merged)
+
+    def test_merge_replaces_placeholder_sections(self) -> None:
+        from scripts import upgrade_agents
+        existing = "## A\n（待填写）"
+        template = "## A\nreal content"
+        merged, changes = upgrade_agents.merge_agents(existing, template)
+        self.assertIn("real content", merged)
+        self.assertNotIn("（待填写）", merged)
+
+    def test_merge_preserves_custom_sections(self) -> None:
+        from scripts import upgrade_agents
+        existing = "## Custom\nmy section"
+        template = "## A\ncontent"
+        merged, changes = upgrade_agents.merge_agents(existing, template)
+        self.assertIn("## Custom", merged)
