@@ -3085,6 +3085,47 @@ class IntegrationTests(unittest.TestCase):
         self.assertIn("next-test", r.stdout)
         self.assertLess(len(r.stdout), 4096)
 
+    def test_propose_skill_upgrade_creates_file(self) -> None:
+        """vibe propose-skill-upgrade creates a proposal in skill-upgrade-candidates/."""
+        r = self._vibe("propose-skill-upgrade", str(self.project), "test proposal")
+        self.assertEqual(r.returncode, 0, msg=_combined(r))
+        candidates_dir = self.project / ".agents" / "skill-upgrade-candidates"
+        self.assertTrue(candidates_dir.exists(), f"candidates dir missing: {candidates_dir}")
+        files = list(candidates_dir.glob("skill-upgrade-candidate-*.md"))
+        self.assertTrue(len(files) > 0, "no proposal file created")
+        content = files[0].read_text(encoding="utf-8")
+        self.assertIn("test proposal", content)
+        self.assertIn("governance", content)
+
+    def test_next_surfaces_pending_skill_upgrades(self) -> None:
+        """vibe next shows advisory when pending skill upgrade candidates exist."""
+        # Create a proposal
+        r = self._vibe("propose-skill-upgrade", str(self.project), "test proposal")
+        self.assertEqual(r.returncode, 0, msg=_combined(r))
+        # Now vibe next should surface it
+        r = self._vibe("next", str(self.project))
+        self.assertEqual(r.returncode, 0, msg=_combined(r))
+        self.assertIn("Skill 升级候选", r.stdout, msg=_combined(r))
+        self.assertIn("skill-upgrade-candidate-", r.stdout, msg=_combined(r))
+        self.assertIn("vibe:pending_skill_upgrades", r.stdout, msg=_combined(r))
+
+    def test_next_silent_when_skill_upgrades_archived(self) -> None:
+        """vibe next is silent when all proposals are archived."""
+        # Create and then archive
+        r = self._vibe("propose-skill-upgrade", str(self.project), "test proposal")
+        self.assertEqual(r.returncode, 0, msg=_combined(r))
+        # Move to archive
+        src = self.project / ".agents" / "skill-upgrade-candidates"
+        dst = self.project / ".agents" / "archive" / "skill-upgrade-candidates"
+        dst.mkdir(parents=True, exist_ok=True)
+        for f in src.iterdir():
+            (dst / f.name).write_text(f.read_text(), encoding="utf-8")
+            f.unlink()
+        # Now vibe next should not mention it
+        r = self._vibe("next", str(self.project))
+        self.assertEqual(r.returncode, 0, msg=_combined(r))
+        self.assertNotIn("Skill 升级候选", r.stdout, msg=_combined(r))
+
     def test_next_reports_bound_project_when_switching_projects(self) -> None:
         other_tempdir = tempfile.TemporaryDirectory()
         self.addCleanup(other_tempdir.cleanup)

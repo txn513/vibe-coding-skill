@@ -173,6 +173,7 @@ def project_status(project_root: str) -> None:
     _print_missing_changelog_hint(project_root)
     _print_uncommitted_work_hint(project_root)
     _print_git_context_hint(project_root)
+    _print_skill_upgrade_advisory(project_root)
     _print_all_clean_signal(project_root, specs)
     # Rule 50: machine-readable status summary.
     spec_count = len(specs)
@@ -232,6 +233,51 @@ def _run_doctor_if_needed(project_root: str, max_age_seconds: int = 60) -> dict:
     return result
 
 
+# Skill upgrade candidates cache: avoid re-scanning within 60 seconds
+_skill_upgrade_cache: dict[str, tuple[list[str], float]] = {}
+
+
+def _check_pending_skill_upgrades(project_root: str, max_age_seconds: int = 60) -> list[str]:
+    """Check for pending skill upgrade candidates not yet archived."""
+    import time
+    cache_key = str(project_root)
+    now = time.time()
+    if cache_key in _skill_upgrade_cache:
+        cached, timestamp = _skill_upgrade_cache[cache_key]
+        if now - timestamp < max_age_seconds:
+            return cached
+
+    candidates_dir = os.path.join(project_root, ".agents", "skill-upgrade-candidates")
+    if not os.path.isdir(candidates_dir):
+        return []
+
+    candidates = []
+    for fname in sorted(os.listdir(candidates_dir)):
+        if not fname.endswith(".md") or not fname.startswith("skill-upgrade-candidate-"):
+            continue
+        # Skip if already in archive
+        archive_dir = os.path.join(project_root, ".agents", "archive", "skill-upgrade-candidates")
+        if os.path.exists(os.path.join(archive_dir, fname)):
+            continue
+        candidates.append(fname)
+
+    _skill_upgrade_cache[cache_key] = (candidates, now)
+    return candidates
+
+
+def _print_skill_upgrade_advisory(project_root: str) -> None:
+    """Print advisory about pending skill upgrade candidates."""
+    candidates = _check_pending_skill_upgrades(project_root)
+    if not candidates:
+        return
+    print()
+    print(f"💡 项目有 {len(candidates)} 个待评审的 Skill 升级候选提案:")
+    for fname in candidates:
+        print(f"   - .agents/skill-upgrade-candidates/{fname}")
+    print("   请管理员评审后归档到 .agents/archive/skill-upgrade-candidates/")
+    print("<!-- vibe:pending_skill_upgrades: " + ",".join(candidates) + " -->")
+
+
 def project_next(project_root: str, args=None) -> dict:
     """Print only the highest-priority governed next action.
 
@@ -288,6 +334,7 @@ def project_next(project_root: str, args=None) -> dict:
     _print_missing_changelog_hint(project_root)
     _print_uncommitted_work_hint(project_root)
     _print_git_context_hint(project_root)
+    _print_skill_upgrade_advisory(project_root)
     _print_all_clean_signal(project_root, specs)
     return recommendation
 

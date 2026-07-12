@@ -118,6 +118,7 @@ import refresh_context
 import rule_status
 import set_status
 import self_analyze
+import propose_skill_upgrade
 import spec_amend
 import retrospective
 import update_agents
@@ -400,6 +401,14 @@ def main() -> None:
                                help="实际移动文件到 .agents/archive/<时间戳>/，默认 dry-run")
     archive_stale.add_argument("--json", action="store_true",
                                help="输出机器可读 JSON")
+
+    # propose-skill-upgrade — create a skill upgrade candidate proposal
+    propose_skill = sub.add_parser(
+        "propose-skill-upgrade",
+        help="创建 Skill 升级候选提案 (存入 .agents/skill-upgrade-candidates/)",
+    )
+    propose_skill.add_argument("project_root")
+    propose_skill.add_argument("title", help="提案短标题")
 
     evidence = sub.add_parser("evidence")
     evidence.add_argument("project_root")
@@ -733,6 +742,11 @@ def main() -> None:
             return
         moved = archive_status.archive(args.project_root, findings)
         print(f"\n✅ 已归档 {len(moved)} 个文件。")
+
+    elif args.operation == "propose-skill-upgrade":
+        propose_skill_upgrade.propose_skill_upgrade(
+            root, args.title,
+        )
 
     elif args.operation == "evidence":
         misplaced = record_evidence.misplaced_vibe_options(args.exec_command)

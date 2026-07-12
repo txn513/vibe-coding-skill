@@ -108,6 +108,14 @@
 - **是否形成 Skill 治理候选**: {{SKILL_CANDIDATE}}
 - **如果形成，候选摘要是什么**: {{SKILL_CANDIDATE_SUMMARY}}
 
+> 💡 Skill 升级候选提案规范（2026-07-13 起）:
+>   - 如果 retro 发现可跨项目复用的治理改进，**必须**写入 `.agents/skill-upgrade-candidates/`
+>   - 命名规范: `skill-upgrade-candidate-YYYYMMDD.md`，同一天多份加后缀 `b`, `c` 等
+>   - 创建命令: `vibe propose-skill-upgrade <project> "<标题>"`
+>   - 模板内容: 候选标题 / 分类(governance/project) / 问题描述 / 建议方案 / 通用性审计 / 预期收益
+>   - 管理员评审后归档到 `.agents/archive/skill-upgrade-candidates/`
+>   - `vibe next` 会自动检测未归档的提案并提醒管理员评审
+
 ## 行动项
 
 - [ ] 更新 AGENTS.md: {{ACTION_AGENTS}}
