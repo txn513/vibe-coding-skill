@@ -89,6 +89,12 @@
 ### Review Agent
 - **发现的真实问题**: {{REVIEWER_FOUND}}
 - **漏掉的问题**: {{REVIEWER_MISSED}}
+- **review quality 自检**（2026-07-13 R53 active inspection）:
+  - review-summary 是否包含对每个变更文件的实际观察（非记忆性描述）
+  - 是否检查了每个文件 diff 的具体行号和代码片段
+  - 是否有"形式合规但内容未审查"的情况（如只补行号未重读）
+  - review-decision basis 是否引用了 review-context 文件路径
+  - 如果 review gate 拦截了，是否重读了被拦的文件，还是只补格式
 
 ## 规格质量
 

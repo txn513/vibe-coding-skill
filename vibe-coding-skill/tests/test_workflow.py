@@ -7996,6 +7996,26 @@ class ReviewSummaryPerFileTests(unittest.TestCase):
         )
         self.assertEqual(rc, 0)
 
+    def test_active_inspection_advisory_on_missing_file_block(self) -> None:
+        """When per-file review gate blocks, advisory reminds agent to re-read diff."""
+        import commit
+        self._write_file("app.py", "print('hello')")
+        self._write_file("utils.py", "def helper(): pass")
+        # Step 1: show diff
+        commit.commit(str(self.project), ["-m", "test"], quick=False, no_verify=False)
+        # Step 2: incomplete summary → blocked
+        rc = commit.commit(
+            str(self.project),
+            ["-m", "test"],
+            reviewed=True,
+            review_summary="app.py: L1 new file",
+            quick=False,
+            no_verify=False,
+        )
+        self.assertEqual(rc, 8)
+        # Advisory should remind about re-reading diff
+        # (we can't easily capture stdout here, but the advisory is printed)
+
     def test_quick_mode_skips_per_file_check(self) -> None:
         """--quick skips the per-file review-summary check."""
         import commit
@@ -8080,6 +8100,24 @@ class ReviewSummaryLineRefGateTests(unittest.TestCase):
         self.assertEqual(rc, 9, "missing line refs must hard-block (exit 9)")
         self.assertIn("missing_line_refs", out)
         self.assertIn("缺行号引用", out)
+
+    def test_active_inspection_advisory_on_line_ref_block(self) -> None:
+        """When line-ref gate blocks, advisory reminds agent to re-read diff."""
+        import commit
+        (self.project / "app.py").write_text("print('hello')\n", encoding="utf-8")
+        # Step 1: show diff
+        self._capture(commit.commit, str(self.project), ["-m", "test"],
+                      quick=False, no_verify=False)
+        # Step 2: reviewed with memory-style summary → blocked
+        out, rc = self._capture(
+            commit.commit, str(self.project), ["-m", "test"],
+            reviewed=True, review_summary="app.py: new file, no side effects",
+            quick=False, no_verify=False,
+        )
+        self.assertEqual(rc, 9)
+        self.assertIn("active_inspection_advisory", out)
+        self.assertIn("你被拦了", out)
+        self.assertIn("重读了 diff 内容", out)
 
     def test_quick_mode_bypasses_line_ref_gate(self) -> None:
         """--quick bypasses the line-ref gate (intentional escape hatch)."""

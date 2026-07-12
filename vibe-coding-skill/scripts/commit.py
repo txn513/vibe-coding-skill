@@ -648,6 +648,13 @@ def commit(
                 # Example with backtick for readability
                 print("   \u4f8b: app.py: \u52203\u884c+\u52a02\u884c, \u8bed\u4e49\u7b49\u4ef7; utils.py: \u65b0\u589ehelper, \u65e0\u526f\u4f5c\u7528")
                 print("<!-- vibe:commit_review_gate: missing_file_review -->")
+                # R53 active inspection reminder (2026-07-13)
+                print()
+                print("💡 拦截提醒 — 你被拦了，但门禁只检查格式")
+                print("   请确认你真的重读了 diff 内容，不是只补文件名引用。")
+                print("   review-summary 必须包含对 diff 的实际观察（如行号、代码片段），")
+                print("   不能只是列出文件名。")
+                print("<!-- vibe:commit_review_gate: active_inspection_advisory -->")
                 return 8
 
         # Per-file-summary 行号引用 hard gate (Rule 53 + Rule 55)
@@ -748,6 +755,13 @@ def commit(
             print("   Bypass: --quick (跳过整个 review gate, 保留 verify) 或")
             print("           --no-verify (跳过 review + verify)")
             print("<!-- vibe:commit_review_gate: missing_line_refs -->")
+            # R53 active inspection reminder (2026-07-13)
+            print()
+            print("💡 拦截提醒 — 你被拦了，但门禁只检查行号引用格式")
+            print("   请确认你真的重读了 diff 内容，不是只补行号/反引号。")
+            print("   review-summary 必须包含基于 diff 观察的业务结论，")
+            print("   不能只是形式合规（如 'L25 重命名，语义等价' 但没有真的看每个调用点）")
+            print("<!-- vibe:commit_review_gate: active_inspection_advisory -->")
             return 9
 
     print("🔒 Review 声明门禁 (Rule 53):")
