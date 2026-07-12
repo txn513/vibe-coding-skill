@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install a pre-commit hook that blocks raw `git commit`.
+"""Install a commit-msg hook that blocks raw `git commit`.
 
 The hook requires every commit to have a `Vibe-Commit:` trailer,
 which is only written by `vibe commit` (Rule 53). This makes it
@@ -14,13 +14,19 @@ import os
 import stat
 
 HOOK_CONTENT = '''#!/bin/bash
-# Vibe Coding pre-commit hook (Rule 53 enforcement)
+# Vibe Coding commit-msg hook (Rule 53 enforcement)
 # Installed by `vibe install-precommit-hook`
 #
 # Blocks any commit that lacks the Vibe-Commit trailer.
 # The trailer is written by `vibe commit` during step 2 (verify + commit).
 # If a commit is made with raw `git commit`, this hook rejects it
 # and tells the user how to fix.
+
+# Bypass: set VIBE_SKIP_COMMIT_MSG_HOOK=1 to skip this check
+# (used by tests and CI that need raw git commit)
+if [ "$VIBE_SKIP_COMMIT_MSG_HOOK" = "1" ]; then
+    exit 0
+fi
 
 COMMIT_MSG_FILE="$1"
 
@@ -42,10 +48,10 @@ fi
 
 
 def install_hook(project_root: str) -> int:
-    """Install the pre-commit hook. Returns exit code."""
+    """Install the commit-msg hook. Returns exit code."""
     project_root = os.path.abspath(project_root)
     hook_dir = os.path.join(project_root, ".git", "hooks")
-    hook_path = os.path.join(hook_dir, "pre-commit")
+    hook_path = os.path.join(hook_dir, "commit-msg")
 
     if not os.path.isdir(hook_dir):
         print(f"❌ 不是 git 仓库或缺少 .git/hooks: {hook_dir}")
@@ -56,9 +62,9 @@ def install_hook(project_root: str) -> int:
         with open(hook_path, "r", encoding="utf-8") as f:
             existing = f.read()
         if "Vibe-Commit:" in existing:
-            print(f"✅ Vibe Coding pre-commit hook 已存在: {hook_path}")
+            print(f"✅ Vibe Coding commit-msg hook 已存在: {hook_path}")
             return 0
-        print(f"⚠️  已有其他 pre-commit hook: {hook_path}")
+        print(f"⚠️  已有其他 commit-msg hook: {hook_path}")
         print("   请手动合并以下代码到现有 hook 中：")
         print("   ---")
         print(HOOK_CONTENT.strip())
@@ -71,15 +77,15 @@ def install_hook(project_root: str) -> int:
     # Make executable
     os.chmod(hook_path, os.stat(hook_path).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
-    print(f"✅ Vibe Coding pre-commit hook 已安装: {hook_path}")
+    print(f"✅ Vibe Coding commit-msg hook 已安装: {hook_path}")
     print("   现在任何没有 Vibe-Commit trailer 的 git commit 都会被阻止。")
-    print("   卸载：rm .git/hooks/pre-commit")
+    print("   卸载：rm .git/hooks/commit-msg")
     return 0
 
 
 if __name__ == "__main__":
     import argparse
-    p = argparse.ArgumentParser(description="Install Vibe Coding pre-commit hook")
+    p = argparse.ArgumentParser(description="Install Vibe Coding commit-msg hook")
     p.add_argument("project_root", help="Project root directory")
     args = p.parse_args()
     raise SystemExit(install_hook(args.project_root))

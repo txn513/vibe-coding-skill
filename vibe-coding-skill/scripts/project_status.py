@@ -15,6 +15,7 @@ import set_status
 import validate_spec
 from common import assess_context_freshness, project_context_digest, spec_digest
 from policy_sources import pending_review_items, unresolved_conflicts
+import doctor_project
 from workflow_state import (
     dependency_cycles, ensure_workflow, risk_profile, spec_last_touched, spec_metadata,
 )
@@ -179,6 +180,58 @@ def project_status(project_root: str) -> None:
     print(f"<!-- vibe:status_summary: {summary} -->")
 
 
+# Doctor cache: avoid re-running within 60 seconds
+doctor_cache: dict[str, tuple[dict, float]] = {}
+
+
+def _run_doctor_if_needed(project_root: str, max_age_seconds: int = 60) -> dict:
+    import os
+    if os.environ.get("VIBE_QUIET_AUTO_DOCTOR"):
+        return {"issues": [], "warnings": []}
+    """Auto-fire doctor on `vibe next` (方案 A, 2026-07-12).
+
+    Runs doctor and surfaces violations BEFORE recommendation.
+    Caches results to avoid re-running on rapid successive calls.
+    Returns the doctor result dict for downstream inspection.
+    """
+    import time
+    now = time.time()
+    cache_key = str(project_root)
+    if cache_key in doctor_cache:
+        cached, timestamp = doctor_cache[cache_key]
+        if now - timestamp < max_age_seconds:
+            return cached
+
+    try:
+        result = doctor_project.doctor(project_root)
+    except Exception:  # noqa: BLE001
+        return {"issues": [], "warnings": []}
+
+    issues = result.get("issues", [])
+    warnings = result.get("warnings", [])
+
+    if issues:
+        print()
+        print(f"🚨 发现 {len(issues)} 个问题 (vibe doctor auto-fire):")
+        for issue in issues[:5]:
+            print(f"   ❌ {issue}")
+        if len(issues) > 5:
+            print(f"   ... 还有 {len(issues) - 5} 个")
+        print()
+
+    if warnings:
+        print()
+        print(f"⚠️  发现 {len(warnings)} 个警告 (vibe doctor auto-fire):")
+        for warning in warnings[:5]:
+            print(f"   ⚠️ {warning}")
+        if len(warnings) > 5:
+            print(f"   ... 还有 {len(warnings) - 5} 个")
+        print()
+
+    doctor_cache[cache_key] = (result, now)
+    return result
+
+
 def project_next(project_root: str, args=None) -> dict:
     """Print only the highest-priority governed next action.
 
@@ -212,6 +265,11 @@ def project_next(project_root: str, args=None) -> dict:
     # full report. Cheap (~50ms for typical projects), bypassable via
     # `--skip-self-analyze`. Same audit pattern as the doctor hooks
     # (Rule 50 machine marker on every auto-fired audit).
+    #
+    # 2026-07-12: auto-fire doctor on every `vibe next` (方案 A).
+    # This prevents agents from silently ignoring violations.
+    # Doctor runs BEFORE recommendation so violations are surfaced first.
+    _run_doctor_if_needed(project_root)
     skip_flag = bool(args and getattr(args, "skip_self_analyze", False))
     skip_us_flag = bool(args and getattr(args, "skip_upgrade_signals", False))
     if not skip_flag:

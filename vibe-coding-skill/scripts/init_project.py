@@ -166,7 +166,7 @@ def init_project(path: str, project_type: str = "generic", force: bool = False) 
     else:
         print(f"   git init — 已存在，跳过")
 
-    # Install pre-commit hook if inside a git repo (Rule 53 enforcement)
+    # Install commit-msg hook if inside a git repo (Rule 53 enforcement)
     git_dir = os.path.join(path, ".git")
     if os.path.isdir(git_dir):
         hook_path = os.path.join(git_dir, "hooks", "pre-commit")
@@ -174,13 +174,13 @@ def init_project(path: str, project_type: str = "generic", force: bool = False) 
             try:
                 import install_precommit_hook
                 install_precommit_hook.install_hook(path)
-                print(f"   .git/hooks/pre-commit — 已安装（阻止 raw git commit）")
+                print(f"   .git/hooks/commit-msg — 已安装（阻止 raw git commit）")
             except Exception:
-                print(f"   ⚠️  pre-commit hook 安装失败，请手动运行: vibe install-precommit-hook {path}")
+                print(f"   ⚠️  commit-msg hook 安装失败，请手动运行: vibe install-precommit-hook {path}")
         else:
-            print(f"   .git/hooks/pre-commit — 已存在，跳过")
+            print(f"   .git/hooks/commit-msg — 已存在，跳过")
     else:
-        print(f"   ⚠️  未检测到 git 仓库，跳过 pre-commit hook 安装")
+        print(f"   ⚠️  未检测到 git 仓库，跳过 commit-msg hook 安装")
         print(f"      如需安装：cd {path} && git init && vibe install-precommit-hook {path}")
 
     print(f"✅ 项目初始化完成: {path}")
@@ -198,7 +198,7 @@ def init_project(path: str, project_type: str = "generic", force: bool = False) 
     print(f"   .agents/reviews/ — 审查记录")
     print(f"   .agents/policy-sources.json — 规范来源与冲突记录")
     print(f"   .agents/policy-differences.md — 待确认规范差异摘要 ({len(policy_manifest.get('review_items', []))} 项)")
-    print(f"   .git/hooks/pre-commit — 阻止 raw git commit（Rule 53）")
+    print(f"   .git/hooks/commit-msg — 阻止 raw git commit（Rule 53）")
     print(f"   .gitignore — 忽略 vibe 生成文件")
 
 

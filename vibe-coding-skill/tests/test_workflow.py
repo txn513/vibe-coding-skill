@@ -15,6 +15,7 @@ import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 
+os.environ["VIBE_SKIP_COMMIT_MSG_HOOK"] = "1"
 SKILL_DIR = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = SKILL_DIR / "scripts"
 sys.path.insert(0, str(SCRIPTS_DIR))
