@@ -403,6 +403,35 @@ def set_status(
     return new_status
 
 
+def _is_retro_placeholder(retro_path: str) -> bool:
+    """True if the retro file is essentially an unedited template (2026-07-12e).
+
+    Heuristic: count non-placeholder lines. A genuine retro will have
+    at least a few lines that are not template defaults.
+    """
+    try:
+        with open(retro_path, encoding="utf-8") as f:
+            text = f.read()
+    except OSError:
+        return True  # can't read → treat as empty
+
+    # Lines that are still template placeholders (parenthesised descriptions)
+    placeholder_line = re.compile(r"^\s*(?:[-*]\s*)?\([^)]*\)\s*$")
+    # Lines that are section headers or empty
+    non_content = re.compile(r"^\s*(?:#{1,3}\s*|$)")
+
+    meaningful_lines = 0
+    for line in text.splitlines():
+        if non_content.match(line):
+            continue
+        if placeholder_line.match(line):
+            continue
+        meaningful_lines += 1
+
+    # If fewer than 5 meaningful lines, it's likely an unedited template
+    return meaningful_lines < 5
+
+
 def _print_retro_reminder_at_done(project_root: str, spec_name: str) -> None:
     """Surface retro writing as the natural next step after spec=done.
 
@@ -415,16 +444,25 @@ def _print_retro_reminder_at_done(project_root: str, spec_name: str) -> None:
     retro_path = os.path.join(
         project_root, ".agents", "retros", f"{spec_name}.md"
     )
-    if os.path.exists(retro_path):
-        # Retro already written; nothing to nudge.
+    if not os.path.exists(retro_path):
+        print()
+        print("📝 下一步建议: 写 retro (Rule 54)")
+        print(f"   spec 已完成 lifecycle, 现在是复盘时机:")
+        print(f'   vibe retrospective {project_root} {spec_name}')
+        print("   (会自动跑 self_analyze 找跨项目失败模式 + 列出 Skill 候选 vs 项目沉淀)")
+        print("   (advisory: 跳过也可以, 但下次 vibe status 会再次提醒这个 spec 缺 retro)")
+        print(f"<!-- vibe:retro_reminder: spec={spec_name} transition=done -->")
         return
-    print()
-    print("📝 下一步建议: 写 retro (Rule 54)")
-    print(f"   spec 已完成 lifecycle, 现在是复盘时机:")
-    print(f'   vibe retrospective {project_root} {spec_name}')
-    print("   (会自动跑 self_analyze 找跨项目失败模式 + 列出 Skill 候选 vs 项目沉淀)")
-    print("   (advisory: 跳过也可以, 但下次 vibe status 会再次提醒这个 spec 缺 retro)")
-    print(f"<!-- vibe:retro_reminder: spec={spec_name} transition=done -->")
+
+    # Retro file exists — check if it's an unedited template (2026-07-12e)
+    if _is_retro_placeholder(retro_path):
+        print()
+        print("❌ Retro 文件存在但内容为空模板 (Rule 54)")
+        print(f"   {retro_path}")
+        print("   当前 retro 全是占位符, 没有实质内容。请填写后再跳过。")
+        print("   必填: 失败模式、目标回顾、做对了什么、做错了什么、结论证据")
+        print(f'   vibe retrospective {project_root} {spec_name}')
+        print(f"<!-- vibe:retro_placeholder: spec={spec_name} transition=done -->")
 
 
 def _print_commit_reminder_at_transition(
