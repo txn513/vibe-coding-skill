@@ -33,7 +33,7 @@ def _find_next_suffix(project_root: str) -> str:
             continue
         has_today = True
         # Extract suffix letter (b, c, d, ...)
-        match = re.search(rf"skill-upgrade-candidate-{today}([a-z]*)\\.md$", fname)
+        match = re.search(rf"skill-upgrade-candidate-{today}([a-z]*)\.md$", fname)
         if match:
             suffix = match.group(1)
             if suffix and suffix > max_suffix:
@@ -69,8 +69,10 @@ def propose_skill_upgrade(project_root: str, title: str) -> str:
     filepath = os.path.join(candidates_dir, filename)
     
     if os.path.exists(filepath):
-        print(f"⚠️  提案文件已存在: {filepath}")
-        return filepath
+        raise FileExistsError(
+            f"Skill upgrade proposal already exists at {filepath}. " +
+            "Use a different title or amend the existing proposal."
+        )
     
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     

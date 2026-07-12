@@ -3126,6 +3126,29 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, msg=_combined(r))
         self.assertNotIn("Skill 升级候选", r.stdout, msg=_combined(r))
 
+
+    def test_propose_skill_upgrade_same_day_no_overwrite(self) -> None:
+        """vibe propose-skill-upgrade on same day does not overwrite existing."""
+        # First proposal
+        r = self._vibe("propose-skill-upgrade", str(self.project), "first proposal")
+        self.assertEqual(r.returncode, 0, msg=_combined(r))
+        candidates_dir = self.project / ".agents" / "skill-upgrade-candidates"
+        today = datetime.now(timezone.utc).strftime("%Y%m%d")
+        first_file = candidates_dir / f"skill-upgrade-candidate-{today}.md"
+        self.assertTrue(first_file.exists(), "first proposal not created")
+        content1 = first_file.read_text(encoding="utf-8")
+        self.assertIn("first proposal", content1)
+        # Second proposal same day should create ...b.md, not overwrite
+        r = self._vibe("propose-skill-upgrade", str(self.project), "second proposal")
+        self.assertEqual(r.returncode, 0, msg=_combined(r))
+        second_file = candidates_dir / f"skill-upgrade-candidate-{today}b.md"
+        self.assertTrue(second_file.exists(), "second proposal not created with b suffix")
+        content2 = second_file.read_text(encoding="utf-8")
+        self.assertIn("second proposal", content2)
+        # Verify first file still has original content
+        self.assertEqual(first_file.read_text(encoding="utf-8"), content1,
+                        "first proposal was overwritten by second")
+
     def test_next_reports_bound_project_when_switching_projects(self) -> None:
         other_tempdir = tempfile.TemporaryDirectory()
         self.addCleanup(other_tempdir.cleanup)
