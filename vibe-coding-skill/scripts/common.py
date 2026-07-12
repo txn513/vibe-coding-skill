@@ -349,3 +349,57 @@ def check_skill_version_drift(skill_dir: str) -> str | None:
         )
     except (OSError, subprocess.SubprocessError, subprocess.TimeoutExpired):
         return None
+
+
+def stale_evidence_files(project_root: str, spec_name: str) -> list[str]:
+    """Return evidence file paths whose spec_digest no longer matches the current spec.
+
+    Used by create_spec / spec_amend after spec modification to warn the
+    agent that previously-recorded evidence needs re-recording.
+
+    Governance upgrade candidate 2026-07-13: evidence digest auto-detection.
+    """
+    import os
+    import re
+
+    spec_file = os.path.join(project_root, ".agents", "specs", f"{spec_name}.md")
+    if not os.path.exists(spec_file):
+        return []
+    with open(spec_file, encoding="utf-8") as f:
+        spec_content = f.read()
+    expected_digest = spec_digest(spec_content)
+
+    evidence_dir = os.path.join(project_root, ".agents", "evidence", spec_name)
+    if not os.path.isdir(evidence_dir):
+        return []
+
+    stale: list[str] = []
+    for filename in sorted(os.listdir(evidence_dir)):
+        if not filename.endswith(".md"):
+            continue
+        path = os.path.join(evidence_dir, filename)
+        with open(path, encoding="utf-8") as f:
+            content = f.read()
+        match = re.search(r"^>.*规格摘要:\s*([0-9a-f]{16})", content, re.MULTILINE)
+        if not match:
+            continue
+        recorded_digest = match.group(1)
+        if recorded_digest != expected_digest:
+            stale.append(filename)
+
+    return stale
+
+
+def print_evidence_digest_advisory(project_root: str, spec_name: str) -> None:
+    """Print advisory when evidence digests are stale after spec modification."""
+    stale = stale_evidence_files(project_root, spec_name)
+    if not stale:
+        return
+    print()
+    print(f"⚠️  spec '{spec_name}' 已修改，以下 evidence 的 spec digest 已过期:")
+    for fn in stale:
+        print(f"   - .agents/evidence/{spec_name}/{fn}")
+    print("   如果 evidence 内容仍然有效，请重新记录以刷新 digest:")
+    print(f"      vibe evidence {project_root} {spec_name} verify passed '...'")
+    print("   如果 evidence 内容因 spec 修改已失效，请修正后重新记录。")
+    print("<!-- vibe:evidence_digest_stale: " + ",".join(stale) + " -->")

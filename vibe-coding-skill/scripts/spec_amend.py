@@ -151,6 +151,10 @@ def amend_spec(project_root: str, spec_name: str, description: str, apply: bool 
 
     atomic_write(spec_file, spec)
 
+    # Governance upgrade candidate 2026-07-13: warn about stale evidence digests.
+    from common import print_evidence_digest_advisory
+    print_evidence_digest_advisory(project_root, spec_name)
+
     # Existing execution artifacts are based on the old requirements.
     archive_dir = os.path.join(
         project_root, ".agents", "archive", spec_name, now_short
