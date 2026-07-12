@@ -756,6 +756,37 @@ def _print_self_analyze_summary(project_root: str, skip: bool = False) -> None:
     )
 
 
+def _missing_retros_for_done_specs(project_root: str) -> list[tuple[str, str]]:
+    """Return list of (spec_name, status) for done/released specs without retro.
+
+    Shared logic with _print_missing_retro_hint (DRY).
+    """
+    specs_dir = os.path.join(project_root, ".agents", "specs")
+    retros_dir = os.path.join(project_root, ".agents", "retros")
+    if not os.path.isdir(specs_dir) or not os.path.isdir(retros_dir):
+        return []
+    existing_retros = {
+        entry[:-3] for entry in os.listdir(retros_dir)
+        if entry.endswith(".md") and entry != ".gitkeep"
+    }
+    missing = []
+    for entry in sorted(os.listdir(specs_dir)):
+        if not entry.endswith(".md") or entry.endswith("-amendments.md"):
+            continue
+        path = os.path.join(specs_dir, entry)
+        try:
+            with open(path, encoding="utf-8") as fp:
+                content = fp.read()
+        except OSError:
+            continue
+        m = re.search(r">\s*状态:\s*(\S+)", content)
+        if m and m.group(1) in {"done", "released"}:
+            name = entry[:-3]
+            if name not in existing_retros:
+                missing.append((name, m.group(1)))
+    return missing
+
+
 def _print_missing_retro_hint(project_root: str) -> None:
     """Low-priority advisory: spec is done but has no retro file.
 
@@ -1255,6 +1286,26 @@ def recommend_next(project_root: str, specs: list[dict] | None = None) -> dict:
     specs = specs if specs is not None else _list_specs(
         os.path.join(project_root, ".agents", "specs")
     )
+    # 2026-07-12: missing retro for done specs is the highest-priority
+    # next action. A retro is required for every done spec (Rule 54),
+    # and skipping it means the failure modes are invisible to
+    # self_analyze and the same mistakes will repeat across specs.
+    missing_retros = _missing_retros_for_done_specs(project_root)
+    if missing_retros:
+        return _recommendation(
+            "补写 retro (Rule 54: done 后不能跳过)",
+            f"{len(missing_retros)} 个已 done 的 spec 缺 retro。"
+            "retro 是复盘失败模式、沉淀治理候选的关键输出，不能跳过。",
+            checks=[f"{name} ({status})" for name, status in missing_retros],
+            why_not="现在不能推进新 spec，因为已有 done spec 的 retro 缺失，"
+                   "failure mode 不可见，self_analyze 无法生成治理候选。",
+            action_command=f"vibe retrospective {project_root} {missing_retros[0][0]}",
+            alternative={
+                "action": "先写最老的 missing retro",
+                "reason": "越早的 spec 失败模式越可能被遗忘，优先补。",
+            },
+        )
+
     # Rule 52: skill version drift is highest-priority because the agent
     # is operating against stale rules until it runs `vibe upgrade` and
     # reloads the Skill. Surfacing it as the top recommendation guarantees
