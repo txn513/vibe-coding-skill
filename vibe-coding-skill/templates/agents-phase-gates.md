@@ -4,6 +4,16 @@
 
 ## Vibe Coding 治理（强制 — 每个环节不可跳过）
 
+## 首次接入安装
+
+如果你是第一次接入本项目，请先运行以下命令安装 pre-commit hook（阻止 `git commit` 直接提交）：
+
+```bash
+vibe install-precommit-hook /path/to/project
+```
+
+安装后，任何没有 `Vibe-Commit` trailer 的 `git commit` 都会被阻止。
+
 **本项目由 Vibe Coding Skill 治理。任何功能、缺陷、重构、交付问题或项目状态查询，都必须通过 Vibe Coding 工作流处理。**
 
 ### 流程顺序（不可逆，不可跳过）

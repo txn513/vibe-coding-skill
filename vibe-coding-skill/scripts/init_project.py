@@ -139,6 +139,23 @@ def init_project(path: str, project_type: str = "generic", force: bool = False) 
         else:
             print(f"   ⚠️  bugs.inbox=true 但 templates/bug-inbox.md 不存在")
 
+    # Install pre-commit hook if inside a git repo (Rule 53 enforcement)
+    git_dir = os.path.join(path, ".git")
+    if os.path.isdir(git_dir):
+        hook_path = os.path.join(git_dir, "hooks", "pre-commit")
+        if not os.path.exists(hook_path):
+            try:
+                import install_precommit_hook
+                install_precommit_hook.install_hook(path)
+                print(f"   .git/hooks/pre-commit — 已安装（阻止 raw git commit）")
+            except Exception:
+                print(f"   ⚠️  pre-commit hook 安装失败，请手动运行: vibe install-precommit-hook {path}")
+        else:
+            print(f"   .git/hooks/pre-commit — 已存在，跳过")
+    else:
+        print(f"   ⚠️  未检测到 git 仓库，跳过 pre-commit hook 安装")
+        print(f"      如需安装：cd {path} && git init && vibe install-precommit-hook {path}")
+
     print(f"✅ 项目初始化完成: {path}")
     print(f"   AGENTS.md     — Agent 上下文文件（含阶段强制规范）")
     print(f"   .agents/rules/ — 编码规范 (api, db, error, security, frontend)")
