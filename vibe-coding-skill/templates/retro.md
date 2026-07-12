@@ -57,6 +57,28 @@
 - **证据引用**: {{CLAIM_EVIDENCE}}
 - **未复验结论**: {{UNVERIFIED_CLAIMS}}
 
+## 流程遵守审计
+
+> 本次 spec 是否严格遵守了 Vibe Coding 工作流？如实填写，这会影响 self_analyze 的治理候选生成。
+
+- [ ] **Discovery**: 是否记录了 intent？（是 / 否 / 不适用）
+  - 如果不适用，原因：
+- [ ] **Spec**: 是否经过 spec-ready 检查？（是 / 否）
+- [ ] **Plan**: 是否有实施计划？（是 / 否）
+- [ ] **Execute**: 是否使用 `vibe commit` 提交？（是 / 否）
+  - 如果使用了 `git commit` 直接提交，原因：
+  - 是否事后用 `git reset --soft` 修复？（是 / 否 / 不适用）
+- [ ] **Verify**: evidence 是否在 advance 前完成？（是 / 否）
+- [ ] **Review**: 是否有独立 reviewer？（是 / 否）
+  - reviewer 与 builder 是否为同一身份？（是 / 否）
+- [ ] **Retro**: 是否在 done 后立即写 retro？（是 / 否）
+
+**如果任何一项为"否"，请说明原因和当时的判断：**
+{{WORKFLOW_SKIP_REASON}}
+
+**心态自检**：我是否因为"觉得 vibe 规范是可选的 overhead"而跳过它？
+如果是，请回忆上一次跳过 review 后引入的 bug —— 那正是 vibe commit 要防止的。
+
 ## Agent 表现评估
 
 ### 实现 Agent

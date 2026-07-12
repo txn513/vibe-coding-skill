@@ -448,6 +448,9 @@ def main() -> None:
     upgrade_agents_cmd.add_argument("project_root", help="Project root to upgrade AGENTS.md for")
     upgrade_agents_cmd.add_argument("--dry-run", action="store_true", help="Preview changes without writing")
 
+    install_hook_cmd = sub.add_parser("install-precommit-hook")
+    install_hook_cmd.add_argument("project_root", help="Project root to install pre-commit hook for")
+
     version_bump_cmd = sub.add_parser(
         "version-bump",
         help="Skill self-maintenance: write VERSION = <HEAD>-<feat-slug> and land a chore commit. "
@@ -775,6 +778,9 @@ def main() -> None:
     elif args.operation == "upgrade-agents":
         import upgrade_agents
         raise SystemExit(upgrade_agents.upgrade_agents(args.project_root, dry_run=getattr(args, "dry_run", False)))
+    elif args.operation == "install-precommit-hook":
+        import install_precommit_hook
+        raise SystemExit(install_precommit_hook.install_hook(args.project_root))
     elif args.operation == "version-bump":
         raise SystemExit(version_bump.bump())
     elif args.operation == "verify":

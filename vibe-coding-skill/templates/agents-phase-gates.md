@@ -18,6 +18,10 @@ Discovery → Spec → Plan → Execute → Verify → Review → Release → Ob
 - 所有工作项必须先记录意图（intent），才能创建 spec
 - 禁止跳过 intent 直接写 spec
 
+**如果不遵守：**
+- 跳过 intent → 需求边界模糊，spec 写一半发现理解错了，返工成本翻倍
+- 修复：补 intent，重新确认需求后再写 spec（浪费 10-30 分钟）
+
 **2. Spec（规格定义）**
 - 高风险变更必须先确认风险等级（confirm_risk），才能 advance in-progress
 - 规格变更后必须重新确认风险等级
@@ -31,6 +35,13 @@ Discovery → Spec → Plan → Execute → Verify → Review → Release → Ob
 - **禁止直接使用 `git commit`**（绕过 review gate 的 bug 会重复）
 - `git commit` 只用于 vibe commit 内部调用，agent 不得直接执行
 - 误用 `git commit` 后的修复：`git reset --soft HEAD~1` 然后重新 `vibe commit`
+
+**如果不遵守：**
+- 直接用 `git commit` → 绕过 review gate，代码未经审查，可能引入 regression
+- 绕过 verify gate → 测试未跑就提交，CI 失败阻塞团队
+- 缺少 Vibe-Commit trailer → retro 无法追溯失败模式，同样错误重复
+- **心态纠正**：agent 容易把 vibe 规范当成"可选的 overhead"，而不是"防错的 guard rail"。请记住：跳过 guard rail 不会节省时间，只会让 bug 在更晚、更贵的时候被发现。
+- 修复成本：`git reset --soft HEAD~1` + 重新 `vibe commit`（浪费 2-3 分钟）
 
 **5. Verify（验证）**
 - Bug 修复前必须先复现并记录 reproduction 证据
