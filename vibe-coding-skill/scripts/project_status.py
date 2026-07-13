@@ -399,17 +399,25 @@ def _print_untagged_precipitation_hint(project_root: str) -> None:
         return
 
     tag_pattern = re.compile(r"\[(?:active|deferred|superseded|永不):\s*[^\]]+\]")
+    level_pattern = re.compile(r"\(\s*(?:项目级|skill 级|skill-level|project-level)\s*\)")
     bullets = re.findall(r"^-\s+(.+)$", section_match.group(0), re.MULTILINE)
     untagged = [b for b in bullets if not tag_pattern.search(b)]
+    unlevelled = [b for b in bullets if tag_pattern.search(b) and not level_pattern.search(b)]
 
-    if not untagged:
+    if not untagged and not unlevelled:
         return
 
     print()
-    print(f"📋 发现 {len(untagged)} 条 retro 沉淀条目未带 R6.1 tag:")
-    for entry in untagged[:5]:
-        print(f"   - {entry[:80]}{'...' if len(entry) > 80 else ''}")
-    print("   请补 tag: [active: <id>] / [deferred: <条件>] / [superseded: <id>] / [永不: <理由>]")
+    if untagged:
+        print(f"📋 发现 {len(untagged)} 条 retro 沉淀条目未带 R6.1 tag:")
+        for entry in untagged[:5]:
+            print(f"   - {entry[:80]}{'...' if len(entry) > 80 else ''}")
+        print("   请补 tag: [active: <id>] / [deferred: <条件>] / [superseded: <id>] / [永不: <理由>]")
+    if unlevelled:
+        print(f"📋 发现 {len(unlevelled)} 条 retro 沉淀条目未标层级:")
+        for entry in unlevelled[:5]:
+            print(f"   - {entry[:80]}{'...' if len(entry) > 80 else ''}")
+        print("   请补层级: (项目级) 或 (skill 级)")
     print("<!-- vibe:untagged_precipitation: count={} -->")
 
 

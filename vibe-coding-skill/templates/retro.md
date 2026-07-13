@@ -124,14 +124,32 @@
 
 ## 沉淀清单 (R-沉淀-enforcement)
 
-> 每条沉淀必带 R6.1 三选一 tag + id. 无 tag = 形式合规假阳性。
+> 每条沉淀必带 R6.1 三选一 tag + id + 层级. 无 tag 或层级不明 = 形式合规假阳性。
 
-- [active: <spec-id>] <description> → 已建 / 待建 follow-up spec
-- [deferred: <触发条件>] <description> → 推迟, 触发条件必明示
-- [superseded: <replaced-by>] <description> → 被哪个 spec / commit 替代
-- [永不: <justification>] <description> → 明确放弃 + 理由
+### 沉淀格式
 
-> 无 tag = retro 不完整. `vibe next` 会扫描本段并提醒未 tag 的沉淀条目.
+```
+- [<tag>: <id>] (<层级>) <description>
+```
+
+**tag 四选一**:
+- `[active: <spec-id>]` → 已建 / 待建 follow-up spec
+- `[deferred: <触发条件>]` → 推迟, 触发条件必明示
+- `[superseded: <replaced-by>]` → 被哪个 spec / commit 替代
+- `[永不: <justification>]` → 明确放弃 + 理由
+
+**层级二选一** (强制):
+- `(项目级)` → 只影响本项目 (项目规则 / 项目代码 / 项目配置)
+- `(skill 级)` → 跨项目通用 (Skill 规则 / 工具 / 模板)
+
+### 示例
+
+- [active: fix-parser-bug] (项目级) parser 在空输入时崩溃 → 已建 spec, 待 advance
+- [deferred: next spec cycle] (项目级) 性能优化 → 等当前 batch 完成后启动
+- [superseded: 62603de] (skill 级) doctor parser 扩展 keywords → 已合并到 Skill
+- [永不: 业务上不需要] (项目级) 支持 IE11 → 明确放弃
+
+> 无 tag 或层级不明 = retro 不完整. `vibe next` 会扫描本段并提醒.
 
 ## 行动项
 
