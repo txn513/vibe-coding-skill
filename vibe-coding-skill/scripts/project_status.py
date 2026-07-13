@@ -166,6 +166,7 @@ def project_status(project_root: str) -> None:
     _apply_model_mapping(project_root, recommendation)
     _print_recommendation(recommendation)
     _print_stale_archive_hint(project_root)
+    _print_untagged_precipitation_hint(project_root)
     _print_stage_stall_warnings(project_root, specs)
     _print_version_drift_hint(project_root)
     _print_proposed_rules_hint(project_root)
@@ -362,6 +363,54 @@ def _print_stale_action_items_hint(project_root: str) -> None:
     print("   处置: 把 [ ] 升级为 [active: <rule-id>] / [deferred: <reason>] / [superseded: <id>]")
     print("   (Rule 60: 行动项必须达到 terminal state，不可停留在 [ ])")
     print(f"<!-- vibe:stale_action_items: count={len(stale)} -->")
+
+
+def _print_untagged_precipitation_hint(project_root: str) -> None:
+    """Advisory (Rule 60 extension): retro precipitation entries without R6.1 tag.
+
+    Scans the most recent retro for untagged precipitation entries
+    (those lacking [active:]/[deferred:]/[superseded:]/[永不:] tags).
+    """
+    import glob
+
+    retros_dir = os.path.join(project_root, ".agents", "retros")
+    if not os.path.isdir(retros_dir):
+        return
+
+    retro_files = sorted(
+        glob.glob(os.path.join(retros_dir, "*.md")),
+        key=lambda p: os.path.getmtime(p),
+        reverse=True,
+    )
+    if not retro_files:
+        return
+
+    try:
+        with open(retro_files[0], encoding="utf-8") as f:
+            content = f.read()
+    except OSError:
+        return
+
+    if "## 沉淀清单" not in content:
+        return
+
+    section_match = re.search(r"## 沉淀清单.*?(?=\n## |\Z)", content, re.DOTALL)
+    if not section_match:
+        return
+
+    tag_pattern = re.compile(r"\[(?:active|deferred|superseded|永不):\s*[^\]]+\]")
+    bullets = re.findall(r"^-\s+(.+)$", section_match.group(0), re.MULTILINE)
+    untagged = [b for b in bullets if not tag_pattern.search(b)]
+
+    if not untagged:
+        return
+
+    print()
+    print(f"📋 发现 {len(untagged)} 条 retro 沉淀条目未带 R6.1 tag:")
+    for entry in untagged[:5]:
+        print(f"   - {entry[:80]}{'...' if len(entry) > 80 else ''}")
+    print("   请补 tag: [active: <id>] / [deferred: <条件>] / [superseded: <id>] / [永不: <理由>]")
+    print("<!-- vibe:untagged_precipitation: count={} -->")
 
 
 def _print_stale_archive_hint(project_root: str) -> None:

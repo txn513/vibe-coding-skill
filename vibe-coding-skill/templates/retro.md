@@ -122,6 +122,17 @@
 >   - 管理员评审后归档到 `.agents/archive/skill-upgrade-candidates/`
 >   - `vibe next` 会自动检测未归档的提案并提醒管理员评审
 
+## 沉淀清单 (R-沉淀-enforcement)
+
+> 每条沉淀必带 R6.1 三选一 tag + id. 无 tag = 形式合规假阳性。
+
+- [active: <spec-id>] <description> → 已建 / 待建 follow-up spec
+- [deferred: <触发条件>] <description> → 推迟, 触发条件必明示
+- [superseded: <replaced-by>] <description> → 被哪个 spec / commit 替代
+- [永不: <justification>] <description> → 明确放弃 + 理由
+
+> 无 tag = retro 不完整. `vibe next` 会扫描本段并提醒未 tag 的沉淀条目.
+
 ## 行动项
 
 - [ ] 更新 AGENTS.md: {{ACTION_AGENTS}}
