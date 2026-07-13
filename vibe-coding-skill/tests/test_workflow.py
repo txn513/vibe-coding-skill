@@ -5693,6 +5693,21 @@ class SkillVersionDriftTests(unittest.TestCase):
             f"pre-Rule-52 project should not back-warn; got {warnings}",
         )
 
+
+    def test_doctor_accepts_no_impact_keyword(self) -> None:
+        """Rule 57: read paths with '无影响' keyword should not warn."""
+        import doctor_project
+        warnings = []
+        spec = """
+## 涉及范围
+- /api/users (无影响)
+- /api/posts (无变化)
+- /api/comments (no-impact)
+- /api/tags (no-change)
+"""
+        doctor_project._audit_read_path_impact("test-spec", spec, warnings)
+        # Should not warn for paths with no-impact keywords
+        self.assertEqual(len(warnings), 0, f"Expected no warnings, got: {warnings}")
     def test_doctor_silent_when_skill_version_file_missing(self) -> None:
         """Dev install with no Skill VERSION file must NOT false-positive."""
         import doctor_project

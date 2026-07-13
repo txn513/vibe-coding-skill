@@ -147,7 +147,7 @@ def _audit_read_path_impact(spec_name: str, content: str, warnings: list[str]) -
     section = scope_match.group(1)
     # Look for read-path lines that mention paths/endpoints but lack impact type
     # Impact types: 新增, 修改, 删除, added, modified, removed
-    impact_types = {"新增", "修改", "删除", "added", "modified", "removed"}
+    impact_types = {"新增", "修改", "删除", "added", "modified", "removed", "无影响", "无变化", "no-impact", "no-change"}
     # Find lines that look like read-path entries (paths, endpoints, APIs)
     path_lines = [
         line.strip() for line in section.splitlines()
