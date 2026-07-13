@@ -400,11 +400,32 @@ def _print_untagged_precipitation_hint(project_root: str) -> None:
 
     tag_pattern = re.compile(r"\[(?:active|deferred|superseded|永不):\s*[^\]]+\]")
     level_pattern = re.compile(r"\(\s*(?:项目级|skill 级|skill-level|project-level)\s*\)")
+    active_pattern = re.compile(r"\[active:\s*[^\]]+\]")
     bullets = re.findall(r"^-\s+(.+)$", section_match.group(0), re.MULTILINE)
     untagged = [b for b in bullets if not tag_pattern.search(b)]
     unlevelled = [b for b in bullets if tag_pattern.search(b) and not level_pattern.search(b)]
 
-    if not untagged and not unlevelled:
+    # Check for [active: ...] entries in old retros (> 7 days)
+    old_active = []
+    for path in retro_files[1:]:
+        if os.path.getmtime(path) > time.time() - 7 * 86400:
+            continue
+        try:
+            with open(path, encoding="utf-8") as f:
+                old_content = f.read()
+            if "## 沉淀清单" not in old_content:
+                continue
+            old_section = re.search(r"## 沉淀清单.*?(?=\\n## |\\Z)", old_content, re.DOTALL)
+            if not old_section:
+                continue
+            old_bullets = re.findall(r"^-\s+(.+)$", old_section.group(0), re.MULTILINE)
+            for b in old_bullets:
+                if active_pattern.search(b):
+                    old_active.append(f"{os.path.basename(path)}: {b[:60]}")
+        except OSError:
+            continue
+
+    if not untagged and not unlevelled and not old_active:
         return
 
     print()
@@ -418,6 +439,11 @@ def _print_untagged_precipitation_hint(project_root: str) -> None:
         for entry in unlevelled[:5]:
             print(f"   - {entry[:80]}{'...' if len(entry) > 80 else ''}")
         print("   请补层级: (项目级) 或 (skill 级)")
+    if old_active:
+        print(f"📋 发现 {len(old_active)} 条 [active: ...] 沉淀在旧 retro (>7 天) 中未推进:")
+        for entry in old_active[:5]:
+            print(f"   - {entry}")
+        print("   请推进: advance spec / 改为 [deferred:] / [superseded:] / [永不:]")
     print("<!-- vibe:untagged_precipitation: count={} -->")
 
 
