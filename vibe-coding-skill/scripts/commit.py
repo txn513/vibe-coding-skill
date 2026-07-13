@@ -112,6 +112,39 @@ def _is_auto_generated_path(filepath: str) -> bool:
         return True
     return any(filepath.startswith(p) for p in AUTO_GENERATED_PATH_PREFIXES)
 
+# Governance file extensions that do not need per-file line refs.
+# Used by commit gate to skip line-ref requirement for pure-docs commits.
+GOVERNANCE_FILE_EXTS = frozenset([
+    ".md", ".txt", ".json", ".yml", ".yaml", ".toml",
+    ".gitignore", ".gitattributes",
+])
+
+
+def _is_governance_file(filepath: str) -> bool:
+    """True if filepath is a governance/docs/config file without logic.
+
+    When ALL changed files in a commit are governance files, the commit
+    gate skips per-file line-ref requirement (missing_line_refs gate).
+    This eliminates the need for --quick on pure governance commits
+    (e.g., retro write, rule update, AGENTS.md housekeeping).
+
+    The missing_file_review gate (exit 8) still requires every file
+    to be mentioned in review-summary; only line-ref gate (exit 9)
+    is relaxed for governance-only commits.
+    """
+    # Exact filenames that are always governance
+    if filepath in {".agents/activity.md", "AGENTS.md", "README.md", "VERSION"}:
+        return True
+    # Extension-based check
+    ext = os.path.splitext(filepath)[1].lower()
+    if ext in GOVERNANCE_FILE_EXTS:
+        return True
+    # Directory-based: anything under .agents/rules/, .agents/retros/, docs/
+    if filepath.startswith((".agents/rules/", ".agents/retros/", ".agents/notes/", "docs/")):
+        return True
+    return False
+
+
 
 # 2026-07-12b: step 2 (vibe commit --reviewed) accepts a marker that
 # was written within this many seconds. After the window, the agent
@@ -393,6 +426,19 @@ def _staged_files(project_root: str) -> list[str]:
     if rc != 0:
         return []
     return [line.strip() for line in out.splitlines() if line.strip()]
+
+
+def _all_changed_are_governance(project_root: str, changed_files: list[str]) -> bool:
+    """True when every changed file is a governance file.
+
+    Used by commit gate to decide whether to skip the per-file
+    line-ref requirement (missing_line_refs gate). Production code
+    commits (.py/.sh/.js etc.) still get full gate treatment.
+    """
+    if not changed_files:
+        return False
+    return all(_is_governance_file(f) for f in changed_files)
+
 
 
 def _has_staged_or_unstaged_changes(project_root: str) -> bool:
@@ -738,7 +784,20 @@ def commit(
                 continue
             if not line_ref_pattern.search(conclusion):
                 no_line_ref_parts.append(part)
-        if no_line_ref_parts:
+        # Governance-only commit: skip per-file line-ref requirement
+        # (2026-07-13: candidate 2, R-Lighter-Governance-Gate).
+        # When all changed files are governance/docs/config, require only
+        # that every file is mentioned in review-summary (missing_file
+        # gate above), not per-file line refs. This eliminates --quick
+        # friction for retro write, rule update, AGENTS.md housekeeping.
+        # Production code commits (.py/.sh etc.) still get full gate.
+        if _all_changed_are_governance(project_root, changed_files):
+            print()
+            print("ℹ️  Governance-only commit: 跳过 per-file 行号引用要求 (Rule 53)")
+            print("   所有变更文件均为治理类文档 (.md/.txt/.json/.yml等),")
+            print("   review-summary 已覆盖全部文件即可, 不要求行号引用。")
+            print("<!-- vibe:commit_review_gate: governance_lighter_path -->")
+        elif no_line_ref_parts:
             print()
             print("🔒 Review 门禁升级 — review-summary 缺行号引用 (Rule 53 + Rule 55):")
             print(f"   以下 {len(no_line_ref_parts)} 个文件结论缺少行号/L标识/代码片段引用:")

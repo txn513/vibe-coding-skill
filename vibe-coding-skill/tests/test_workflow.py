@@ -5889,6 +5889,47 @@ class PreCommitGateTests(unittest.TestCase):
 
 
 
+
+    def test_commit_governance_only_skips_line_ref_gate(self) -> None:
+        """Governance-only commit (all .md/.txt) skips per-file line ref requirement.
+
+        Regression for: 20260712b (R-Lighter-Governance-Gate)
+        """
+        import commit
+        import subprocess
+        import os
+        import io
+        import contextlib
+        import workflow_state
+        from common import atomic_write_json
+        # Create a governance file and stage it
+        (self.project / "AGENTS.md").write_text("# Agents\n", encoding="utf-8")
+        (self.project / ".agents" / "rules" / "dev.md").parent.mkdir(parents=True, exist_ok=True)
+        (self.project / ".agents" / "rules" / "dev.md").write_text("# Rules\n", encoding="utf-8")
+        subprocess.run(["git", "add", "-A"], cwd=str(self.project), check=True)
+        # Mark step-1 complete
+        marker_dir = os.path.join(str(self.project), ".agents")
+        os.makedirs(marker_dir, exist_ok=True)
+        with open(os.path.join(marker_dir, ".vibe-review-pending"), "w") as f:
+            f.write("test step1")
+        # Add verify command so we don't fail on verify gate
+        workflow, _ = workflow_state.ensure_workflow(str(self.project))
+        workflow.setdefault("commands", {})["verify"] = [["true"]]
+        atomic_write_json(
+            str(self.project / ".agents" / "workflow.json"),
+            workflow,
+        )
+        # Step 2: commit with review summary (no line refs - should pass for governance)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = commit.commit(str(self.project), ["-m", "governance only"],
+                               reviewed=True,
+                               review_summary="AGENTS.md: update header; dev.md: add R-D-8")
+        out = buf.getvalue()
+        self.assertEqual(rc, 0, f"Expected commit to succeed, got rc={rc}\nout={out}")
+        self.assertIn("governance_lighter_path", out, "Expected governance lighter path marker")
+        self.assertNotIn("missing_line_refs", out, "Should NOT trigger line ref gate for governance files")
+
 class ReviewSummaryGateTests(unittest.TestCase):
     """Cover Rule 53 — `--reviewed` requires `--review-summary '<text>'`.
 
