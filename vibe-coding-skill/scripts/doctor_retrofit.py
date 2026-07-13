@@ -22,15 +22,15 @@ from pathlib import Path
 # 状态行匹配: 状态: done 在 frontmatter
 STATUS_PATTERN = re.compile(r"^>\s*状态:\s*(\S+)", re.MULTILINE)
 
-# 涉及范围段匹配
+# 涉及范围段匹配 (H2 or H3, optional scope type suffix)
 SCOPE_SECTION = re.compile(
-    r"(##\s*涉及范围[^\n]*\n)(.*?)(?=\n##\s|\Z)",
+    r"(#{2,3}\s*涉及范围[^\n]*\n)(.*?)(?=\n#{2,3}\s|\Z)",
     re.DOTALL,
 )
 
-# 修复范围段匹配
+# 修复范围段匹配 (H2 or H3, optional scope type suffix)
 FIX_SCOPE_SECTION = re.compile(
-    r"(##\s*修复范围\s*\(Fix Scope\)[^\n]*\n)(.*?)(?=\n##\s|\Z)",
+    r"(#{2,3}\s*修复范围\s*\(Fix Scope\)[^\n]*\n)(.*?)(?=\n#{2,3}\s|\Z)",
     re.DOTALL,
 )
 
