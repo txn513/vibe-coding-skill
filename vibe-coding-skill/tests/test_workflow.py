@@ -5708,6 +5708,42 @@ class SkillVersionDriftTests(unittest.TestCase):
         doctor_project._audit_read_path_impact("test-spec", spec, warnings)
         # Should not warn for paths with no-impact keywords
         self.assertEqual(len(warnings), 0, f"Expected no warnings, got: {warnings}")
+    def test_doctor_skips_bullet_when_rule57_table_present(self) -> None:
+        """Rule 57: when table exists, skip bullet-level check to avoid false positive."""
+        import doctor_project
+        warnings = []
+        # Spec with both bullet AND table — table should take precedence
+        spec = """
+## 涉及范围
+- **受影响的读路径**: 无读路径影响 (some description)
+
+### 受影响的读路径 (Rule 57)
+| 读路径 | 影响类型 | 说明 |
+|--------|----------|------|
+| some path | 无影响 | desc |
+"""
+        doctor_project._audit_read_path_impact("test-spec", spec, warnings)
+        self.assertEqual(warnings, [], f"Should skip bullet when table present, got: {warnings}")
+
+    def test_doctor_skips_bullet_when_rule56_table_present(self) -> None:
+        """Rule 56: when table exists, skip bullet-level check to avoid false positive."""
+        import doctor_project
+        warnings = []
+        spec = """
+## 修复范围 (Fix Scope)
+
+### 故意不改的相邻位置
+- `utils.py:42` - 辅助函数 (风险已知晓)
+
+| 位置 | 是否已有保护性测试 | 风险已知晓 |
+|------|---------------------|-----------|
+| utils.py:42 | 是 | 是 |
+"""
+        result = doctor_project._audit_adjacent_protection("test-spec", spec, warnings)
+        self.assertEqual(result["total"], 0, "Should skip bullet when table present")
+        self.assertEqual(result["skipped"], 0, "Should not flag when table present")
+
+
     def test_doctor_silent_when_skill_version_file_missing(self) -> None:
         """Dev install with no Skill VERSION file must NOT false-positive."""
         import doctor_project

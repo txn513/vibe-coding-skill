@@ -100,6 +100,12 @@ def _audit_adjacent_protection(spec_name: str, content: str, warnings: list[str]
 
     Returns a stats dict: {total, protected, skipped} for this spec.
     """
+    # Check if Rule 56 table already exists (retrofit-generated table)
+    has_rule_56_table = bool(re.search(
+        r"\|\s*位置.*是否已有保护性测试.*风险已知晓\s*\|",
+        content,
+    ))
+
     # Find "故意不改" section content
     adjacent_match = re.search(
         r"(?:故意不改的相邻位置|Deliberately unchanged)[^\n]*\n((?:\s+-.*\n?)+)",
@@ -108,7 +114,12 @@ def _audit_adjacent_protection(spec_name: str, content: str, warnings: list[str]
     if not adjacent_match:
         return {"total": 0, "protected": 0, "skipped": 0}
     section = adjacent_match.group(1)
-    entries = [line.strip().lstrip("- ").strip() for line in section.splitlines() if line.strip().startswith("-")]
+
+    # If Rule 56 table exists, skip bullet-level checks (table is authoritative)
+    if has_rule_56_table:
+        entries = []
+    else:
+        entries = [line.strip().lstrip("- ").strip() for line in section.splitlines() if line.strip().startswith("-")]
     if not entries:
         return {"total": 0, "protected": 0, "skipped": 0}
     # Check for risk acknowledgment or protection test mention
@@ -145,6 +156,13 @@ def _audit_read_path_impact(spec_name: str, content: str, warnings: list[str]) -
     if not scope_match:
         return  # No scope section — Rule 44 advisory covers this elsewhere
     section = scope_match.group(1)
+
+    # Check if Rule 57 table already exists (retrofit-generated table)
+    has_rule_57_table = bool(re.search(
+        r"###\s*受影响的读路径.*Rule 57|\|.*读路径.*\|.*影响类型.*\|",
+        content,
+    ))
+
     # Look for read-path lines that mention paths/endpoints but lack impact type
     # Impact types: 新增, 修改, 删除, added, modified, removed
     impact_types = {"新增", "修改", "删除", "added", "modified", "removed", "无影响", "无变化", "no-impact", "no-change"}
@@ -157,6 +175,9 @@ def _audit_read_path_impact(spec_name: str, content: str, warnings: list[str]) -
         return
     unannotated = []
     for line in path_lines:
+        # Skip bullet when Rule 57 table exists and this bullet is about read paths
+        if has_rule_57_table and "受影响的读路径" in line:
+            continue
         # Check if any impact type keyword is present
         if not any(it in line for it in impact_types):
             unannotated.append(line.lstrip("- ").strip()[:60])
