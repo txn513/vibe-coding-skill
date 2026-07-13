@@ -72,6 +72,12 @@ Discovery → Spec → Plan → Execute → Verify → Review → Release → Ob
 - 当 Agent 发现 Skill 升级候选时，可以主动询问 `发现 N 条可能的 Skill 治理升级候选，是否应用？`，但在用户明确确认前，不得修改 Skill 核心
 - 如果项目规则与 Skill 默认规则冲突，项目规则优先，但必须记录冲突原因
 
+## Session 恢复与断点续传
+
+- **Agent 会话中断后必须先恢复状态再工作**：如果对话被 compact/断连/重启，Agent 在继续任何工作前必须先运行 `vibe status` + `vibe next` 恢复项目状态。不要凭记忆继续，因为内存中的上下文已丢失，而 `.agents/` 文件是唯一可信的状态源
+- **恢复后核对**：确认当前激活的 spec、阶段、已完成/未完成项，与用户简报当前状态后再继续
+- **禁止假设**：不要因为"我记得上次做到这里"就跳过 vibe status；每次 session 恢复都必须重新读取治理文件
+
 ## 技术栈
 
 - **语言/运行时**: {{LANGUAGE_RUNTIME}}
