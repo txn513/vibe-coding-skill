@@ -12,6 +12,16 @@ Discovery → Spec → Plan → Execute → Verify → Review → Release → Ob
 
 每个阶段推进前，必须先完成当前阶段的所有门禁，否则不得 advance。
 
+<!-- AGENT-MANDATORY-FIRST-ACTION: 以下段落必须在 Agent 启动 / session 恢复 / compact 后第一秒可见。Host (Codex/Claude/Cursor) 应将此段作为 system prompt 前缀注入，或在 Agent 首次读取 AGENTS.md 时优先展示。 -->
+
+## Session 恢复与断点续传
+
+- **Agent 会话中断后必须先恢复状态再工作**：如果对话被 compact/断连/重启，Agent 在继续任何工作前必须先运行 `vibe status` + `vibe next` 恢复项目状态。不要凭记忆继续，因为内存中的上下文已丢失，而 `.agents/` 文件是唯一可信的状态源
+- **恢复后核对**：确认当前激活的 spec、阶段、已完成/未完成项，与用户简报当前状态后再继续
+- **禁止假设**：不要因为"我记得上次做到这里"就跳过 vibe status；每次 session 恢复都必须重新读取治理文件
+- **所有操作前自检**：在运行 `vibe commit`、`vibe amend` 或任何修改性命令前，如果距离上次 `vibe status` 已超过 5 分钟，必须先运行 `vibe status` 确认当前状态
+
+
 ### 阶段级约束
 
 **1. Discovery（意图澄清）**
@@ -71,12 +81,6 @@ Discovery → Spec → Plan → Execute → Verify → Review → Release → Ob
 - 当用户说 `Vibe 复盘这个问题` 时，Agent 必须在当前项目内执行一次复盘：优先更新本项目的规则、文档、retro、testing 策略；仅把抽象后的治理结论作为 Skill 升级候选
 - 当 Agent 发现 Skill 升级候选时，可以主动询问 `发现 N 条可能的 Skill 治理升级候选，是否应用？`，但在用户明确确认前，不得修改 Skill 核心
 - 如果项目规则与 Skill 默认规则冲突，项目规则优先，但必须记录冲突原因
-
-## Session 恢复与断点续传
-
-- **Agent 会话中断后必须先恢复状态再工作**：如果对话被 compact/断连/重启，Agent 在继续任何工作前必须先运行 `vibe status` + `vibe next` 恢复项目状态。不要凭记忆继续，因为内存中的上下文已丢失，而 `.agents/` 文件是唯一可信的状态源
-- **恢复后核对**：确认当前激活的 spec、阶段、已完成/未完成项，与用户简报当前状态后再继续
-- **禁止假设**：不要因为"我记得上次做到这里"就跳过 vibe status；每次 session 恢复都必须重新读取治理文件
 
 ## 技术栈
 

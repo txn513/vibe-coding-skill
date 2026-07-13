@@ -1413,6 +1413,30 @@ def _last_activity_timestamp(project_root: str) -> datetime | None:
     except ValueError:
         return None
 
+
+
+def _check_session_state(project_root: str, threshold_minutes: int = 5) -> None:
+    """Print session-state advisory if last activity is stale.
+
+    Called from commit, amend, and other mutating commands so the
+    agent sees the advisory even when it skips `vibe next`.
+    Rule 66 enforcement: advisory at every entry point.
+    """
+    from datetime import datetime, timezone
+
+    last = _last_activity_timestamp(project_root)
+    if last is None:
+        print("🧠 Session 状态提示: 未找到 activity 记录。如果这是新 session, 请先运行 `vibe status` 恢复状态 (Rule 66)。")
+        print("<!-- vibe:session_state: no_activity -->")
+        return
+
+    minutes = (datetime.now(timezone.utc) - last).total_seconds() / 60
+    if minutes > threshold_minutes:
+        print(f"🧠 Session 状态提示: 距离上次 activity 已 {int(minutes)} 分钟。")
+        print("   如果这是新 session, 请先运行 `vibe status` 恢复状态 (Rule 66)。")
+        print("<!-- vibe:session_state: stale_activity -->")
+
+
 def recommend_next(project_root: str, specs: list[dict] | None = None) -> dict:
     """Return one prioritized next action based on current gates."""
     specs = specs if specs is not None else _list_specs(

@@ -18,6 +18,10 @@ from common import atomic_write, validate_artifact_name
 
 
 def amend_spec(project_root: str, spec_name: str, description: str, apply: bool = False) -> str | None:
+    # Rule 66: Session-state check at mutating command entry.
+    from project_status import _check_session_state
+    _check_session_state(project_root, threshold_minutes=5)
+
     spec_name = validate_artifact_name(spec_name, "规格名称")
     description = " ".join(description.split()).replace("|", r"\|")
     if not description:

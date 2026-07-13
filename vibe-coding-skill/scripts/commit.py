@@ -524,6 +524,12 @@ def commit(
         print("❌ 没有可提交的改动（git status 干净）")
         return 2
 
+    # Rule 66: Session-state check at mutating command entry.
+    # Advisory only — does not block commit, but ensures the agent
+    # sees the hint even when it skips `vibe next`.
+    from project_status import _check_session_state
+    _check_session_state(project_root, threshold_minutes=5)
+
     # Stage selection logic (priority order):
     # 1. --paths <csv>: stage only those paths, then commit. Most
     #    explicit; useful when the agent knows exactly which files
