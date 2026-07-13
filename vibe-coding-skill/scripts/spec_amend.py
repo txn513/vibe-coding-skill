@@ -155,6 +155,31 @@ def amend_spec(project_root: str, spec_name: str, description: str, apply: bool 
 
     atomic_write(spec_file, spec)
 
+    # 2026-07-13g: Auto-refresh plan digest after spec amend (R-plan-auto-refresh).
+    # When a spec is amended, its content digest changes. If a plan exists,
+    # the plan header's spec digest becomes stale immediately. Refresh it
+    # silently so doctor/next do not report false-positive stale-plan issues.
+    # This is a best-effort advisory: if the plan does not exist or the
+    # refresh fails, we log a warning and continue — we never block the amend.
+    plan_file = os.path.join(project_root, ".agents", "plans", f"{spec_name}.md")
+    if os.path.exists(plan_file):
+        try:
+            import subprocess as _subprocess
+            vibe_py = os.path.join(os.path.dirname(__file__), "vibe.py")
+            result = _subprocess.run(
+                ["python3", vibe_py, "plan", project_root, spec_name, "--refresh-digest-only"],
+                capture_output=True, text=True, timeout=30,
+            )
+            if result.returncode == 0:
+                print(f"✅ plan digest 已自动刷新: {spec_name}")
+            else:
+                stderr = result.stderr.strip()[:200] if result.stderr else "unknown"
+                print(f"⚠️  plan digest 刷新跳过 ({spec_name}): {stderr}")
+        except Exception as e:
+            print(f"⚠️  plan digest 刷新异常 ({spec_name}): {e}")
+    else:
+        print(f"ℹ️  无 plan 文件，跳过 digest 刷新: {spec_name}")
+
     # Governance upgrade candidate 2026-07-13: warn about stale evidence digests.
     from common import print_evidence_digest_advisory
     print_evidence_digest_advisory(project_root, spec_name)

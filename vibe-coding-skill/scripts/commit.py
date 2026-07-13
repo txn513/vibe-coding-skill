@@ -490,6 +490,36 @@ def _print_expected_file_list(project_root: str) -> None:
           f"{len(staged)} untracked={len(untracked)} -->")
 
 
+def _changed_files_for_plan_refresh(project_root: str, staged_only: bool, paths: list[str] | None) -> list[str]:
+    """Detect changed .agents/specs/*.md files and return spec names.
+
+    Used by commit() step 2.6 to auto-refresh plan digests before the
+    commit lands. Returns a list of spec names (stems) whose spec
+    files are in the current change set.
+    """
+    # Determine which files are about to be committed
+    if paths:
+        candidate_files = paths
+    elif staged_only:
+        rc, out, _ = _run(["git", "diff", "--cached", "--name-only"], project_root)
+        candidate_files = out.splitlines() if rc == 0 else []
+    else:
+        rc, out, _ = _run(["git", "status", "--porcelain"], project_root)
+        candidate_files = []
+        if rc == 0:
+            for line in out.splitlines():
+                if len(line) > 3 and line[2] == " ":
+                    candidate_files.append(line[3:].strip())
+    # Filter to spec files
+    spec_names = []
+    for fpath in candidate_files:
+        if fpath.startswith(".agents/specs/") and fpath.endswith(".md"):
+            # Skip amendment log files (e.g., spec-name-amendments.md)
+            basename = os.path.basename(fpath)
+            if not basename.endswith("-amendments.md"):
+                spec_names.append(os.path.splitext(basename)[0])
+    return spec_names
+
 def _is_git_repo(project_root: str) -> bool:
     rc, _, _ = _run(["git", "rev-parse", "--git-dir"], project_root)
     return rc == 0
@@ -976,6 +1006,37 @@ def commit(
             print("   修复: grep 受影响符号的全项目调用点，确保每个都已适配。")
             print("   临时绕过: `vibe commit --no-verify`")
             return 8
+        print()
+
+    # 2.6 Auto-refresh plan digest for changed specs (2026-07-13g: R-plan-auto-refresh).
+    # When a commit includes spec file changes, the plan digest headers
+    # become stale immediately. Refresh them silently before the commit
+    # lands so that doctor/next do not report false-positive stale-plan issues.
+    # This is best-effort: if a plan doesn't exist or refresh fails, we
+    # log a warning and continue — we never block the commit.
+    _changed_specs_for_commit = _changed_files_for_plan_refresh(project_root, staged_only, paths)
+    if _changed_specs_for_commit:
+        print()
+        print(f"🔄 自动刷新 plan digest ({len(_changed_specs_for_commit)} specs, 2026-07-13g):")
+        for _cs in _changed_specs_for_commit:
+            _pf = os.path.join(project_root, ".agents", "plans", f"{_cs}.md")
+            if os.path.exists(_pf):
+                try:
+                    import subprocess as _sp2
+                    _vibe_py = os.path.join(os.path.dirname(__file__), "vibe.py")
+                    _r = _sp2.run(
+                        ["python3", _vibe_py, "plan", project_root, _cs, "--refresh-digest-only"],
+                        capture_output=True, text=True, timeout=30,
+                    )
+                    if _r.returncode == 0:
+                        print(f"   ✅ {_cs}")
+                    else:
+                        _err = _r.stderr.strip()[:120] if _r.stderr else "unknown"
+                        print(f"   ⚠️  {_cs}: {_err}")
+                except Exception as _e:
+                    print(f"   ⚠️  {_cs}: {_e}")
+            else:
+                print(f"   ℹ️  {_cs}: 无 plan 文件, 跳过")
         print()
 
     # 3. Commit — hand off to git, with Rule 53 trailer
