@@ -1386,11 +1386,52 @@ def _print_stage_stall_warnings(project_root: str, specs: list[dict] | None = No
     print("   阈值可在 .agents/workflow.json 的 stage_stall_sla 调整。")
 
 
+
+
+def _last_activity_timestamp(project_root: str) -> datetime | None:
+    """Parse the most recent timestamp from .agents/activity.md.
+
+    Returns None if the file is missing or has no parseable timestamps.
+    """
+    import re
+    from datetime import datetime
+
+    path = os.path.join(project_root, ".agents", "activity.md")
+    if not os.path.exists(path):
+        return None
+
+    with open(path, encoding="utf-8") as f:
+        content = f.read()
+
+    # activity.md timestamps look like: "- **2026-07-13T10:00:00Z** ..."
+    timestamps = re.findall(r"-\s*\*\*([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z)\*\*", content)
+    if not timestamps:
+        return None
+
+    try:
+        return datetime.fromisoformat(timestamps[-1].replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
 def recommend_next(project_root: str, specs: list[dict] | None = None) -> dict:
     """Return one prioritized next action based on current gates."""
     specs = specs if specs is not None else _list_specs(
         os.path.join(project_root, ".agents", "specs")
     )
+
+    # Rule 66: Session recovery advisory (2026-07-14).
+    # When activity.md is empty or the last entry is stale (e.g., >30min),
+    # surface a session-state hint at the top of vibe next so the agent
+    # knows to re-read project state before proceeding.
+    last_activity = _last_activity_timestamp(project_root)
+    if last_activity is not None:
+        minutes_since = (datetime.now(timezone.utc) - last_activity).total_seconds() / 60
+        if minutes_since > 30:
+            print(f"🧠 Session 状态提示：距离上次 activity 已 {int(minutes_since)} 分钟。")
+            print("   如果这是新 session，请先运行 `vibe status` 恢复状态 (Rule 66)。")
+            print("<!-- vibe:session_state: stale_activity -->")
+            print()
+
     # 2026-07-12: missing retro for done specs is the highest-priority
     # next action. A retro is required for every done spec (Rule 54),
     # and skipping it means the failure modes are invisible to
