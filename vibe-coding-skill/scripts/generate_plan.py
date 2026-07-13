@@ -211,8 +211,31 @@ def refresh_plan_digests_only(project_root: str, spec_name: str) -> str | None:
         flags=re.MULTILINE,
     )
     if plan_content_new == plan_content:
-        print("⚠️  plan header 不含可识别的 digest 行 (老格式 plan); 未修改")
-        return plan_file
+        # 2026-07-13k: Auto-upgrade old-format plans without digest headers.
+        # Instead of aborting, insert digest lines into the header.
+        # Find the first heading line and insert after it.
+        lines = plan_content.splitlines(keepends=True)
+        header_inserted = False
+        for i, line in enumerate(lines):
+            if line.startswith("# ") or line.startswith("## "):
+                # Insert after the first heading line
+                header_block = (
+                    f"> 基于规格: {spec_file} | 规格摘要: {new_spec_digest} | "
+                    f"上下文摘要: {new_context_digest} | "
+                    f"生成: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}\n"
+                )
+                lines.insert(i + 1, header_block)
+                header_inserted = True
+                break
+        if header_inserted:
+            plan_content_new = "".join(lines)
+            atomic_write(plan_file, plan_content_new)
+            print(f"✅ plan header 已自动升级 (老格式 → 新格式): 规格={new_spec_digest} 上下文={new_context_digest}")
+            print(f"   {plan_file}")
+            return plan_file
+        else:
+            print("⚠️  plan header 不含可识别的 digest 行且无法定位标题行; 未修改")
+            return plan_file
     atomic_write(plan_file, plan_content_new)
     print(f"✅ plan header digest 已刷新: 规格={new_spec_digest} 上下文={new_context_digest}")
     print(f"   {plan_file}")
