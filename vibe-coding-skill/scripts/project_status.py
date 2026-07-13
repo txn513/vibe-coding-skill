@@ -1404,7 +1404,7 @@ def _last_activity_timestamp(project_root: str) -> datetime | None:
         content = f.read()
 
     # activity.md timestamps look like: "- **2026-07-13T10:00:00Z** ..."
-    timestamps = re.findall(r"-\s*\*\*([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z)\*\*", content)
+    timestamps = re.findall(r"-\s*\*\*([0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2} UTC)\*\*", content)
     if not timestamps:
         return None
 
