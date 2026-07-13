@@ -473,6 +473,12 @@ def main() -> None:
     upgrade_agents_cmd.add_argument("project_root", help="Project root to upgrade AGENTS.md for")
     upgrade_agents_cmd.add_argument("--dry-run", action="store_true", help="Preview changes without writing")
 
+    doctor_retrofit_cmd = sub.add_parser("doctor-retrofit")
+    doctor_retrofit_cmd.add_argument("project_root", help="Project root to retrofit")
+    doctor_retrofit_cmd.add_argument("--spec", help="Retrofit only this spec (default: all done specs)")
+    doctor_retrofit_cmd.add_argument("--apply", action="store_true", help="Actually modify files (default: dry-run)")
+    doctor_retrofit_cmd.add_argument("--no-plan-refresh", action="store_true", help="Skip plan digest refresh")
+
     install_hook_cmd = sub.add_parser("install-precommit-hook")
     install_hook_cmd.add_argument("project_root", help="Project root to install pre-commit hook for")
 
@@ -816,6 +822,14 @@ def main() -> None:
     elif args.operation == "upgrade-agents":
         import upgrade_agents
         raise SystemExit(upgrade_agents.upgrade_agents(args.project_root, dry_run=getattr(args, "dry_run", False)))
+    elif args.operation == "doctor-retrofit":
+        import doctor_retrofit
+        raise SystemExit(doctor_retrofit.main(
+            project_root=args.project_root,
+            spec=getattr(args, "spec", None),
+            apply=getattr(args, "apply", False),
+            no_plan_refresh=getattr(args, "no_plan_refresh", False),
+        ))
     elif args.operation == "install-precommit-hook":
         import install_precommit_hook
         raise SystemExit(install_precommit_hook.install_hook(args.project_root))
