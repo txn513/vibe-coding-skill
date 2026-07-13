@@ -112,6 +112,14 @@ def upgrade(project_root: str) -> int:
         print()
         print("   配置完成后，`vibe commit` 才会真正生效。")
 
+    # Step 3: auto-upgrade AGENTS.md with AGENT-MANDATORY retrofit (2026-07-14)
+    print("\n🔍 AGENTS.md 升级检测:")
+    try:
+        import upgrade_agents
+        upgrade_agents.upgrade_agents(project_root)
+    except Exception:
+        pass  # advisory only, do not block upgrade
+
     return 0
 
 

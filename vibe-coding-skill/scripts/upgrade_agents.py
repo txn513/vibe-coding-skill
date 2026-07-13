@@ -99,6 +99,61 @@ def merge_agents(existing_text: str, template_text: str) -> tuple[str, list[str]
 
     return "\n\n".join(result_sections), changes
 
+def _inject_mandatory_section(existing_text: str, template_text: str) -> tuple[str, list[str]]:
+    """Inject AGENT-MANDATORY section if missing from existing AGENTS.md.
+
+    Extracts the Session Recovery section (marked by AGENT-MANDATORY comment)
+    from templates/agents.md and prepends it to the existing AGENTS.md if not present.
+    Returns (modified_text, changes).
+    """
+    changes = []
+
+    if "<!-- AGENT-MANDATORY" in existing_text:
+        return existing_text, changes
+
+    # Read the section from templates/agents.md (not agents-phase-gates.md)
+    import os
+    skill_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    agents_md_path = os.path.join(skill_dir, "templates", "agents.md")
+
+    try:
+        with open(agents_md_path, encoding="utf-8") as f:
+            agents_md_text = f.read()
+    except OSError:
+        changes.append("无法读取 templates/agents.md")
+        return existing_text, changes
+
+    marker_idx = agents_md_text.find("<!-- AGENT-MANDATORY")
+    if marker_idx == -1:
+        changes.append("模板中未找到 AGENT-MANDATORY 标记")
+        return existing_text, changes
+
+    section_lines = []
+    for i, line in enumerate(agents_md_text[marker_idx:].splitlines()):
+        if i == 0:
+            section_lines.append(line)
+            continue
+        if line.startswith("##") and "Session" not in line:
+            break
+        if line.startswith("###"):
+            break
+        section_lines.append(line)
+
+    if not section_lines:
+        changes.append("模板中未找到 Session 恢复节")
+        return existing_text, changes
+
+    mandatory_block = "\n".join(section_lines).rstrip() + "\n\n"
+
+    existing_lines = existing_text.splitlines(keepends=True)
+    result = existing_lines[0] + "\n" + mandatory_block + "".join(existing_lines[1:])
+
+    changes.append("新增: AGENT-MANDATORY Session 恢复节 (老项目 retrofit)")
+    return result, changes
+
+
+
+
 
 def upgrade_agents(project_root: str, dry_run: bool = False) -> int:
     """Upgrade AGENTS.md from template. Returns exit code."""
@@ -120,6 +175,10 @@ def upgrade_agents(project_root: str, dry_run: bool = False) -> int:
         template = f.read()
 
     merged, changes = merge_agents(existing, template)
+
+    # Retrofit: inject AGENT-MANDATORY Session Recovery section if missing (2026-07-14)
+    merged, mandatory_changes = _inject_mandatory_section(merged, template)
+    changes += mandatory_changes
 
     if merged.strip() == existing.strip():
         print("✅ AGENTS.md 已是最新，无需更新")
