@@ -1409,7 +1409,7 @@ def _last_activity_timestamp(project_root: str) -> datetime | None:
         return None
 
     try:
-        return datetime.fromisoformat(timestamps[-1].replace("Z", "+00:00"))
+        return datetime.fromisoformat(timestamps[-1].replace("Z", "+00:00").replace(" UTC", "+00:00"))
     except ValueError:
         return None
 
