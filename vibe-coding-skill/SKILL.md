@@ -90,7 +90,20 @@ artifacts merely because a template exists.
 <!-- ENFORCE: id=R4, hook=tool_call, tool=bash, match=vibe(?:\.py)?\s+(verify|evidence), action=verify_commands, message=必须运行 workflow.json 配置的 verify 命令，不能只写结论 -->
 4. Execute configured project commands for mechanical checks. A written claim
    cannot replace configured command evidence.
-<!-- ENFORCE: id=R5, hook=tool_call, tool=bash, match=vibe(?:\.py)?\s+next.*review, action=check_identity, message=review 必须与 builder 不同身份 -->
+<!-- ENFORCE: id=R5, hook=tool_call, tool=bash, match=vibe(?:\.py)?\s+next.*review, action=block_self_review, message=review 必须与 builder 不同身份，禁止 self-review -->
+
+<!-- ENFORCE: id=R5b, hook=tool_call, tool=bash, match=vibe(?:\.py)?\s+next.*review, action=block_self_review_session, message=reviewer 必须是不同 session 或 sub-agent，禁止同一 session self-review -->
+
+    5b. **Review session separation (hard gate)**: When advancing
+    to review, the reviewer MUST be a different session or
+    sub-agent from the builder. In Pi, the current session ID
+    is detected from `PI_SESSION_FILE` / `PI_SESSION_ID`. If
+    the last builder actor equals the current session, the
+    advance is blocked. Non-Pi agents without session context
+    are skipped with a warning (not blocked). To bypass in
+    solo-session emergencies, use `--role override_approver`
+    with `--future-session` (R67).
+
 5. Validate actor and declared role. Separated roles (reviewer, releaser,
    observer) must use a different identity from the builder, and the spec's
    risk level determines which transitions enforce this. The set of risk
@@ -907,7 +920,20 @@ artifacts merely because a template exists.
     gate blocks with a message directing the agent to create a spec
     first. Projects without `.agents/` (non-vibe projects) are
     automatically skipped. Emergency fixes can bypass via
-    `--force` on the `vibe advance` command to push a spec to
+    `--force` on the `vibe advance` command 
+<!-- ENFORCE: id=R53b, hook=tool_call, tool=bash, match=vibe(?:\.py)?\s+commit.*--reviewed, action=block_without_review, message=必须先跑 vibe commit (step 1) 看 diff，才能加 --reviewed -->
+
+    53b. **Review-then-commit enforcement**: `vibe commit --reviewed`
+    MUST NOT be used unless a prior `vibe commit` (step 1, without
+    `--reviewed`) was run in the same project first. Step 1 creates
+    a `.agents/.vibe-review-pending` marker; step 2 (`--reviewed`)
+    consumes it. If the marker is missing, the commit is blocked.
+    This prevents the observed failure mode where agents add
+    `--reviewed` upfront and never actually read the diff. The
+    agent must inspect the diff for unintended modifications,
+    scope creep, or regressions before proceeding. `--quick`
+    skips this gate for docs-only commits.
+to push a spec to
     in-progress without full review.
 
 66. **Session recovery: Agent MUST re-read project state after context loss**: When an Agent's session is interrupted, compacted, restarted, or otherwise loses in-memory context, the Agent MUST NOT continue work based on memory alone. Before doing anything else, the Agent MUST run `vibe status` followed by `vibe next` to re-read the project's `.agents/` state (specs, plans, activity, retros, workflow.json). The Agent MUST then confirm the active spec, current phase, and any open action items with the user before proceeding. This is a structural forcing function: the `.agents/` directory is the single source of truth; an Agent's memory is ephemeral and unreliable after a session break. For multi-turn conversations where `vibe status` was already run in the current session, the Agent MAY skip the re-read, provided it can cite the last known state from the conversation context. When the Agent cannot determine whether the conversation is a continuation or a fresh session, it MUST default to re-reading. This rule applies regardless of the host platform (Codex, Claude Code, Cursor, or any other agent runner).
