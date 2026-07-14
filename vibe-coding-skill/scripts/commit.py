@@ -1111,6 +1111,18 @@ def commit(
             print("   ℹ️  无 plan 文件需要刷新")
         else:
             print(f"   共刷新 {refreshed} 个 plan digest")
+            # Auto-stage refreshed plans so they enter this commit
+            # (20260714h: fix dead-loop where refreshed plans stay dirty)
+            try:
+                import subprocess as _sp4
+                _r2 = _sp4.run(
+                    ["git", "add", plans_dir],
+                    cwd=project_root, capture_output=True, text=True, timeout=10,
+                )
+                if _r2.returncode == 0:
+                    print(f"   📦 已 stage {refreshed} 个 refreshed plans 进本次 commit")
+            except Exception as _e:
+                print(f"   ⚠️  stage refreshed plans 失败: {_e}")
         print()
 
 
@@ -1150,6 +1162,17 @@ def commit(
                 print(f"   ⚠️  sync failed: {_e}")
         else:
             print("   ℹ️  sync_ledger.py 不在项目 (skip)")
+        # Auto-stage synced bug ledger files (20260714h: same pattern as 2.7)
+        try:
+            import subprocess as _sp5
+            _r3 = _sp5.run(
+                ["git", "add", bugs_dir],
+                cwd=project_root, capture_output=True, text=True, timeout=10,
+            )
+            if _r3.returncode == 0:
+                print("   📦 已 stage synced bug ledger 进本次 commit")
+        except Exception as _e:
+            print(f"   ⚠️  stage bug ledger 失败: {_e}")
         print()
 
     # 3. Commit — hand off to git, with Rule 53 trailer
