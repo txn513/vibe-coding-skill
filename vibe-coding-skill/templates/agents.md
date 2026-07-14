@@ -116,6 +116,31 @@ Discovery → Spec → Plan → Execute → Verify → Review → Release → Ob
 - **Governance batch 允许但必须声明根因**：单根因的 governance batch（如 auto-refresh 70 plans）允许，但 commit message 必须声明根因 + review-summary 解释。
 - **禁止多 spec 聚合 commit**：一次 commit 涉及多个 spec + 所有 evidence = 隐藏幽灵 spec，违反 R8.46。
 
+### Session 启动 SOP
+
+- 新 session 必做（不可跳）：先 `vibe status <project_root>` 看当前状态，再 `vibe next` 看下一步建议，再 `git status --short` 看本地改动
+- 检查 `.agents/.skill-version` 是否与 Skill 版本一致，不同步时跑 `vibe upgrade`
+- 检查 `.agents/skill-upgrade-candidates/` 是否有待处理候选
+
+### `--quick` 使用边界
+
+- `--quick` 仅用于纯文档改动（typo、格式调整）和 governance 资产变动（retro、规则、候选 sync）
+- `--quick` 禁用于业务代码改动、bug fix、feature implement — 这些必须走完整 review + verify 流程
+- 如果不确定该不该用 `--quick`，就不用
+
+### 批量 Commit 边界
+
+- Governance batch（多个 plans/rules/retros 同步）允许，但 commit message 必须声明单一根因（如"workflow.json 变更触发 70 plan digest refresh"）
+- 业务代码 batch（多 spec + 各自 evidence 合并 1 commit）禁止 — 隐藏幽灵 spec
+- 测试 fixture batch 可以合（同一根因的测试添加），不同根因必须拆
+
+### Override Approver 身份（单 Actor 项目参考）
+
+- Solo-session 项目如果必须走 override_approver，指定一个 future session ID 作为 reviewer，不能"我自己 override 我自己"
+- Future session 起来后必须读原 spec/evidence/commit 才能 approve 或 reject
+- 多 actor 项目不需要此规则
+
+
 ## 技术栈
 
 - **语言/运行时**: {{LANGUAGE_RUNTIME}}
