@@ -1039,6 +1039,59 @@ def commit(
                 print(f"   ℹ️  {_cs}: 无 plan 文件, 跳过")
         print()
 
+    # 2.7 Auto-refresh plan digest for project guidance changes (2026-07-14c).
+    # When .agents/rules/, AGENTS.md, or workflow.json change, all plan
+    # digests become stale. Refresh them silently before commit lands.
+    # This is best-effort: if refresh fails, log warning and continue.
+    def _has_project_guidance_changes() -> bool:
+        """Detect if commit includes project guidance files."""
+        guidance_prefixes = (
+            ".agents/rules/",
+            ".agents/checklists/",
+            "AGENTS.md",
+            ".agents/workflow.json",
+        )
+        for fpath in _changed_files_for_plan_refresh(project_root, staged_only, paths):
+            for prefix in guidance_prefixes:
+                if fpath.startswith(prefix) or fpath == prefix:
+                    return True
+        return False
+
+    if _has_project_guidance_changes():
+        print()
+        print("🔄 project guidance 变化 — 自动刷新所有 plan digest (2026-07-14c):")
+        plans_dir = os.path.join(project_root, ".agents", "plans")
+        specs_dir = os.path.join(project_root, ".agents", "specs")
+        refreshed = 0
+        if os.path.exists(plans_dir):
+            for plan_file in os.listdir(plans_dir):
+                if not plan_file.endswith(".md"):
+                    continue
+                spec_name = plan_file[:-3]
+                spec_file = os.path.join(specs_dir, f"{spec_name}.md")
+                if not os.path.exists(spec_file):
+                    continue
+                try:
+                    import subprocess as _sp3
+                    _vibe_py = os.path.join(os.path.dirname(__file__), "vibe.py")
+                    _r = _sp3.run(
+                        ["python3", _vibe_py, "plan", project_root, spec_name, "--refresh-digest-only"],
+                        capture_output=True, text=True, timeout=30,
+                    )
+                    if _r.returncode == 0:
+                        refreshed += 1
+                        print(f"   ✅ {spec_name}")
+                    else:
+                        _err = _r.stderr.strip()[:120] if _r.stderr else "unknown"
+                        print(f"   ⚠️  {spec_name}: {_err}")
+                except Exception as _e:
+                    print(f"   ⚠️  {spec_name}: {_e}")
+        if refreshed == 0:
+            print("   ℹ️  无 plan 文件需要刷新")
+        else:
+            print(f"   共刷新 {refreshed} 个 plan digest")
+        print()
+
     # 3. Commit — hand off to git, with Rule 53 trailer
     # Adding a git trailer so doctor can detect commits that bypassed
     # vibe commit (raw `git commit` won't have this trailer).
