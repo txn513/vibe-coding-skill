@@ -27,15 +27,7 @@ function findSkillPath(cwd: string): string | null {
   return null;
 }
 
-function findScriptsDir(skillPath: string): string | null {
-  const dir = path.dirname(skillPath);
-  const scriptsDir = path.join(dir, "scripts");
-  if (fs.existsSync(scriptsDir)) return scriptsDir;
-  return null;
-}
-
 function findProjectRoot(cwd: string): string {
-  // Walk up to find .agents/ directory
   let current = path.resolve(cwd);
   for (let i = 0; i < 10; i++) {
     if (fs.existsSync(path.join(current, ".agents"))) return current;
@@ -72,75 +64,119 @@ function parseEnforceComments(content: string): EnforceRule[] {
 
 // ── Real enforcement helpers ─────────────────────────────
 
-function checkReviewerIdentity(projectRoot: string, specName: string): { ok: boolean; detail: string } {
+function checkReviewerIdentity(projectRoot: string, _specName: string): { ok: boolean; detail: string } {
   try {
     const activityFile = path.join(projectRoot, ".agents", "activity.md");
-    if (!fs.existsSync(activityFile)) {
-      return { ok: true, detail: "No activity.md, skipping identity check" };
-    }
+    if (!fs.existsSync(activityFile)) return { ok: true, detail: "No activity.md" };
     const content = fs.readFileSync(activityFile, "utf-8");
-
-    // Find all entries for this spec
-    const specPattern = new RegExp(`- \\*\\*${specName}\\*\\*`, "g");
     const lines = content.split("\n");
-    let lastBuilder = "";
-    let lastReviewer = "";
-
+    let lastBuilder = "", lastReviewer = "";
     for (const line of lines) {
-      if (specPattern.test(line)) {
+      if (line.includes("Actor:")) {
         const actorMatch = line.match(/Actor:\s*(\S+)/);
         const roleMatch = line.match(/Role:\s*(\S+)/);
         if (actorMatch && roleMatch) {
-          const actor = actorMatch[1];
-          const role = roleMatch[1];
-          if (role === "builder") lastBuilder = actor;
-          if (role === "reviewer") lastReviewer = actor;
+          if (roleMatch[1] === "builder") lastBuilder = actorMatch[1];
+          if (roleMatch[1] === "reviewer") lastReviewer = actorMatch[1];
         }
       }
     }
-
-    if (!lastBuilder || !lastReviewer) {
-      return { ok: true, detail: "Missing builder or reviewer record" };
-    }
-
+    if (!lastBuilder || !lastReviewer) return { ok: true, detail: "Missing records" };
     if (lastBuilder === lastReviewer) {
-      return {
-        ok: false,
-        detail: `Builder (${lastBuilder}) 和 Reviewer (${lastReviewer}) 是同一人，违反身份分离`,
-      };
+      return { ok: false, detail: `Builder (${lastBuilder}) = Reviewer (${lastReviewer})` };
     }
-
-    return { ok: true, detail: `Builder=${lastBuilder}, Reviewer=${lastReviewer}` };
+    return { ok: true, detail: `${lastBuilder} != ${lastReviewer}` };
   } catch (e) {
-    return { ok: true, detail: `Identity check error: ${e}` };
+    return { ok: true, detail: `Error: ${e}` };
   }
 }
 
 function checkVerifyCommands(projectRoot: string): { ok: boolean; detail: string } {
   try {
     const workflowPath = path.join(projectRoot, ".agents", "workflow.json");
-    if (!fs.existsSync(workflowPath)) {
-      return { ok: true, detail: "No workflow.json" };
-    }
+    if (!fs.existsSync(workflowPath)) return { ok: true, detail: "No workflow.json" };
     const workflow = JSON.parse(fs.readFileSync(workflowPath, "utf-8"));
     const commands = workflow?.commands?.verify || [];
-    if (commands.length === 0) {
-      return { ok: false, detail: "workflow.json 未配置 verify 命令" };
-    }
-    return { ok: true, detail: `${commands.length} verify commands configured` };
+    if (commands.length === 0) return { ok: false, detail: "No verify commands" };
+    return { ok: true, detail: `${commands.length} commands` };
   } catch (e) {
-    return { ok: true, detail: `Verify check error: ${e}` };
+    return { ok: true, detail: `Error: ${e}` };
+  }
+}
+
+function checkPerACMapping(projectRoot: string, _specName: string): { ok: boolean; detail: string } {
+  try {
+    const evidenceDir = path.join(projectRoot, ".agents", "evidence");
+    if (!fs.existsSync(evidenceDir)) return { ok: true, detail: "No evidence dir" };
+    const files = fs.readdirSync(evidenceDir);
+    let missingAC = 0;
+    for (const f of files) {
+      if (!f.endsWith(".md")) continue;
+      const content = fs.readFileSync(path.join(evidenceDir, f), "utf-8");
+      if (!content.includes("AC") && !content.includes("Acceptance Criteria")) {
+        missingAC++;
+      }
+    }
+    if (missingAC > 0) return { ok: false, detail: `${missingAC} evidence files lack AC mapping` };
+    return { ok: true, detail: "All evidence has AC mapping" };
+  } catch (e) {
+    return { ok: true, detail: `Error: ${e}` };
+  }
+}
+
+function checkPromptVersion(projectRoot: string, _specName: string): { ok: boolean; detail: string } {
+  try {
+    const specsDir = path.join(projectRoot, ".agents", "specs");
+    if (!fs.existsSync(specsDir)) return { ok: true, detail: "No specs dir" };
+    const files = fs.readdirSync(specsDir).filter(f => f.endsWith(".md"));
+    let outdated = 0;
+    for (const f of files) {
+      const content = fs.readFileSync(path.join(specsDir, f), "utf-8");
+      if (content.includes("Prompt version") && !content.includes("Prompt version: ")) {
+        outdated++;
+      }
+    }
+    if (outdated > 0) return { ok: false, detail: `${outdated} specs lack Prompt version` };
+    return { ok: true, detail: "All specs have Prompt version" };
+  } catch (e) {
+    return { ok: true, detail: `Error: ${e}` };
+  }
+}
+
+function checkRetroItems(projectRoot: string): { ok: boolean; detail: string } {
+  try {
+    const retrosDir = path.join(projectRoot, ".agents", "retros");
+    if (!fs.existsSync(retrosDir)) return { ok: true, detail: "No retros dir" };
+    const files = fs.readdirSync(retrosDir).filter(f => f.endsWith(".md"));
+    let openItems = 0;
+    for (const f of files) {
+      const content = fs.readFileSync(path.join(retrosDir, f), "utf-8");
+      const matches = content.match(/- \[ \].*action item/gi);
+      if (matches) openItems += matches.length;
+    }
+    if (openItems > 0) return { ok: false, detail: `${openItems} open action items` };
+    return { ok: true, detail: "All action items terminal" };
+  } catch (e) {
+    return { ok: true, detail: `Error: ${e}` };
+  }
+}
+
+function checkCallSites(projectRoot: string): { ok: boolean; detail: string } {
+  try {
+    const workflowPath = path.join(projectRoot, ".agents", "workflow.json");
+    if (!fs.existsSync(workflowPath)) return { ok: true, detail: "No workflow.json" };
+    const workflow = JSON.parse(fs.readFileSync(workflowPath, "utf-8"));
+    const checks = workflow?.commands?.call_site_check || [];
+    if (checks.length === 0) return { ok: true, detail: "call_site_check not configured (optional)" };
+    return { ok: true, detail: `${checks.length} call-site checks configured` };
+  } catch (e) {
+    return { ok: true, detail: `Error: ${e}` };
   }
 }
 
 // ── Handlers ─────────────────────────────────────────────
 
-function registerHandlers(
-  pi: ExtensionAPI,
-  rules: EnforceRule[],
-  _scriptsDir: string | null,
-  projectRoot: string,
-) {
+function registerHandlers(pi: ExtensionAPI, rules: EnforceRule[], projectRoot: string) {
   for (const rule of rules) {
     const id = rule.id;
     const message = rule.message || `${id}: 违反规则`;
@@ -157,43 +193,55 @@ function registerHandlers(
           const cmd = event.input?.command ?? "";
           if (!rule._compiledRegex || !rule._compiledRegex.test(cmd)) return;
 
-          // ── R53: block raw git commit ──
+          // R53: block raw git commit
           if (id === "R53" && rule.action === "block") {
             ctx.ui.notify(`⚠️ ${id}: ${message}`, "warning");
             return { block: true, reason: `${id}: ${message}` };
           }
 
-          // ── R5: reviewer identity check ──
-          if (id === "R5" && rule.action === "check_identity") {
-            const result = checkReviewerIdentity(projectRoot, "*");
-            if (!result.ok) {
-              ctx.ui.notify(`⚠️ ${id}: ${result.detail}`, "warning");
-              // Advisory only — don't block, just warn
-            }
-          }
-
-          // ── R4: verify commands configured ──
+          // R4: verify commands check
           if (id === "R4" && rule.action === "verify_commands") {
             const result = checkVerifyCommands(projectRoot);
-            if (!result.ok) {
-              ctx.ui.notify(`⚠️ ${id}: ${result.detail}`, "warning");
-            }
+            if (!result.ok) ctx.ui.notify(`⚠️ ${id}: ${result.detail}`, "warning");
           }
 
-          // ── R10: bug evidence check ──
+          // R5: reviewer identity
+          if (id === "R5" && rule.action === "check_identity") {
+            const result = checkReviewerIdentity(projectRoot, "*");
+            if (!result.ok) ctx.ui.notify(`⚠️ ${id}: ${result.detail}`, "warning");
+          }
+
+          // R10: bug evidence
           if (id === "R10" && rule.action === "check_bug_evidence") {
-            // Advisory: prompt agent to check for reproduction evidence
             ctx.ui.notify(`⚠️ ${id}: ${message}`, "warning");
           }
 
-          // ── R22: stage transition gate ──
+          // R22: stage transition
           if (id === "R22" && rule.action === "check_stage_transition") {
             ctx.ui.notify(`🔒 ${id}: ${message}`, "info");
           }
 
-          // ── R25: retro failure labels ──
+          // R25: retro failure labels
           if (id === "R25" && rule.action === "check_failure_labels") {
             ctx.ui.notify(`📝 ${id}: ${message}`, "info");
+          }
+
+          // R30: per-AC mapping
+          if (id === "R30" && rule.action === "check_per_ac") {
+            const result = checkPerACMapping(projectRoot, "*");
+            if (!result.ok) ctx.ui.notify(`⚠️ ${id}: ${result.detail}`, "warning");
+          }
+
+          // R47: Prompt version
+          if (id === "R47" && rule.action === "check_prompt_version") {
+            const result = checkPromptVersion(projectRoot, "*");
+            if (!result.ok) ctx.ui.notify(`⚠️ ${id}: ${result.detail}`, "warning");
+          }
+
+          // R62: call sites
+          if (id === "R62" && rule.action === "check_call_sites") {
+            const result = checkCallSites(projectRoot);
+            if (!result.ok) ctx.ui.notify(`⚠️ ${id}: ${result.detail}`, "warning");
           }
         });
         break;
@@ -211,11 +259,14 @@ function registerHandlers(
 
       case "agent_end": {
         pi.on("agent_end", async (_event, ctx) => {
-          if (rule.action === "check_gates") {
+          // R1: check gates
+          if (id === "R1" && rule.action === "check_gates") {
             ctx.ui.notify(`🔒 ${message}`, "info");
           }
-          if (rule.action === "require_retro") {
-            ctx.ui.notify(`📝 ${message}`, "info");
+          // R60: retro items
+          if (id === "R60" && rule.action === "check_retro_items") {
+            const result = checkRetroItems(projectRoot);
+            if (!result.ok) ctx.ui.notify(`📝 ${id}: ${result.detail}`, "warning");
           }
         });
         break;
@@ -232,7 +283,6 @@ function registerHandlers(
 
 export default function (pi: ExtensionAPI) {
   let rules: EnforceRule[] = [];
-  let scriptsDir: string | null = null;
   let projectRoot = "";
 
   pi.on("session_start", async (event, ctx) => {
@@ -241,18 +291,11 @@ export default function (pi: ExtensionAPI) {
 
     const skillPath = findSkillPath(cwd);
     if (!skillPath) {
-      console.warn("[vibe-enforcer] SKILL.md not found. Searched:");
-      console.warn("  ~/.pi/agent/skills/vibe-coding/SKILL.md");
-      console.warn("  ~/.agents/skills/vibe-coding/SKILL.md");
-      console.warn("  ./.pi/skills/vibe-coding/SKILL.md");
-      console.warn("  ./.agents/skills/vibe-coding/SKILL.md");
-      console.warn("  <ext>/../SKILL.md");
+      console.warn("[vibe-enforcer] SKILL.md not found.");
       return;
     }
 
-    scriptsDir = findScriptsDir(skillPath);
     console.log(`[vibe-enforcer] Skill: ${skillPath}`);
-    if (scriptsDir) console.log(`[vibe-enforcer] Scripts: ${scriptsDir}`);
 
     try {
       const content = fs.readFileSync(skillPath, "utf-8");
@@ -266,6 +309,6 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
-    registerHandlers(pi, rules, scriptsDir, projectRoot);
+    registerHandlers(pi, rules, projectRoot);
   });
 }
