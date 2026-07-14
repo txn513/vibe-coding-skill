@@ -239,6 +239,27 @@ def validate_spec(spec_path: str) -> dict:
                        "reviewer 必须独立 grep 验证调用点清单完整性。",
             })
 
+    # R6_8: spec should have a matching intent file (20260714o)
+    spec_dir = os.path.dirname(spec_path)
+    intents_dir = os.path.join(os.path.dirname(spec_dir), "intents")
+    if os.path.exists(intents_dir):
+        intent_path = os.path.join(intents_dir, name + ".md")
+        has_intent_ref = bool(re.search(r">\s*(?:关联 intent|Related Intent):", content))
+        if not os.path.exists(intent_path) and not has_intent_ref:
+            issues.append({
+                "severity": "warning",
+                "msg": f"Intent file missing: intents/{name}.md (R6_8)",
+            })
+
+    # R51e: type=bug spec must have Fix Scope section (20260714o)
+    spec_type_match = re.search(r">\s*(?:类型|Type):\s*(\S+)", content)
+    if spec_type_match and spec_type_match.group(1) == "bug":
+        if "## 修复范围" not in content and "## Fix Scope" not in content:
+            issues.append({
+                "severity": "error",
+                "msg": "type=bug spec missing Fix Scope section (R51e) - declare fixed locations + intentionally unchanged adjacent locations",
+            })
+
     errors = [i for i in issues if i["severity"] == "error"]
     warnings = [i for i in issues if i["severity"] == "warning"]
 
