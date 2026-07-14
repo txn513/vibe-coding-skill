@@ -82,6 +82,40 @@ Discovery → Spec → Plan → Execute → Verify → Review → Release → Ob
 - 当 Agent 发现 Skill 升级候选时，可以主动询问 `发现 N 条可能的 Skill 治理升级候选，是否应用？`，但在用户明确确认前，不得修改 Skill 核心
 - 如果项目规则与 Skill 默认规则冲突，项目规则优先，但必须记录冲突原因
 
+## 项目级治理建议（参考 — 不强制，按需采纳）
+
+> 以下建议来自 Skill 升级评审中被判定为"项目级"的治理点。
+> 它们不强制，但能显著提升项目质量。按需采纳到项目 AGENTS.md 或 .agents/rules/ 中。
+
+### 候选提案规范
+
+- **写候选时必须附 PoC 数据**：任何 `.agents/skill-upgrade-candidates/` 下的提案文件，必须包含实测数据（触发次数、影响范围、边界 case），不能只写"理论上应该这么检查"。没有数据的提案容易被拒绝。
+- **单条优于打包**：一次提 1 条候选比打包提 8 条接受率高。聚焦 + 数据 > 广泛 + 猜测。
+- **区分 Skill 级 vs 项目级**：提案必须明确标注是 Skill 级（跨项目通用）还是项目级（本项目特定）。Skill 级不含项目业务知识。
+
+### Bug 治理
+
+- **修复前必读完整治理文件**：修 bug 前不要只看 bug-inbox，还要读 BUG_INDEX.md、STATUS.md、CHANGELOG.md 等（如果项目有这些文件）。避免基于不完整信息选错 bug 或漏看根因。
+- **修复范围必须声明**：type=bug 的 spec 必须有 `## 修复范围 (Fix Scope)` 段，声明已修复位置 + 故意不改的相邻位置 + 判断依据。
+- **override_approver 不是 self-override**：如果 solo-session 必须走 override，指定一个 future session ID 作为 reviewer，不能"我自己 override 我自己"。
+
+### 代码质量
+
+- **diff 审查必须认真阅读代码**：`vibe commit` step 1 展示 diff 后，必须逐行检查是否有意外修改、scope creep、逻辑回归。不能只看 stat 就加 `--reviewed`。
+- **改代码必须检查所有调用点**：修改函数签名/行为后，必须 grep 所有调用点，不能口头声称"已检查"。
+- **bug fix 必须有双向证据**：fix 后 PASS + fix 前 FAIL，缺一不可。只有 PASS 证据 = fix 可能无效。
+
+### Retro 质量
+
+- **Retro 必须包含失败模式标签**：每个 retro 必须引用至少一个 failure mode label（Rule 25 taxonomy），不能只写现象不归类。
+- **Retro action items 必须有终端状态**：`[ ]` 空项不能跨多个 retro 周期不关闭。必须推进到 `[active: rule-id]`、`[deferred: reason]` 或 `[superseded: other-id]`。
+
+### 流程纪律
+
+- **Done 后必须写 Retro**：spec 到达 done 后不能跳过 retro。`vibe next` 会强制推荐先写 retro。
+- **Governance batch 允许但必须声明根因**：单根因的 governance batch（如 auto-refresh 70 plans）允许，但 commit message 必须声明根因 + review-summary 解释。
+- **禁止多 spec 聚合 commit**：一次 commit 涉及多个 spec + 所有 evidence = 隐藏幽灵 spec，违反 R8.46。
+
 ## 技术栈
 
 - **语言/运行时**: {{LANGUAGE_RUNTIME}}
