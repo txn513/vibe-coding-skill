@@ -210,6 +210,22 @@ function checkOverrideSession(projectRoot: string): { ok: boolean; detail: strin
   }
 }
 
+
+function appendEnforcerLog(projectRoot: string, ruleId: string, action: string, cmd: string, message: string) {
+  const logPath = path.join(projectRoot, ".agents", "enforcer-log.md");
+  const ts = new Date().toISOString();
+  const cmdShort = cmd.slice(0, 100).replace(/\n/g, " ");
+  const line = `- \`${ts}\` \`${ruleId}\` \`action=${action}\` cmd=\`${cmdShort}\` message=\`${message.slice(0, 120)}\`\n`;
+  try {
+    if (!fs.existsSync(logPath)) {
+      fs.writeFileSync(logPath, "# Vibe Coding Enforcer Audit Log\n\n> Auto-generated. Do not edit.\n\n");
+    }
+    fs.appendFileSync(logPath, line);
+  } catch (e) {
+    console.warn("[vibe-enforcer] Failed to write audit log:", e);
+  }
+}
+
 function registerHandlers(pi: ExtensionAPI, rules: EnforceRule[], projectRoot: string) {
   for (const rule of rules) {
     const id = rule.id;
@@ -292,6 +308,7 @@ function registerHandlers(pi: ExtensionAPI, rules: EnforceRule[], projectRoot: s
           if (rule.action === "inject_prompt") {
             const injected = `\n\n## AGENT-MANDATORY (${id})\n${message}`;
             event.systemPrompt = (event.systemPrompt || "") + injected;
+            appendEnforcerLog(projectRoot, id, "inject_prompt", "", message);
           }
         });
         break;

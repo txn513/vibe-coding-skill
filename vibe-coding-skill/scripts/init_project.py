@@ -120,6 +120,7 @@ def init_project(path: str, project_type: str = "generic", force: bool = False) 
 .agents/archive/
 .agents/evidence/*/verify-reproduction.md
 .agents/evidence/*/verify-fix-regression.md
+.agents/enforcer-log.md
 """
         with open(gitignore_path, "w", encoding="utf-8") as f:
             f.write(gitignore_content)
