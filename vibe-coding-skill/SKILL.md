@@ -892,6 +892,24 @@ artifacts merely because a template exists.
     Claude, Cursor) that lack session IDs are unaffected - the gate
     only enforces when session context is available.
 
+<!-- ENFORCE: id=R68, hook=tool_call, tool=write, action=block_spec_state, message=写业务代码前 spec 必须 in-progress，禁止跳过流程直接写代码 -->
+<!-- ENFORCE: id=R68e, hook=tool_call, tool=edit, action=block_spec_state, message=写业务代码前 spec 必须 in-progress，禁止跳过流程直接写代码 -->
+
+    68. **Write-gate: spec state precondition**: Before writing business
+    code (files under `src/`, `backend/`, `frontend/`, `lib/`, `app/`,
+    or any path listed in `workflow.json.code_paths`), the project
+    MUST have at least one spec in `in-progress` status. This gate
+    prevents the observed failure mode where an agent skips the
+    entire spec/plan/verify workflow and writes code directly from a
+    user prompt. The gate only blocks `write`/`edit` tool calls that
+    target business code — documentation, tests, config, and
+    `.agents/` files are exempt. If no in-progress spec exists, the
+    gate blocks with a message directing the agent to create a spec
+    first. Projects without `.agents/` (non-vibe projects) are
+    automatically skipped. Emergency fixes can bypass via
+    `--force` on the `vibe advance` command to push a spec to
+    in-progress without full review.
+
 66. **Session recovery: Agent MUST re-read project state after context loss**: When an Agent's session is interrupted, compacted, restarted, or otherwise loses in-memory context, the Agent MUST NOT continue work based on memory alone. Before doing anything else, the Agent MUST run `vibe status` followed by `vibe next` to re-read the project's `.agents/` state (specs, plans, activity, retros, workflow.json). The Agent MUST then confirm the active spec, current phase, and any open action items with the user before proceeding. This is a structural forcing function: the `.agents/` directory is the single source of truth; an Agent's memory is ephemeral and unreliable after a session break. For multi-turn conversations where `vibe status` was already run in the current session, the Agent MAY skip the re-read, provided it can cite the last known state from the conversation context. When the Agent cannot determine whether the conversation is a continuation or a fresh session, it MUST default to re-reading. This rule applies regardless of the host platform (Codex, Claude Code, Cursor, or any other agent runner).
 
     **Host Integration Required**: The `templates/agents.md` "Session 恢复与断点续传" section MUST be treated as a mandatory system-prompt prefix. Host implementations SHOULD inject this section at the start of every new session / compact / context switch, or at minimum ensure the Agent reads AGENTS.md before the first user message. The `<!-- AGENT-MANDATORY-FIRST-ACTION -->` HTML comment in the template signals this priority to host tooling. When the host does not support automatic injection, the Agent is responsible for reading AGENTS.md explicitly on session start.

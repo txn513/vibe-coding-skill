@@ -226,6 +226,47 @@ function appendEnforcerLog(projectRoot: string, ruleId: string, action: string, 
   }
 }
 
+
+function checkWriteSpecState(projectRoot: string, filePath: string): { ok: boolean; detail: string } {
+  try {
+    // Skip non-vibe projects
+    if (!fs.existsSync(path.join(projectRoot, ".agents"))) return { ok: true, detail: "Non-vibe project" };
+
+    // Only check business code paths
+    const codePrefixes = ["src/", "backend/", "frontend/", "lib/", "app/"];
+    // Check workflow.json code_paths if available
+    const workflowPath = path.join(projectRoot, ".agents", "workflow.json");
+    if (fs.existsSync(workflowPath)) {
+      try {
+        const workflow = JSON.parse(fs.readFileSync(workflowPath, "utf-8"));
+        if (Array.isArray(workflow.code_paths)) {
+          for (const cp of workflow.code_paths) codePrefixes.push(cp);
+        }
+      } catch {}
+    }
+
+    const isBusinessCode = codePrefixes.some(p => filePath.startsWith(p));
+    if (!isBusinessCode) return { ok: true, detail: "Non-business code: " + filePath };
+
+    // Check for in-progress spec
+    const specsDir = path.join(projectRoot, ".agents", "specs");
+    if (!fs.existsSync(specsDir)) return { ok: true, detail: "No specs dir" };
+
+    const specFiles = fs.readdirSync(specsDir).filter(f => f.endsWith(".md") && !f.endsWith("-amendments.md"));
+    for (const sf of specFiles) {
+      const content = fs.readFileSync(path.join(specsDir, sf), "utf-8");
+      const statusMatch = content.match(/>\s*(?:Status|状态):\s*(\S+)/);
+      if (statusMatch && (statusMatch[1] === "in-progress" || statusMatch[1] === "review")) {
+        return { ok: true, detail: "Has in-progress spec: " + sf.replace(".md", "") };
+      }
+    }
+
+    return { ok: false, detail: "No spec in in-progress. Create one first: vibe spec <name>" };
+  } catch (e) {
+    return { ok: true, detail: "Error: " + e };
+  }
+}
+
 function registerHandlers(pi: ExtensionAPI, rules: EnforceRule[], projectRoot: string) {
   for (const rule of rules) {
     const id = rule.id;

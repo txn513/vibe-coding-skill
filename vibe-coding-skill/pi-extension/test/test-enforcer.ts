@@ -121,8 +121,8 @@ function testSuite() {
   const { rules } = loadEnforcer();
 
   // Test 1: Parse all rules
-  console.log(`1. Rule count: expect 13, got ${rules.length}`);
-  assert(rules.length === 13, `Parsed ${rules.length} ENFORCE rules`);
+  console.log(`1. Rule count: expect 15, got ${rules.length}`);
+  assert(rules.length === 15, `Parsed ${rules.length} ENFORCE rules`);
 
   // Test 2: Each rule has required fields
   console.log("\n2. Rule schema validation:");
@@ -137,11 +137,15 @@ function testSuite() {
   const toolCallRules = rules.filter((r) => r.hook === "tool_call");
   for (const r of toolCallRules) {
     assert(!!r.tool, `${r.id}: has tool=${r.tool}`);
-    assert(!!r.match, `${r.id}: has match regex`);
+    assert(!!r.match || r.id.startsWith("R68"), `${r.id}: has match regex (or is path-based like R68)`);
     // Verify regex compiles
     try {
-      new RegExp(r.match, "i");
-      assert(true, `${r.id}: regex compiles`);
+      if (r.match) {
+        new RegExp(r.match, "i");
+        assert(true, `${r.id}: regex compiles`);
+      } else {
+        assert(true, `${r.id}: no regex (path-based)`);
+      }
     } catch (e) {
       assert(false, `${r.id}: regex COMPILE ERROR`);
     }
