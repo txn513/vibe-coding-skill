@@ -2459,8 +2459,8 @@ def _list_plans(dir: str) -> list[dict]:
             path = os.path.join(dir, f)
             with open(path) as fh:
                 content = fh.read()
-            done = len(re.findall(r"- \[x\]", content))
-            total = len(re.findall(r"- \[.\]", content))
+            done = len(re.findall(r"^\s*- \[x\]", content, re.MULTILINE))
+            total = len(re.findall(r"^\s*- \[.\]", content, re.MULTILINE))
             result.append({
                 "name": f.replace(".md", ""),
                 "done": done,

@@ -882,6 +882,20 @@ artifacts merely because a template exists.
 
     **Host Integration Required**: The `templates/agents.md` "Session 恢复与断点续传" section MUST be treated as a mandatory system-prompt prefix. Host implementations SHOULD inject this section at the start of every new session / compact / context switch, or at minimum ensure the Agent reads AGENTS.md before the first user message. The `<!-- AGENT-MANDATORY-FIRST-ACTION -->` HTML comment in the template signals this priority to host tooling. When the host does not support automatic injection, the Agent is responsible for reading AGENTS.md explicitly on session start.
 
+    **Governance batch boundary**: A single commit may touch many
+    `.agents/` files when all changes share one root cause (e.g.
+    project guidance auto-refresh triggers 70 plan digest updates,
+    or a schema version bump). This is distinct from multi-spec
+    aggregation (which hides "ghost specs" and is forbidden). A
+    governance batch is allowed when:
+    1. All changes are auto-refresh output (digest headers only) or
+       ≤ 5 lines per file, AND
+    2. The commit message declares the single root cause, AND
+    3. The review-summary explains why a single batch is justified.
+    The auto-stage mechanism (2.7/2.8 segments) ensures refreshed
+    files enter the commit rather than staying dirty.
+
+
 ## State Model
 
 Normal states are:
