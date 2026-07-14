@@ -540,6 +540,18 @@ def doctor(project_root: str) -> dict:
             print("   ⚠️  跳过率超过 50%，考虑在 workflow.json 加 adjacent_protection.required_for 配置项")
         print(f"<!-- vibe:adjacent_protection: total={total} protected={protected} skipped={skipped} -->")
     print(f"<!-- vibe:doctor_health: {health} issues={len(issues)} warnings={len(warnings)} -->")
+        # ENFORCE consistency check (Pi Extension vs CLI gate parity)
+    from enforce_consistency_check import check_cli_implementations, _find_skill_md
+    skill_md = _find_skill_md()
+    for w in check_cli_implementations(skill_md):
+        warnings.append(f"ENFORCE parity: {w}")
+
+    # ENFORCE consistency check (Pi Extension vs CLI gate parity)
+    from enforce_consistency_check import check_cli_implementations, _find_skill_md
+    skill_md = _find_skill_md()
+    for w in check_cli_implementations(skill_md):
+        warnings.append(f"ENFORCE parity: {w}")
+
     return {"workflow": workflow, "issues": issues, "warnings": warnings}
 
 
