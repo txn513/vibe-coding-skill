@@ -546,6 +546,33 @@ def _is_git_repo(project_root: str) -> bool:
     return rc == 0
 
 
+
+def _force_add_ignored_agents_files(project_root: str) -> None:
+    """Auto git-add -f any .agents/ files that are modified but gitignored.
+
+    Prevents the failure mode where agent modifies .agents/ files
+    (retro status, candidate archives, etc.) but git add -A silently
+    skips them because .gitignore blocks the directory.
+    """
+    # Find .agents/ files that are modified/created but ignored
+    rc, out, _ = _run(["git", "status", "--porcelain"], project_root)
+    if rc != 0:
+        return
+    ignored_agents = []
+    for line in out.splitlines():
+        if not line.strip() or len(line) < 4:
+            continue
+        fpath = line[3:].strip()
+        if not fpath.startswith(".agents/"):
+            continue
+        # Check if this file is gitignored
+        rc2, _, _ = _run(["git", "check-ignore", fpath], project_root)
+        if rc2 == 0:  # Exit 0 = IS ignored
+            ignored_agents.append(fpath)
+    if ignored_agents:
+        _run(["git", "add", "-f", "--"] + ignored_agents, project_root)
+        print(f"   📦 自动 force-add {len(ignored_agents)} 个被 gitignore 的 .agents/ 文件")
+
 def commit(
     project_root: str,
     commit_argv: list[str],
@@ -596,6 +623,7 @@ def commit(
         # from a previous vibe commit would bleed into this one.
         _run(["git", "reset", "HEAD"], project_root)
         _run(["git", "add", "--"] + paths, project_root)
+        _force_add_ignored_agents_files(project_root)
         print(f"ℹ️  --paths: 只 stage 了 {len(paths)} 个路径。")
     elif staged_only:
         # Honour whatever the agent already staged; do NOT auto-add.
@@ -604,6 +632,7 @@ def commit(
         staged = _has_staged_changes(project_root)
         if not staged:
             _run(["git", "add", "-A"], project_root)
+            _force_add_ignored_agents_files(project_root)
         else:
             print("ℹ️  worktree 已有 staged 改动；只 commit 已 staged 内容（精细拆分模式）。")
             print("   如要 commit 全部 dirty 改动，先 `git reset HEAD` 撤回 staged，再用 `vibe commit`。")

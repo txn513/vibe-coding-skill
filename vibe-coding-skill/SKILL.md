@@ -924,6 +924,17 @@ artifacts merely because a template exists.
 
 <!-- ENFORCE: id=R30b, hook=tool_call, tool=bash, match=vibe(?:\.py)?\s+advance.*released, action=block_no_changelog, message=advance to released 需要 changelog -->
 
+<!-- ENFORCE: id=R69, hook=tool_call, tool=bash, match=vibe(?:\.py)?\s+commit, action=check_ignored_agents, message=.agents/ 文件被 gitignore 时 commit 必须 force-add，否则 ledger sync 假阳性 -->
+
+    69. **.agents/ force-add gate**: When committing, if any
+    `.agents/` file is modified but blocked by `.gitignore`, the
+    commit wrapper must automatically `git add -f` those files.
+    Agent must NOT assume "I edited the file, so it's staged".
+    Physical file changes and git index are two different layers.
+    If `.gitignore` shields `.agents/archive/` or similar, changes
+    to those files are invisible to normal `git add -A`.
+
+
     30b. **Changelog gate**: When advancing to released, a
     changelog entry must exist. Bypass: --force --skip-changelog.
 
