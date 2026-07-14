@@ -9,7 +9,7 @@ from pathlib import Path
 
 from common import atomic_write_json
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 
 def default_workflow(project_name: str) -> dict:
@@ -86,6 +86,7 @@ def default_workflow(project_name: str) -> dict:
         },
         "bugs": {
             "inbox": False,
+            "ledger": False,
         },
     }
 
@@ -150,6 +151,12 @@ def migrate(value: dict, project_name: str) -> bool:
         # Drop legacy features dict (was only ever used for inbox).
         value.pop("features", None)
         changed = True
+    # Deep merge: ensure bugs.ledger exists (added in schema 11)
+    bugs_block = value.get("bugs", {})
+    if isinstance(bugs_block, dict) and "ledger" not in bugs_block:
+        bugs_block["ledger"] = False
+        changed = True
+
     if value.get("schema_version") != SCHEMA_VERSION:
         value["schema_version"] = SCHEMA_VERSION
         changed = True

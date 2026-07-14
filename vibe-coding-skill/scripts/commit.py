@@ -1113,6 +1113,45 @@ def commit(
             print(f"   共刷新 {refreshed} 个 plan digest")
         print()
 
+
+    # 2.8 Auto-sync bug ledger when .agents/bugs/ files change (2026-07-14g).
+    # If workflow.json bugs.ledger is enabled, any change to bug ledger
+    # files triggers an automatic sync to keep INDEX consistent.
+    def _has_bug_ledger_changes() -> bool:
+        if not workflow.get("bugs", {}).get("ledger"):
+            return False
+        ledger_prefixes = (
+            ".agents/bugs/",
+        )
+        for fpath in _changed_file_paths(project_root, staged_only, paths):
+            for prefix in ledger_prefixes:
+                if fpath.startswith(prefix):
+                    return True
+        return False
+
+    if _has_bug_ledger_changes():
+        print()
+        print("🔄 bug ledger 变化 — 自动同步 BUG_INDEX (2026-07-14g):")
+        bugs_dir = os.path.join(project_root, ".agents", "bugs")
+        sync_script = os.path.join(bugs_dir, "sync_ledger.py")
+        if os.path.exists(sync_script):
+            try:
+                import subprocess as _sp3
+                _r = _sp3.run(
+                    ["python3", sync_script, "--apply"],
+                    capture_output=True, text=True, timeout=30,
+                )
+                if _r.returncode == 0:
+                    print(_r.stdout[-500:])
+                else:
+                    _err = _r.stderr.strip()[:200] if _r.stderr else "unknown"
+                    print(f"   ⚠️  sync failed: {_err}")
+            except Exception as _e:
+                print(f"   ⚠️  sync failed: {_e}")
+        else:
+            print("   ℹ️  sync_ledger.py 不在项目 (skip)")
+        print()
+
     # 3. Commit — hand off to git, with Rule 53 trailer
     # Adding a git trailer so doctor can detect commits that bypassed
     # vibe commit (raw `git commit` won't have this trailer).

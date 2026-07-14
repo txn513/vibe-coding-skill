@@ -57,7 +57,9 @@ def init_project(path: str, project_type: str = "generic", force: bool = False) 
     plans_dir = os.path.join(agents_dir, "plans")
     reviews_dir = os.path.join(agents_dir, "reviews")
 
-    for d in [agents_dir, rules_dir, specs_dir, plans_dir, reviews_dir]:
+    bugs_dir = os.path.join(agents_dir, "bugs")
+
+    for d in [agents_dir, rules_dir, specs_dir, plans_dir, reviews_dir, bugs_dir]:
         os.makedirs(d, exist_ok=True)
 
     # Generate AGENTS.md
