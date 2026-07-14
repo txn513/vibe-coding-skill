@@ -520,6 +520,27 @@ def _changed_files_for_plan_refresh(project_root: str, staged_only: bool, paths:
                 spec_names.append(os.path.splitext(basename)[0])
     return spec_names
 
+def _changed_file_paths(project_root: str, staged_only: bool, paths: list[str] | None) -> list[str]:
+    """Return raw file paths in the current change set (unfiltered).
+
+    Used by commit() step 2.7 to detect project guidance file changes.
+    Unlike _changed_files_for_plan_refresh which returns spec names,
+    this returns the original file paths."""
+    if paths:
+        return list(paths)
+    if staged_only:
+        rc, out, _ = _run(["git", "diff", "--cached", "--name-only"], project_root)
+        return out.splitlines() if rc == 0 else []
+    rc, out, _ = _run(["git", "status", "--porcelain"], project_root)
+    if rc != 0:
+        return []
+    result = []
+    for line in out.splitlines():
+        if len(line) > 3 and line[2] == " ":
+            result.append(line[3:].strip())
+    return result
+
+
 def _is_git_repo(project_root: str) -> bool:
     rc, _, _ = _run(["git", "rev-parse", "--git-dir"], project_root)
     return rc == 0
@@ -1051,7 +1072,7 @@ def commit(
             "AGENTS.md",
             ".agents/workflow.json",
         )
-        for fpath in _changed_files_for_plan_refresh(project_root, staged_only, paths):
+        for fpath in _changed_file_paths(project_root, staged_only, paths):
             for prefix in guidance_prefixes:
                 if fpath.startswith(prefix) or fpath == prefix:
                     return True
