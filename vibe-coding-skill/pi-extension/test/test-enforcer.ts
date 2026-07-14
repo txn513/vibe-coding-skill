@@ -121,8 +121,8 @@ function testSuite() {
   const { rules } = loadEnforcer();
 
   // Test 1: Parse all rules
-  console.log(`1. Rule count: expect 12, got ${rules.length}`);
-  assert(rules.length === 12, `Parsed ${rules.length} ENFORCE rules`);
+  console.log(`1. Rule count: expect 13, got ${rules.length}`);
+  assert(rules.length === 13, `Parsed ${rules.length} ENFORCE rules`);
 
   // Test 2: Each rule has required fields
   console.log("\n2. Rule schema validation:");

@@ -176,6 +176,40 @@ function checkCallSites(projectRoot: string): { ok: boolean; detail: string } {
 
 // ── Handlers ─────────────────────────────────────────────
 
+
+function checkOverrideSession(projectRoot: string): { ok: boolean; detail: string } {
+  try {
+    const sessionFile = process.env.PI_SESSION_FILE || "";
+    const sessionId = process.env.PI_SESSION_ID || "";
+    let currentSession = "";
+    if (sessionFile) {
+      const basename = path.basename(sessionFile);
+      const parts = basename.split("_");
+      if (parts.length >= 2) currentSession = parts[parts.length - 1].replace(".jsonl", "");
+    }
+    if (!currentSession && sessionId) currentSession = sessionId;
+    if (!currentSession) return { ok: true, detail: "No session context, gate skipped" };
+    const activityFile = path.join(projectRoot, ".agents", "activity.md");
+    if (!fs.existsSync(activityFile)) return { ok: true, detail: "No activity.md" };
+    const actContent = fs.readFileSync(activityFile, "utf-8");
+    const lines = actContent.split("\n");
+    let lastOverrideActor = "";
+    for (const line of lines) {
+      if (line.includes("override_approver")) {
+        const actorMatch = line.match(/Actor:\s*(\S+)/);
+        if (actorMatch) lastOverrideActor = actorMatch[1];
+      }
+    }
+    if (!lastOverrideActor) return { ok: true, detail: "No override_approver found" };
+    if (lastOverrideActor === currentSession) {
+      return { ok: false, detail: "Self-override: actor " + lastOverrideActor + " = current session" };
+    }
+    return { ok: true, detail: "Override actor " + lastOverrideActor + " != session " + currentSession };
+  } catch (e) {
+    return { ok: true, detail: "Error: " + e };
+  }
+}
+
 function registerHandlers(pi: ExtensionAPI, rules: EnforceRule[], projectRoot: string) {
   for (const rule of rules) {
     const id = rule.id;
@@ -241,6 +275,12 @@ function registerHandlers(pi: ExtensionAPI, rules: EnforceRule[], projectRoot: s
           // R62: call sites
           if (id === "R62" && rule.action === "check_call_sites") {
             const result = checkCallSites(projectRoot);
+            if (!result.ok) ctx.ui.notify(`⚠️ ${id}: ${result.detail}`, "warning");
+          }
+
+          // R67: override session separation
+          if (id === "R67" && rule.action === "check_override_session") {
+            const result = checkOverrideSession(projectRoot);
             if (!result.ok) ctx.ui.notify(`⚠️ ${id}: ${result.detail}`, "warning");
           }
         });
