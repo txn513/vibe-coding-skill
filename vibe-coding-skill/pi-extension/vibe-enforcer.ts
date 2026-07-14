@@ -1,13 +1,3 @@
-/**
- * Vibe Coding Enforcer Extension for Pi Agent
- *
- * Reads ENFORCE comments from SKILL.md and auto-generates runtime guards.
- * Single source of truth: modify SKILL.md, restart Pi, rules sync automatically.
- *
- * Installation:
- *   ln -s $(pwd)/pi-extension/vibe-enforcer.ts ~/.pi/agent/extensions/vibe-enforcer.ts
- */
-
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -19,7 +9,6 @@ interface EnforceRule {
   tool?: string;
   match?: string;
   message?: string;
-  spec_status?: string;
 }
 
 function findSkillPath(): string | null {
@@ -87,14 +76,14 @@ export default function (pi: ExtensionAPI) {
           if (rule.match) {
             const regex = new RegExp(rule.match, "i");
             if (regex.test(cmd)) {
-              ctx.ui.notify(`⚠️ ${message}`, "warning");
+              ctx.ui.notify(`⚠️ ${id}: ${message}`, "warning");
               if (rule.action === "block") {
                 return { block: true, reason: `${id}: ${message}` };
               }
             }
           }
         });
-        console.log(`[vibe-enforcer] Registered ${id}: tool_call hook (tool=${rule.tool}, match=${rule.match})`);
+        console.log(`[vibe-enforcer] ${id}: tool_call (tool=${rule.tool}, match=${rule.match})`);
         break;
       }
 
@@ -105,19 +94,20 @@ export default function (pi: ExtensionAPI) {
             event.systemPrompt = (event.systemPrompt || "") + injected;
           }
         });
-        console.log(`[vibe-enforcer] Registered ${id}: before_agent_start inject_prompt`);
+        console.log(`[vibe-enforcer] ${id}: before_agent_start inject_prompt`);
         break;
       }
 
       case "agent_end": {
         pi.on("agent_end", async (_event, ctx) => {
-          if (rule.action === "require_retro" && rule.spec_status === "done") {
-            // Advisory only — cannot retroactively inspect .agents/ state here
-            // Extension would need custom logic. For now, just notify.
+          if (rule.action === "require_retro") {
             ctx.ui.notify(`📝 ${message}`, "info");
           }
+          if (rule.action === "check_gates") {
+            ctx.ui.notify(`🔒 ${message}`, "info");
+          }
         });
-        console.log(`[vibe-enforcer] Registered ${id}: agent_end notify`);
+        console.log(`[vibe-enforcer] ${id}: agent_end notify`);
         break;
       }
 

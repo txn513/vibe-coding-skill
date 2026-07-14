@@ -81,13 +81,16 @@ artifacts merely because a template exists.
 
 ## Core Rules
 
+<!-- ENFORCE: id=R1, hook=agent_end, action=check_gates, message=确保所有 gate 通过后才确认完成 -->
 1. Treat Agent output as a proposal until required gates pass.
 2. Bind plans, prompts, evidence, and reviews to the requirement version,
    durable project policy, and relevant source snapshot.
 3. Ignore mutable workflow status and role assignments when computing
    requirement/policy freshness; they must not cause false invalidation.
+<!-- ENFORCE: id=R4, hook=tool_call, tool=bash, match=vibe (verify|evidence), action=verify_commands, message=必须运行 workflow.json 配置的 verify 命令，不能只写结论 -->
 4. Execute configured project commands for mechanical checks. A written claim
    cannot replace configured command evidence.
+<!-- ENFORCE: id=R5, hook=tool_call, tool=bash, match=vibe next.*review, action=check_identity, message=review 必须与 builder 不同身份 -->
 5. Validate actor and declared role. Separated roles (reviewer, releaser,
    observer) must use a different identity from the builder, and the spec's
    risk level determines which transitions enforce this. The set of risk
@@ -137,6 +140,7 @@ artifacts merely because a template exists.
 8. Redact common credential-shaped values before persisting command output.
 9. Keep retrospective learning project-local. Add only evidence-backed rules,
    mark them proposed until adopted, and prune stale guidance.
+<!-- ENFORCE: id=R10, hook=tool_call, tool=bash, match=vibe evidence.*verify passed, action=check_bug_evidence, message=bug fix 必须有 reproduction + fix-regression 双向证据 -->
 10. For bug fixes: require evidence that the bug reproduced before the fix and
     no longer reproduces after. When a bug is a regression from a prior change,
     mark the regression source; review the original spec's retro for root causes.
@@ -224,6 +228,7 @@ artifacts merely because a template exists.
     candidates require explicit human review and a boundary audit.
 21. Do not silently expand into deployment orchestration, monitoring, issue
     tracking, or business-domain knowledge. Integrate external systems instead.
+<!-- ENFORCE: id=R22, hook=tool_call, tool=bash, match=vibe next, action=check_stage_transition, message=advance 前必须检查 gate 条件 -->
 22. **Stage-transition gate**: Before advancing any spec's status, the Agent must
     run `vibe next` (or equivalent check) to confirm all gates for the target
     status are satisfied. After advancing, the Agent must run `vibe status` (or
@@ -255,6 +260,7 @@ artifacts merely because a template exists.
     before listing fixes. Prefer the shared failure taxonomy when it fits so
     that later `self_analyze` runs can aggregate patterns across multiple
     retros.
+<!-- ENFORCE: id=R25, hook=tool_call, tool=bash, match=vibe retro, action=check_failure_labels, message=retro 必须引用 failure mode label，不能只写现象 -->
     25.1 **Failure mode labels are advisory triggers, not recovery playbooks**:
         When a retro names a shared-failure-mode label from the taxonomy
         (single-point verified / composed-path missing, steady-state
