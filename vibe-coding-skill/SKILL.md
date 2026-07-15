@@ -954,7 +954,7 @@ artifacts merely because a template exists.
     `--force` on the `vibe advance` command 
 <!-- ENFORCE: id=R53b, hook=tool_call, tool=bash, match=vibe(?:\.py)?\s+commit.*--reviewed, action=block_without_review, message=必须先跑 vibe commit (step 1) 看 diff，才能加 --reviewed -->
 
-<!-- ENFORCE: id=R53c, hook=tool_call, tool=bash, match=vibe(?>\.py)?\s+commit(?!.*--quick), action=block_governance_batch, message=governance文件>5个时必须分commit或用--quick -->
+<!-- ENFORCE: id=R53c, hook=tool_call, tool=bash, match=vibe(?:\.py)?\s+commit(?!.*--quick), action=block_governance_batch, message=governance文件>5个时必须分commit或用--quick -->
 
     53c. **Governance batch review gate**: When committing, if the
     staged set includes both business code (src/, backend/,
@@ -978,7 +978,7 @@ artifacts merely because a template exists.
     for async DB calls, (3) temp async DB fixture as last
     resort. Never run real async DB writes in sandbox.
 
-<!-- ENFORCE: id=R5c, hook=tool_call, tool=bash, match=vibe(?>\.py)?\s+advance.*review, action=block_solo_review, message=solo session review必须声明待独立reviewer验证 -->
+<!-- ENFORCE: id=R5c, hook=tool_call, tool=bash, match=vibe(?:\.py)?\s+advance.*review, action=block_solo_review, message=solo session review必须声明待独立reviewer验证 -->
 
     5c. **Solo session review declaration**: When advancing to
     review in a solo-session (builder == reviewer same session),
@@ -988,7 +988,7 @@ artifacts merely because a template exists.
     follow-up action item to validate by a future session.
     This prevents self-review from being silently accepted.
 
-<!-- ENFORCE: id=R60f, hook=tool_call, tool=bash, match=vibe(?>\.py)?\s+advance.*done, action=block_unresolved_followup, message=retro含follow-up但未建draft spec不能advance done -->
+<!-- ENFORCE: id=R60f, hook=tool_call, tool=bash, match=vibe(?:\.py)?\s+advance.*done, action=block_unresolved_followup, message=retro含follow-up但未建draft spec不能advance done -->
 
     60f. **Retro follow-up resolution gate**: When advancing a
     spec to done, if the retro contains a `[follow-up: <id>]`
