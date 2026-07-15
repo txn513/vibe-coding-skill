@@ -38,7 +38,7 @@ function findProjectRoot(cwd: string): string {
   return cwd;
 }
 
-function parseEnforceComments(content: string): EnforceRule[] {
+function parseEnforceComments(content: string, projectRoot: string): EnforceRule[] {
   const rules: EnforceRule[] = [];
   const regex = /<!--\s*ENFORCE:\s*([^>]+)\s*-->/g;
   let m: RegExpExecArray | null;
@@ -55,6 +55,16 @@ function parseEnforceComments(content: string): EnforceRule[] {
     }
     if (rule.id && rule.hook && rule.action) {
       rules.push(rule as EnforceRule);
+      // R6.10: regex compile 检测，防静默 skip
+      if (rule.match) {
+        try {
+          new RegExp(rule.match);
+        } catch (e) {
+          const msg = `[FATAL] ENFORCE rule ${rule.id} match regex invalid: ${e instanceof Error ? e.message : String(e)}`;
+          console.error(msg);
+          appendEnforcerLog(projectRoot, rule.id, "error", "", msg);
+        }
+      }
     } else {
       console.warn("[vibe-enforcer] Skipped malformed ENFORCE rule:", raw);
     }
@@ -397,7 +407,7 @@ export default function (pi: ExtensionAPI) {
 
     try {
       const content = fs.readFileSync(skillPath, "utf-8");
-      rules = parseEnforceComments(content);
+      rules = parseEnforceComments(content, projectRoot);
       console.log(`[vibe-enforcer] Loaded ${rules.length} rules:`);
       for (const r of rules) {
         console.log(`  - ${r.id}: ${r.hook}/${r.action}`);

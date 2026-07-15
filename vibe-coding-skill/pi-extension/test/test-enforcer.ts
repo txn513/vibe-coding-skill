@@ -267,3 +267,48 @@ function testSuite() {
 }
 
 testSuite();
+
+// ── R6.10: Regex compile error detection test ─────────────
+
+function testRegexCompileError() {
+  console.log("\n=== R6.10 Regex Compile Error Detection ===\n");
+
+  // R99 has a valid regex pattern (just like any normal ENFORCE rule)
+  // R98 has an invalid regex pattern (unclosed parenthesis)
+  const invalidContent = `
+<!-- ENFORCE: id=R99, hook=tool_call, tool=bash, match=vibe\\s+test, action=block, message=valid -->
+<!-- ENFORCE: id=R98, hook=tool_call, tool=bash, match=vibe(test, action=block, message=invalid -->
+`;
+
+  const rules: Array<Record<string, string>> = [];
+  const regex = /<!--\s*ENFORCE:\s*([^>]+)\s*-->/g;
+  let m: RegExpExecArray | null;
+  let compileErrors = 0;
+
+  while ((m = regex.exec(invalidContent)) !== null) {
+    const raw = m[1].trim();
+    const pairs = raw.split(",").map((p) => p.trim());
+    const rule: Record<string, string> = {};
+    for (const pair of pairs) {
+      const eq = pair.indexOf("=");
+      if (eq < 0) continue;
+      rule[pair.slice(0, eq).trim()] = pair.slice(eq + 1).trim();
+    }
+    if (rule.id && rule.hook && rule.action) {
+      rules.push(rule);
+      if (rule.match) {
+        try {
+          new RegExp(rule.match);
+        } catch (e) {
+          compileErrors++;
+          console.log(`  R6.10 detected invalid regex for ${rule.id}: ${rule.match}`);
+        }
+      }
+    }
+  }
+
+  assert(rules.length === 2, "Parsed 2 rules (1 valid + 1 invalid regex)");
+  assert(compileErrors === 1, `R6.10 detected 1 regex compile error (got ${compileErrors})`);
+}
+
+testRegexCompileError();
