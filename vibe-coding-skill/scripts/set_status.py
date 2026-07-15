@@ -34,6 +34,7 @@ from workflow_state import (
     risk_profile,
     spec_metadata,
 )
+import doctor_project
 
 VALID_STATUSES = [
     "draft", "spec-ready", "in-progress", "review", "released", "done", "blocked",
@@ -51,6 +52,17 @@ ALLOWED_TRANSITIONS = {
     "superseded": set(),
 }
 PLAN_PROGRESS_WARNING_THRESHOLD = 80
+
+
+def _is_critical_warning(warning):
+    critical_keywords = [
+        "retro gap",
+        "reproduction",
+        "runtime trace",
+        "missing dependency",
+    ]
+    w_lower = warning.lower()
+    return any(kw in w_lower for kw in critical_keywords)
 
 
 def set_status(
@@ -110,6 +122,27 @@ def set_status(
             profile, workflow, actor, role,
             spec_type=metadata_fields.get("spec_type", ""),
         )
+
+    # Doctor critical warnings advisory (2026-07-12).
+    # Soft advisory: doesn't block advance, but surfaces project-level
+    # debt so agents don't silently ignore it.
+    if new_status and not no_checklist:
+        try:
+            doctor_result = doctor_project.doctor(project_root)
+            critical = [w for w in doctor_result.get("warnings", [])
+                        if _is_critical_warning(w)]
+            if critical:
+                print()
+                print(f"🚨 项目有 {len(critical)} 个关键 doctor 问题未处理 (推进 {spec_name} 前建议清理):")
+                for w in critical[:3]:
+                    print(f"   🔴 {w[:120]}")
+                if len(critical) > 3:
+                    print(f"   ... 还有 {len(critical) - 3} 个")
+                print("   💡 运行: vibe doctor <project> 查看全部")
+                print("   (advisory: 不阻塞 advance，但建议优先处理)")
+                print()
+        except Exception:
+            pass
 
     if force and not (force_reason or "").strip():
         print("❌ 使用 --force 时必须通过 --reason 记录绕过原因")

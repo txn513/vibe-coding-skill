@@ -212,6 +212,16 @@ def _run_doctor_if_needed(project_root: str, max_age_seconds: int = 60) -> dict:
     issues = result.get("issues", [])
     warnings = result.get("warnings", [])
 
+    # Categorize warnings by type for better visibility
+    categorized = {"critical": [], "warning": [], "info": []}
+    for warning in warnings:
+        if "retro gap" in warning or "reproduction" in warning:
+            categorized["critical"].append(warning)
+        elif "stale project guidance" in warning or "HEAD 已过期" in warning:
+            categorized["warning"].append(warning)
+        else:
+            categorized["info"].append(warning)
+
     if issues:
         print()
         print(f"🚨 发现 {len(issues)} 个问题 (vibe doctor auto-fire):")
@@ -221,13 +231,33 @@ def _run_doctor_if_needed(project_root: str, max_age_seconds: int = 60) -> dict:
             print(f"   ... 还有 {len(issues) - 5} 个")
         print()
 
-    if warnings:
+    # Show critical warnings first
+    if categorized["critical"]:
         print()
-        print(f"⚠️  发现 {len(warnings)} 个警告 (vibe doctor auto-fire):")
-        for warning in warnings[:5]:
-            print(f"   ⚠️ {warning}")
-        if len(warnings) > 5:
-            print(f"   ... 还有 {len(warnings) - 5} 个")
+        print(f"🚨 关键债务 {len(categorized['critical'])} 个 (影响 spec 推进):")
+        for warning in categorized["critical"][:3]:
+            print(f"   🔴 {warning[:120]}")
+        if len(categorized["critical"]) > 3:
+            print(f"   ... 还有 {len(categorized['critical']) - 3} 个")
+        print("   💡 建议优先处理后再推进新 spec")
+        print()
+
+    if categorized["warning"]:
+        print()
+        print(f"⚠️  警告 {len(categorized['warning'])} 个 (建议清理):")
+        for warning in categorized["warning"][:3]:
+            print(f"   🟡 {warning[:120]}")
+        if len(categorized["warning"]) > 3:
+            print(f"   ... 还有 {len(categorized['warning']) - 3} 个")
+        print()
+
+    if categorized["info"]:
+        print()
+        print(f"ℹ️  提示 {len(categorized['info'])} 个:")
+        for warning in categorized["info"][:3]:
+            print(f"   💡 {warning[:120]}")
+        if len(categorized["info"]) > 3:
+            print(f"   ... 还有 {len(categorized['info']) - 3} 个")
         print()
 
     doctor_cache[cache_key] = (result, now)
