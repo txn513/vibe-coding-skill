@@ -409,4 +409,99 @@ export default function (pi: ExtensionAPI) {
 
     registerHandlers(pi, rules, projectRoot);
   });
-}
+
+
+          // R53c: governance batch block
+          if (id === "R53c" && rule.action === "block_governance_batch") {
+            try {
+              const gitStatus = require("child_process").execSync("git status --porcelain", { cwd: projectRoot, encoding: "utf-8" });
+              const lines = gitStatus.split("\n").filter(l => l.trim());
+              const govFiles = lines.filter(l => {
+                const path = l.slice(3).trim();
+                return path.startsWith(".agents/");
+              });
+              const bizFiles = lines.filter(l => {
+                const path = l.slice(3).trim();
+                return !path.startsWith(".agents/") && (path.startsWith("src/") || path.startsWith("backend/") || path.startsWith("frontend/"));
+              });
+              if (govFiles.length > 5 && bizFiles.length > 0) {
+                const msg = `Governance batch: ${govFiles.length} gov files + ${bizFiles.length} biz files. Use --quick or split commits.`;
+                ctx.ui.notify(`🚫 ${id}: ${msg}`, "warning");
+                appendEnforcerLog(projectRoot, id, "block", cmd, msg);
+                return { block: true, reason: msg };
+              }
+              appendEnforcerLog(projectRoot, id, "pass", cmd, "OK");
+            } catch (e) {
+              appendEnforcerLog(projectRoot, id, "error", cmd, String(e));
+            }
+          }
+
+          // R10p: sandbox async DB block
+          if (id === "R10p" && rule.action === "block_sandbox_async_db") {
+            const isSandbox = process.env.PI_SESSION_FILE || process.env.CODEX_SANDBOX;
+            const isAsyncDb = /asyncio\.run\s*\(\s*ensure_default_admin|async\s+db|asyncio\.run/.test(cmd);
+            if (isSandbox && isAsyncDb) {
+              const msg = "Sandbox async DB detected. Downgrade: grep static → MagicMock → temp fixture. Never real async DB writes.";
+              ctx.ui.notify(`🚫 ${id}: ${msg}`, "warning");
+              appendEnforcerLog(projectRoot, id, "block", cmd, msg);
+              return { block: true, reason: msg };
+            }
+            appendEnforcerLog(projectRoot, id, "pass", cmd, "OK");
+          }
+
+          // R5c: solo session review block
+          if (id === "R5c" && rule.action === "block_solo_review") {
+            const sessionFile = process.env.PI_SESSION_FILE || "";
+            const sessionId = process.env.PI_SESSION_ID || "";
+            let currentSession = "";
+            if (sessionFile) {
+              const basename = path.basename(sessionFile);
+              const parts = basename.split("_");
+              if (parts.length >= 2) currentSession = parts[parts.length - 1].replace(".jsonl", "");
+            }
+            if (!currentSession && sessionId) currentSession = sessionId;
+            if (!currentSession) {
+              appendEnforcerLog(projectRoot, id, "skip", cmd, "No session context");
+            } else {
+              const reviewDir = path.join(projectRoot, ".agents", "reviews");
+              if (fs.existsSync(reviewDir)) {
+                const reviewFiles = fs.readdirSync(reviewDir).filter(f => f.endsWith(".md"));
+                for (const rf of reviewFiles) {
+                  const content = fs.readFileSync(path.join(reviewDir, rf), "utf-8");
+                  if (!content.includes("Solo Session Limitation") && !content.includes("独立 reviewer")) {
+                    const msg = `Review ${rf} lacks Solo Session Limitation Disclosure. Add: (1) reviewer session ID placeholder, (2) independent review pending note, (3) follow-up action.`;
+                    ctx.ui.notify(`🚫 ${id}: ${msg}`, "warning");
+                    appendEnforcerLog(projectRoot, id, "block", cmd, msg);
+                    return { block: true, reason: msg };
+                  }
+                }
+              }
+              appendEnforcerLog(projectRoot, id, "pass", cmd, "OK");
+            }
+          }
+
+          // R60f: retro follow-up block
+          if (id === "R60f" && rule.action === "block_unresolved_followup") {
+            const retrosDir = path.join(projectRoot, ".agents", "retros");
+            if (fs.existsSync(retrosDir)) {
+              const retroFiles = fs.readdirSync(retrosDir).filter(f => f.endsWith(".md"));
+              for (const rf of retroFiles) {
+                const content = fs.readFileSync(path.join(retrosDir, rf), "utf-8");
+                const followUps = content.match(/\[follow-up:\s*([^\]]+)\]/g) || [];
+                for (const fu of followUps) {
+                  const idMatch = fu.match(/\[follow-up:\s*([^\]]+)\]/);
+                  if (idMatch) {
+                    const specId = idMatch[1].trim();
+                    const specPath = path.join(projectRoot, ".agents", "specs", `${specId}.md`);
+                    if (!fs.existsSync(specPath)) {
+                      const msg = `Follow-up spec ${specId} not found. Create: vibe intent . ${specId}`;
+                      ctx.ui.notify(`🚫 ${id}: ${msg}`, "warning");
+                      appendEnforcerLog(projectRoot, id, "block", cmd, msg);
+                      return { block: true, reason: msg };
+                    }
+                  }
+                }
+              }
+              appendEnforcerLog(projectRoot, id, "pass", cmd, "OK");
+            }
+          }}

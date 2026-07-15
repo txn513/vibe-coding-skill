@@ -954,6 +954,50 @@ artifacts merely because a template exists.
     `--force` on the `vibe advance` command 
 <!-- ENFORCE: id=R53b, hook=tool_call, tool=bash, match=vibe(?:\.py)?\s+commit.*--reviewed, action=block_without_review, message=必须先跑 vibe commit (step 1) 看 diff，才能加 --reviewed -->
 
+<!-- ENFORCE: id=R53c, hook=tool_call, tool=bash, match=vibe(?>\.py)?\s+commit(?!.*--quick), action=block_governance_batch, message=governance文件>5个时必须分commit或用--quick -->
+
+    53c. **Governance batch review gate**: When committing, if the
+    staged set includes both business code (src/, backend/,
+    frontend/) and governance files (.agents/ files), and the
+    governance file count exceeds 5, the commit must either:
+    (a) use `--quick` (governance-only commits), or (b) split
+    into two commits: one for business code (strict review) and
+    one for governance (batch). Review-summary line-ref checks
+    only apply to business code files. Auto-generated .agents/
+    files (evidence, plans, retros) are exempt from per-file
+    line-ref requirements.
+
+<!-- ENFORCE: id=R10p, hook=tool_call, tool=bash, match=python3?|pytest, action=block_sandbox_async_db, message=pi sandbox环境跑async DB会hang，必须降级到grep+MagicMock -->
+
+    10p. **Pi sandbox async DB fallback**: In Pi Agent sandbox
+    environments, running real async DB operations (e.g.
+    `asyncio.run(ensure_default_admin())`) triggers a PTY
+    timeout (60s+ hang) because the dev DB lock is held by
+    the sandbox process. The verify command must downgrade:
+    (1) grep static verification first, (2) MagicMock(spec=[])
+    for async DB calls, (3) temp async DB fixture as last
+    resort. Never run real async DB writes in sandbox.
+
+<!-- ENFORCE: id=R5c, hook=tool_call, tool=bash, match=vibe(?>\.py)?\s+advance.*review, action=block_solo_review, message=solo session review必须声明待独立reviewer验证 -->
+
+    5c. **Solo session review declaration**: When advancing to
+    review in a solo-session (builder == reviewer same session),
+    the review document MUST include a "Solo Session Limitation
+    Disclosure" section with: (1) a placeholder reviewer session
+    ID, (2) a note that independent review is pending, (3) a
+    follow-up action item to validate by a future session.
+    This prevents self-review from being silently accepted.
+
+<!-- ENFORCE: id=R60f, hook=tool_call, tool=bash, match=vibe(?>\.py)?\s+advance.*done, action=block_unresolved_followup, message=retro含follow-up但未建draft spec不能advance done -->
+
+    60f. **Retro follow-up resolution gate**: When advancing a
+    spec to done, if the retro contains a `[follow-up: <id>]`
+    item, a draft spec `.agents/specs/<id>.md` MUST exist.
+    Follow-ups without corresponding specs signal forgotten
+    work. The draft spec must be created in the same commit or
+    before advancing to done.
+
+
     53b. **Review-then-commit enforcement**: `vibe commit --reviewed`
     MUST NOT be used unless a prior `vibe commit` (step 1, without
     `--reviewed`) was run in the same project first. Step 1 creates
