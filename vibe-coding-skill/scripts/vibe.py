@@ -506,10 +506,8 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     commit_cmd.add_argument("project_root")
-    commit_cmd.add_argument(
-        "git_args", nargs=argparse.REMAINDER,
-        help="Arguments forwarded to `git commit`",
-    )
+    # R6.12 fix: --paths, --staged, and vibe-specific flags must come
+    # BEFORE git_args (nargs=REMAINDER), otherwise argparse swallows them.
     commit_cmd.add_argument(
         "--no-verify", action="store_true",
         help="Skip Rule 53 verify gate (escape hatch)",
@@ -554,6 +552,10 @@ def main() -> None:
         help="Mandatory with --reviewed: a short description of what you actually "
         "found while reading the diff. Empty string is rejected (exit 7). "
         "Non-empty value is written to the commit as Review-Summary: <text> trailer.",
+    )
+    commit_cmd.add_argument(
+        "git_args", nargs=argparse.REMAINDER,
+        help="Arguments forwarded to `git commit`",
     )
 
     policy_scan = sub.add_parser("policy-scan")
