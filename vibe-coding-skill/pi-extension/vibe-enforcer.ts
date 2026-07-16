@@ -389,7 +389,7 @@ function registerHandlers(pi: ExtensionAPI, rules: EnforceRule[], projectRoot: s
 
 // ── Main ─────────────────────────────────────────────────
 
-export default function (pi: ExtensionAPI) {
+export default function vibeEnforcerExtension(pi: ExtensionAPI) {
   let rules: EnforceRule[] = [];
   let projectRoot = "";
 
