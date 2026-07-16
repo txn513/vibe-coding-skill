@@ -14,6 +14,8 @@ TEMPLATE_PATH=""
 COMMIT_HASH="HEAD"
 RULES="R5,R8.44,R8.45"
 CODEX_CMD="${CODEX_CMD:-codex}"
+CODEX_EXTRA_FLAGS="${CODEX_EXTRA_FLAGS:-}"
+AGENTS_MD="AGENTS.md"
 
 # --- 工具函数 ---
 die() { echo "❌ $SCRIPT_NAME: $*" >&2; exit 1; }
@@ -25,28 +27,38 @@ Usage: spawn_reviewer.sh <spec-id> [options]
 
 一键生成 codex exec 独立 reviewer 命令，用于 spawn 与 builder 不同身份的 reviewer。
 
+注意: 默认从当前目录推断 --project-root。如果你在 skill 目录跑，
+      必须显式传 --project-root 指向项目根。
+
 Options:
-  --project-root DIR      项目根目录 (默认: 当前目录)
-  --specs-dir DIR         specs 目录 (默认: <project-root>/.agents/specs)
-  --template FILE         reviewer prompt 模板路径
-                          (默认: <project-root>/.agents/templates/reviewer-prompt.md)
-  --commit HASH           要验证的 commit (默认: HEAD)
-  --rules RULES           逗号分隔的 R 编号列表 (默认: R5,R8.44,R8.45)
-  --codex-cmd CMD         codex CLI 命令 (默认: codex, 环境变量 CODEX_CMD 可覆盖)
-  --help, -h              显示帮助
+  --project-root DIR        项目根目录 (默认: 当前目录)
+  --specs-dir DIR           specs 目录 (默认: <project-root>/.agents/specs)
+  --template FILE           reviewer prompt 模板路径
+                            (默认: <project-root>/.agents/templates/reviewer-prompt.md)
+  --commit HASH             要验证的 commit (默认: HEAD)
+  --rules RULES             逗号分隔的 R 编号列表 (默认: R5,R8.44,R8.45)
+  --codex-cmd CMD           codex CLI 命令 (默认: codex, 环境变量 CODEX_CMD 可覆盖)
+  --codex-extra-flags STR   额外 codex 参数 (默认: 空, 环境变量 CODEX_EXTRA_FLAGS 可覆盖)
+  --agends-md FILE          AGENTS.md 文件名 (默认: AGENTS.md)
+  --help, -h                显示帮助
 
 Examples:
-  # 当前项目验证某个 spec
-  bash scripts/spawn_reviewer.sh my-spec
+  # 在项目根目录跑 (推荐)
+  cd /path/to/project
+  bash <skill-path>/scripts/spawn_reviewer.sh my-spec
 
-  # 指定项目目录
-  bash scripts/spawn_reviewer.sh my-spec --project-root /path/to/project
+  # 显式指定项目
+  bash <skill-path>/scripts/spawn_reviewer.sh my-spec --project-root /path/to/project
 
   # 自定义 reviewer 规则
-  bash scripts/spawn_reviewer.sh my-spec --rules R5,R8.44,R8.45,R62
+  bash <skill-path>/scripts/spawn_reviewer.sh my-spec --rules R5,R8.44,R8.45,R62
+
+  # 加额外 codex 参数
+  bash scripts/spawn_reviewer.sh my-spec --codex-extra-flag "--sandbox read-only"
 
 Environment:
-  CODEX_CMD               覆盖默认的 codex CLI 命令
+  CODEX_CMD                 覆盖默认的 codex CLI 命令
+  CODEX_EXTRA_FLAGS         额外 codex 参数 (如 --sandbox)
 HELP
 }
 
@@ -65,6 +77,10 @@ while [[ $# -gt 0 ]]; do
       RULES="$2"; shift 2 ;;
     --codex-cmd)
       CODEX_CMD="$2"; shift 2 ;;
+    --codex-extra-flags)
+      CODEX_EXTRA_FLAGS="$2"; shift 2 ;;
+    --agends-md)
+      AGENTS_MD="$2"; shift 2 ;;
     --help|-h)
       show_help; exit 0 ;;
     -*)
@@ -100,8 +116,15 @@ if ! command -v "$CODEX_CMD" >/dev/null 2>&1; then
 fi
 
 # --- 生成命令 ---
-PROMPT_CMD="sed -e 's|<spec-id>|$SPEC_ID|g' -e 's|<commit-hash>|$COMMIT_HASH|g' -e 's|<rules>|$RULES|g' '$TEMPLATE_PATH'"
+PROMPT_CMD="sed -e 's|<spec-id>|$SPEC_ID|g' -e 's|<commit-hash>|$COMMIT_HASH|g' -e 's|<rules>|$RULES|g' -e 's|<agends-md-path>|$AGENTS_MD|g' '$TEMPLATE_PATH'"
 
+# 组装 codex exec 命令
 echo "# 复制并执行以下命令:" >&2
 echo "#" >&2
-echo "codex exec --allowedTools \"Read,Bash,Grep\" \"\$($PROMPT_CMD)\"" 
+echo "# 注意: 确保你在项目根目录运行" >&2
+echo "#" >&2
+if [[ -n "$CODEX_EXTRA_FLAGS" ]]; then
+  echo "codex exec $CODEX_EXTRA_FLAGS --allowedTools \"Read,Bash,Grep\" \"\$($PROMPT_CMD)\"" >&1
+else
+  echo "codex exec --allowedTools \"Read,Bash,Grep\" \"\$($PROMPT_CMD)\"" >&1
+fi
