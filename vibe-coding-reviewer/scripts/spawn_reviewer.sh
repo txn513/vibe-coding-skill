@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+# spawn_reviewer.sh — 一键生成 codex exec 独立 reviewer 命令
+# Usage: spawn_reviewer.sh <spec-id> [options]
+#
+# 跨项目通用: 通过 --project-root 参数支持任意 vibe-coding 项目
+
+set -euo pipefail
+
+# --- 默认值 ---
+SCRIPT_NAME="$(basename "$0")"
+PROJECT_ROOT=""
+SPECS_DIR=""
+TEMPLATE_PATH=""
+COMMIT_HASH="HEAD"
+RULES="R5,R8.44,R8.45"
+CODEX_CMD="${CODEX_CMD:-codex}"
+
+# --- 工具函数 ---
+die() { echo "❌ $SCRIPT_NAME: $*" >&2; exit 1; }
+warn() { echo "⚠️  $SCRIPT_NAME: $*" >&2; }
+
+show_help() {
+  cat <<'HELP'
+Usage: spawn_reviewer.sh <spec-id> [options]
+
+一键生成 codex exec 独立 reviewer 命令，用于 spawn 与 builder 不同身份的 reviewer。
+
+Options:
+  --project-root DIR      项目根目录 (默认: 当前目录)
+  --specs-dir DIR         specs 目录 (默认: <project-root>/.agents/specs)
+  --template FILE         reviewer prompt 模板路径
+                          (默认: <project-root>/.agents/templates/reviewer-prompt.md)
+  --commit HASH           要验证的 commit (默认: HEAD)
+  --rules RULES           逗号分隔的 R 编号列表 (默认: R5,R8.44,R8.45)
+  --codex-cmd CMD         codex CLI 命令 (默认: codex, 环境变量 CODEX_CMD 可覆盖)
+  --help, -h              显示帮助
+
+Examples:
+  # 当前项目验证某个 spec
+  bash scripts/spawn_reviewer.sh my-spec
+
+  # 指定项目目录
+  bash scripts/spawn_reviewer.sh my-spec --project-root /path/to/project
+
+  # 自定义 reviewer 规则
+  bash scripts/spawn_reviewer.sh my-spec --rules R5,R8.44,R8.45,R62
+
+Environment:
+  CODEX_CMD               覆盖默认的 codex CLI 命令
+HELP
+}
+
+# --- 参数解析 ---
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --project-root)
+      PROJECT_ROOT="$2"; shift 2 ;;
+    --specs-dir)
+      SPECS_DIR="$2"; shift 2 ;;
+    --template)
+      TEMPLATE_PATH="$2"; shift 2 ;;
+    --commit)
+      COMMIT_HASH="$2"; shift 2 ;;
+    --rules)
+      RULES="$2"; shift 2 ;;
+    --codex-cmd)
+      CODEX_CMD="$2"; shift 2 ;;
+    --help|-h)
+      show_help; exit 0 ;;
+    -*)
+      die "未知参数: $1 (用 --help 查看用法)" ;;
+    *)
+      [[ -z "${SPEC_ID:-}" ]] || die "只接受一个 spec-id"
+      SPEC_ID="$1"; shift ;;
+  esac
+done
+
+[[ -n "${SPEC_ID:-}" ]] || { show_help; exit 1; }
+
+# --- 推导默认值 ---
+PROJECT_ROOT="${PROJECT_ROOT:-$(pwd)}"
+PROJECT_ROOT="$(cd "$PROJECT_ROOT" && pwd)"
+SPECS_DIR="${SPECS_DIR:-$PROJECT_ROOT/.agents/specs}"
+TEMPLATE_PATH="${TEMPLATE_PATH:-$PROJECT_ROOT/.agents/templates/reviewer-prompt.md}"
+
+# --- 校验 ---
+if ! [[ "$SPEC_ID" =~ ^[a-z0-9-]+$ ]]; then
+  die "spec-id 格式不合法: '$SPEC_ID' (要求 ^[a-z0-9-]+\$)"
+fi
+
+SPEC_FILE="$SPECS_DIR/$SPEC_ID.md"
+[[ -f "$SPEC_FILE" ]] || die "spec 文件不存在: $SPEC_FILE"
+
+[[ -f "$TEMPLATE_PATH" ]] || die "模板文件不存在: $TEMPLATE_PATH"
+
+# --- codex 检测 ---
+if ! command -v "$CODEX_CMD" >/dev/null 2>&1; then
+  warn "$CODEX_CMD 不在 PATH"
+  warn "生成的命令可能无法直接执行，可复制到有 codex 的环境运行"
+fi
+
+# --- 生成命令 ---
+PROMPT_CMD="sed -e 's|<spec-id>|$SPEC_ID|g' -e 's|<commit-hash>|$COMMIT_HASH|g' -e 's|<rules>|$RULES|g' '$TEMPLATE_PATH'"
+
+echo "# 复制并执行以下命令:" >&2
+echo "#" >&2
+echo "codex exec --allowedTools \"Read,Bash,Grep\" \"\$($PROMPT_CMD)\"" 
