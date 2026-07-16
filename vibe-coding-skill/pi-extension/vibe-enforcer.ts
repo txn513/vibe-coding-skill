@@ -515,3 +515,6 @@ export default function vibeEnforcerExtension(pi: ExtensionAPI) {
               appendEnforcerLog(projectRoot, id, "pass", cmd, "OK");
             }
           }}
+
+// Pi Extension loader requires id export
+export const id = "vibe-enforcer";
