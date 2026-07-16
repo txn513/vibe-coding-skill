@@ -124,7 +124,7 @@ echo "#" >&2
 echo "# 注意: 确保你在项目根目录运行" >&2
 echo "#" >&2
 if [[ -n "$CODEX_EXTRA_FLAGS" ]]; then
-  echo "codex exec $CODEX_EXTRA_FLAGS --allowedTools \"Read,Bash,Grep\" \"\$($PROMPT_CMD)\"" >&1
+  echo "$CODEX_CMD exec $CODEX_EXTRA_FLAGS --allowedTools \"Read,Bash,Grep\" \"\$($PROMPT_CMD)\"" >&1
 else
-  echo "codex exec --allowedTools \"Read,Bash,Grep\" \"\$($PROMPT_CMD)\"" >&1
+  echo "$CODEX_CMD exec --allowedTools \"Read,Bash,Grep\" \"\$($PROMPT_CMD)\"" >&1
 fi
