@@ -128,3 +128,16 @@ if [[ -n "$CODEX_EXTRA_FLAGS" ]]; then
 else
   echo "$CODEX_CMD exec --allowedTools \"Read,Bash,Grep\" \"\$($PROMPT_CMD)\"" >&1
 fi
+
+# --- 无 reviewer / subagent 时的替代方案 ---
+echo "#" >&2
+echo "# 提示: 如果你没有 codex CLI 或没有可用的 reviewer subagent," >&2
+echo "# 可以用 pi agent 替代(单文件模式,不保留 session):" >&2
+echo "#" >&2
+echo "#   pi --print --no-session --provider minimax-cn --model MiniMax-M3 \\" >&2
+echo "#     < $TEMPLATE_PATH \\" >&2
+echo "#     > review.md" >&2
+echo "#" >&2
+echo "# pi agent 会把 prompt 模板内容读入,输出 review 结果到 review.md。" >&2
+echo "# 注意: pi agent 的命令格式跟 codex exec 不同,codex 把 prompt 当参数传," >&2
+echo "# pi 从 stdin 读。具体用法请查阅 pi agent 文档。" >&2
