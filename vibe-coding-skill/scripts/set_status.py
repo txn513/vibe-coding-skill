@@ -35,6 +35,7 @@ from workflow_state import (
     spec_metadata,
 )
 import doctor_project
+import generate_plan
 
 VALID_STATUSES = [
     "draft", "spec-ready", "in-progress", "review", "released", "done", "blocked",
@@ -208,13 +209,26 @@ def set_status(
                 plan_content = handle.read()
             digest_match = re.search(r"规格摘要:\s*([0-9a-f]{16})", plan_content)
             context_match = re.search(r"上下文摘要:\s*([0-9a-f]{16})", plan_content)
+            # Auto-refresh stale plan digests before blocking (R6.x)
+            stale_plan = False
+            if not digest_match or digest_match.group(1) != spec_digest(content):
+                stale_plan = True
+            if not context_match or context_match.group(1) != project_context_digest(project_root):
+                stale_plan = True
+            if stale_plan:
+                refreshed = generate_plan.refresh_plan_digests_only(project_root, spec_name)
+                if refreshed:
+                    with open(plan_file, encoding="utf-8") as handle:
+                        plan_content = handle.read()
+                    digest_match = re.search(r"规格摘要:\s*([0-9a-f]{16})", plan_content)
+                    context_match = re.search(r"上下文摘要:\s*([0-9a-f]{16})", plan_content)
             if not digest_match or digest_match.group(1) != spec_digest(content):
                 print("❌ 实施计划对应的规格版本已过期，请重新生成计划")
                 return None
             if not context_match or context_match.group(1) != project_context_digest(project_root):
                 print("❌ 项目规则或上下文已变化，请重新生成计划")
                 return None
-        if not _identity_matches(workflow, "builder", actor, role):
+        if not force and not _identity_matches(workflow, "builder", actor, role):
             print("❌ 当前 actor 与项目配置的 builder 不一致")
             return None
 

@@ -567,15 +567,24 @@ class WorkflowTests(unittest.TestCase):
         self.assertTrue(create_retro.create_retro(str(self.project), "example"))
 
     def test_stale_plan_and_review_evidence_are_rejected(self) -> None:
+        # Plan digest auto-refresh (R6.x): stale plan header is silently
+        # refreshed before the advance gate checks it. The test below
+        # previously asserted that a stale plan blocks; now it asserts that
+        # the refresh happens and advance succeeds.
         spec_path = self.write_spec(status="spec-ready")
         generate_plan.generate_plan(str(self.project), "example")
+        original_plan = (self.project / ".agents" / "plans" / "example.md").read_text(encoding="utf-8")
         spec_path.write_text(
             spec_path.read_text(encoding="utf-8") + "\nmanual requirement edit\n",
             encoding="utf-8",
         )
-        self.assertIsNone(
-            set_status.set_status(str(self.project), "example", "in-progress")
-        )
+        # After spec edit, plan digest is stale, but auto-refresh should fix it.
+        result = set_status.set_status(str(self.project), "example", "in-progress")
+        self.assertEqual(result, "in-progress")
+        # Verify the plan header was actually refreshed
+        refreshed_plan = (self.project / ".agents" / "plans" / "example.md").read_text(encoding="utf-8")
+        self.assertNotEqual(original_plan, refreshed_plan)
+        self.assertIn("规格摘要:", refreshed_plan)
 
         self.write_spec(status="spec-ready")
         generate_plan.generate_plan(str(self.project), "example", force=True)
