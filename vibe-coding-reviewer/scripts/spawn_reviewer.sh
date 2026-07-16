@@ -54,7 +54,7 @@ Examples:
   bash <skill-path>/scripts/spawn_reviewer.sh my-spec --rules R5,R8.44,R8.45,R62
 
   # 加额外 codex 参数
-  bash scripts/spawn_reviewer.sh my-spec --codex-extra-flag "--sandbox read-only"
+  bash scripts/spawn_reviewer.sh my-spec --codex-extra-flags "--sandbox read-only"
 
 Environment:
   CODEX_CMD                 覆盖默认的 codex CLI 命令
