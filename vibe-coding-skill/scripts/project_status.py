@@ -2480,6 +2480,33 @@ def _print_plan_progress_commit_hint(
     print(f"<!-- vibe:plan_progress_commit_hint: {dirty_count} files -->")
 
 
+def _extract_task_section(content: str):
+    import re
+    task_headers = [
+        r"^##\s*任务列表",
+        r"^##\s*Task List",
+        r"^##\s*Tasks",
+        r"^##\s*实施步骤",
+    ]
+    lines = content.splitlines()
+    in_task_section = False
+    task_lines = []
+    for line in lines:
+        if in_task_section:
+            # Stop at next "## " (same or higher level heading), not "###"
+            # Task section is "## 任务列表", so stop at next "## " or end
+            if re.match(r"^##\s", line):
+                break
+            task_lines.append(line)
+        else:
+            if any(re.match(h, line) for h in task_headers):
+                in_task_section = True
+                task_lines.append(line)
+    if task_lines:
+        return "\n".join(task_lines)
+    return None
+
+
 def _list_plans(dir: str) -> list[dict]:
     if not os.path.exists(dir):
         return []
@@ -2489,8 +2516,15 @@ def _list_plans(dir: str) -> list[dict]:
             path = os.path.join(dir, f)
             with open(path) as fh:
                 content = fh.read()
-            done = len(re.findall(r"^\s*- \[x\]", content, re.MULTILINE))
-            total = len(re.findall(r"^\s*- \[.\]", content, re.MULTILINE))
+            # 候选 20260716: 只识别 "## 任务列表" 段下的 checkbox
+            task_section = _extract_task_section(content)
+            if task_section:
+                done = len(re.findall(r"^\s*- \[x\]", task_section, re.MULTILINE))
+                total = len(re.findall(r"^\s*- \[.\]", task_section, re.MULTILINE))
+            else:
+                # fallback: 老格式 plan
+                done = len(re.findall(r"^\s*- \[x\]", content, re.MULTILINE))
+                total = len(re.findall(r"^\s*- \[.\]", content, re.MULTILINE))
             result.append({
                 "name": f.replace(".md", ""),
                 "done": done,
