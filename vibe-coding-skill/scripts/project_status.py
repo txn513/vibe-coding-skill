@@ -1709,6 +1709,29 @@ def recommend_next(project_root: str, specs: list[dict] | None = None) -> dict:
             },
         )
     if not specs:
+        # Check bug-inbox first (Rule 65 opt-in): if there are open bugs,
+        # recommend handling them before creating new specs.
+        bug_inbox_path = os.path.join(project_root, ".agents", "bug-inbox.md")
+        if os.path.exists(bug_inbox_path):
+            with open(bug_inbox_path, encoding="utf-8") as f:
+                inbox_content = f.read()
+            open_bugs = re.findall(r"^- \[ \] (P[1-4]): (.+)$", inbox_content, re.MULTILINE)
+            if open_bugs:
+                priority_map = {"P1": 0, "P2": 1, "P3": 2, "P4": 3}
+                open_bugs.sort(key=lambda x: priority_map.get(x[0], 99))
+                p, desc = open_bugs[0]
+                return _recommendation(
+                    f"处理 bug-inbox 中的 {p} 级 bug",
+                    f"当前有 {len(open_bugs)} 个未关闭的 bug，优先级最高的是 {p}。建议先处理 bug 再创建新 spec，避免新功能建立在有缺陷的基础上。",
+                    checks=[f"{len(open_bugs)} 个 open bug 在 inbox 中", f"最高优先级: {p}"],
+                    why_not="项目没有可推进的 Spec，但 bug-inbox 中有未处理的 bug。" +
+                             "先修 bug 再推进新功能，避免技术债务累积。",
+                    action_command=f"grep -E '^- \\\\[ \\\\[\\\\] P' {bug_inbox_path}",
+                    alternative={
+                        "action": "为这个 bug 创建 vibe spec 走完整修复流程",
+                        "reason": "高风险 bug (P1/P2) 必须走 reproduction + fix-regression 流程 (R10)。",
+                    },
+                )
         intents_dir = os.path.join(project_root, ".agents", "intents")
         has_intent = _count_files(intents_dir) > 0
         return _recommendation(
