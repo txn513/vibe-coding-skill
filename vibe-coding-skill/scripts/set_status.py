@@ -1183,6 +1183,11 @@ def _dependencies_done(project_root: str, dependencies: list[str]) -> bool:
 def _identity_matches(workflow: dict, expected_role: str, actor: str, role: str) -> bool:
     configured = workflow.get("roles", {}).get(expected_role, "").strip()
     if configured:
+        # override_approver can act as builder/reviewer when configured
+        if role == "override_approver":
+            override = workflow.get("roles", {}).get("override_approver", "").strip()
+            if override and override == actor:
+                return True
         return configured == actor and role == expected_role
     if actor or role:
         return role == expected_role
