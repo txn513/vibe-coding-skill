@@ -335,6 +335,70 @@ def _audit_inbox_drift(project_root: str, warnings: list[str]) -> None:
             )
 
 
+
+
+def _audit_directory_structure(project_root: str, warnings: list[str]) -> None:
+    """Check .agents/ for overlapping/deprecated directories per the
+    .agents/ Directory Contract in SKILL.md. Advisory only."""
+    agents_dir = os.path.join(project_root, ".agents")
+    if not os.path.isdir(agents_dir):
+        return
+
+    # 1. reports/ overlapping with retros/
+    reports_dir = os.path.join(agents_dir, "reports")
+    retros_dir = os.path.join(agents_dir, "retros")
+    if os.path.isdir(reports_dir) and os.path.isdir(retros_dir):
+        report_specs = {f.replace(".md", "") for f in os.listdir(reports_dir) if f.endswith(".md")}
+        retro_specs = {f.replace(".md", "") for f in os.listdir(retros_dir) if f.endswith(".md")}
+        overlap = report_specs & retro_specs
+        if overlap:
+            warnings.append(
+                f"reports/ has {len(overlap)} specs also in retros/ "
+                f"(source of truth is retros/). Archive reports/ to reduce confusion."
+            )
+
+    # 2. Deprecated skill-upgrade-proposals/ directory
+    proposals_dir = os.path.join(agents_dir, "skill-upgrade-proposals")
+    if os.path.isdir(proposals_dir):
+        count = len([f for f in os.listdir(proposals_dir) if f.endswith(".md")])
+        if count > 0:
+            warnings.append(
+                f"skill-upgrade-proposals/ is deprecated ({count} files). "
+                "Migrate to skill-upgrade-candidates/ per Directory Contract."
+            )
+
+    # 3. discovery/ files older than 30 days
+    discovery_dir = os.path.join(agents_dir, "discovery")
+    if os.path.isdir(discovery_dir):
+        import time
+        now = time.time()
+        old_files = []
+        for f in os.listdir(discovery_dir):
+            fpath = os.path.join(discovery_dir, f)
+            if f.endswith(".md") and os.path.getmtime(fpath) < now - 30 * 86400:
+                old_files.append(f)
+        if old_files:
+            warnings.append(
+                f"discovery/ has {len(old_files)} files older than 30 days. "
+                "Archive to archive/discovery/ per Directory Contract."
+            )
+
+    # 4. Unknown directories not in the Contract
+    known_dirs = {
+        "specs", "plans", "evidence", "reviews", "retros", "changelogs",
+        "intents", "reports", "notes", "archive", "skill-upgrade-candidates",
+        "rules", "bugs", "templates", "discovery", "skill-upgrade-proposals",
+        # Internal/hidden
+        ".vibe-review-pending", ".session-state",
+    }
+    for entry in os.listdir(agents_dir):
+        full = os.path.join(agents_dir, entry)
+        if os.path.isdir(full) and entry not in known_dirs and not entry.startswith(".") and entry not in ("project-upgrade-candidates",):
+            warnings.append(
+                f".agents/{entry}/ is not in the Directory Contract. "
+                "Consider migrating to a declared directory or archiving."
+            )
+
 def doctor(project_root: str) -> dict:
     workflow, migrated = ensure_workflow(project_root)
     issues = []
@@ -384,6 +448,7 @@ def doctor(project_root: str) -> dict:
     _audit_evidence_commit_freshness(project_root, warnings)
     _audit_reproduction_runtime_present(project_root, warnings)
     _audit_inbox_drift(project_root, warnings)
+    _audit_directory_structure(project_root, warnings)
     # Rule 56: accumulate adjacent-location protection stats across specs
     adjacent_stats = {"total": 0, "protected": 0, "skipped": 0}
 

@@ -1051,6 +1051,37 @@ Before advancing:
 - Require a structured review decision rather than manual conclusion edits.
 - Require observation evidence before high-risk work becomes `done`.
 
+## .agents/ Directory Contract
+
+The `.agents/` directory is managed by the Skill. Each subdirectory has a
+declared writer, purpose, and lifecycle. Agents must not create subdirectories
+not listed here. Each piece of information has exactly one canonical location
+(single source of truth).
+
+| Directory | Writer | Purpose | Lifecycle |
+|-----------|--------|---------|-----------|
+| specs/ | create_spec / spec_amend | Feature specifications | Created to archived |
+| plans/ | generate_plan / plan refresh | Implementation plans | Created to archived |
+| evidence/ | record_evidence | Verification evidence | Created to archived |
+| reviews/ | record_review | Review records | Created to archived |
+| retros/ | retrospective | Retrospective records | Written after done, permanent |
+| changelogs/ | changelog / commit | Change logs | Archived after release |
+| intents/ | create_intent | Intent declarations | Before spec creation |
+| reports/ | self_analyze | Structured analysis | Archived to archive/ |
+| notes/ | Agent (any) | Temporary notes | No enforced lifecycle |
+| archive/ | archive_status | Archived storage | For done/cancelled specs |
+| skill-upgrade-candidates/ | Agent / retro | Skill upgrade proposals | Archived after admin review |
+| rules/ | Agent / retro | Project-local rules | Adopted or abandoned |
+| bugs/ | Agent | Bug inbox (opt-in) | Append-only ledger |
+| templates/ | Agent | Prompt templates | Project-specific |
+
+**Key rules**:
+- Do not create subdirectories not listed above without Skill update
+- `reports/` is a derived view of `retros/`; the source of truth is `retros/`
+- `skill-upgrade-proposals/` is deprecated; use `skill-upgrade-candidates/`
+- `discovery/` files older than 30 days should be archived
+- Only one writer owns each directory (no dual-write)
+
 ## Project Boundary
 
 `.agents/workflow.json` contains only generic governance configuration:
