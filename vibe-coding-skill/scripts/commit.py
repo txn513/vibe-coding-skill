@@ -342,17 +342,29 @@ def _extract_changed_files_from_stat(stat: str) -> list[str]:
     return files
 
 
-def _git_diff_full(project_root: str) -> str:
-    """Return full `git diff` against HEAD so the Agent can review
-    actual code changes, not just file names and line counts.
+def _git_diff_full(project_root: str, staged_only: bool = False) -> str:
+    """Return full `git diff` so the Agent can review actual code
+    changes, not just file names and line counts.
+
+    staged_only=True returns `git diff --cached` — only what is
+    staged for this commit. Used when --paths or --staged mode
+    scopes the commit to a subset of dirty files, so the review
+    only shows what will actually land (not every dirty file).
+
+    staged_only=False returns `git diff HEAD` — the working-tree-
+    wide view (legacy default for the simple single-commit case).
 
     Rule 53 requires the Agent to inspect diff content for
     unintended modifications, scope creep, or regressions.
-    Showing only --stat defeats this purpose.
     """
-    rc, out, err = _run(
-        ["git", "diff", "HEAD"], project_root
-    )
+    if staged_only:
+        rc, out, err = _run(
+            ["git", "diff", "--cached"], project_root
+        )
+    else:
+        rc, out, err = _run(
+            ["git", "diff", "HEAD"], project_root
+        )
     if rc != 0:
         # No commits yet — root-commit case. Fall back to diff of
         # the index so staged content is visible to review (Rule 53)
@@ -642,10 +654,19 @@ def commit(
     # modifications, scope creep, or regressions. Showing only
     # --stat is insufficient — the Agent needs to see actual
     # code changes to catch problems.
-    print("📋 提交前 Review — 检查 diff 内容 (Rule 53):")
+    #
+    # When --paths / --staged / granularity mode is active, only
+    # show staged content (not every dirty file in the worktree).
+    # This prevents review noise: the agent should only review what
+    # will actually land in this commit.
+    use_scoped_diff = bool(paths) or staged_only or _has_staged_changes(project_root)
+    if use_scoped_diff:
+        print("📋 提交前 Review — 检查 diff 内容 (Rule 53) [scoped: 只展示本次 commit 的改动]:")
+    else:
+        print("📋 提交前 Review — 检查 diff 内容 (Rule 53):")
     print("   ⚠️  审查以下改动：发现意外修改、范围蔓延、或回归问题必须修复后再 commit。")
     print()
-    stat = _git_diff_stat(project_root)
+    stat = _git_diff_stat(project_root, staged_only=use_scoped_diff)
     if stat and stat != "(no tracked changes)":
         print("📊 改动概览:")
         print(stat)
@@ -663,7 +684,7 @@ def commit(
             print("   好处: 回滚精确、review 清晰、每个 commit 对应一个意图")
             print("<!-- vibe:commit_granularity: large_diff -->")
         print()
-    full_diff = _git_diff_full(project_root)
+    full_diff = _git_diff_full(project_root, staged_only=use_scoped_diff)
     if full_diff and full_diff != "(no tracked changes)":
         print("📝 完整 diff:")
         print(full_diff)
