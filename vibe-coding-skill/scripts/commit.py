@@ -718,6 +718,7 @@ def commit(
             print("   上一次 `vibe commit` 在哪个项目跑的？是否跟当前项目不一致？")
             print("   如果确实要先看 diff: 先跑 `vibe commit`（不带 --reviewed），再跑 `vibe commit --reviewed`。")
             print("   如果要跳过 review gate: 用 `--quick`（docs-only）或 `--no-verify`（需说明理由）。")
+            print("   注意: 不要手动改 .agents/.vibe-review-pending 或绕 hook 提交。回到 step1 修复问题。")
             print("<!-- vibe:commit_review_gate: skipped_step1 -->")
             return 6
         else:
