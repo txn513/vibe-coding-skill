@@ -301,20 +301,41 @@ def _check_retro_upgrade_candidates(project_root: str) -> list[dict]:
         except OSError:
             continue
 
-        # Check for 沉淀落点 section with Skill candidate declaration
-        if "是否形成 Skill 治理候选" not in text and "是否形成 Skill 候选" not in text:
-            continue
-        # Check if it says 'yes'
-        if not re.search(r"是否形成 Skill (?:治理)?候选(?:\*\*)?:\s*yes", text, re.IGNORECASE):
+        # Check for 沉淀落点 section with Skill or project candidate declaration
+        has_skill_candidate = bool(
+            re.search(r"是否形成 Skill (?:治理)?候选(?:\*\*)?:\s*yes", text, re.IGNORECASE)
+        )
+        has_project_update = "项目内应更新什么" in text
+
+        if not has_skill_candidate and not has_project_update:
             continue
 
-        # Extract the candidate summary
-        summary_match = re.search(
-            r"候选摘要是什么(?:\*\*)?(?:\?|：|:)\s*(.+?)$",
-            text,
-            re.MULTILINE,
-        )
-        summary = summary_match.group(1).strip() if summary_match else "(无摘要)"
+        # Extract the candidate summary (Skill level)
+        summary = "(无摘要)"
+        if has_skill_candidate:
+            summary_match = re.search(
+                r"候选摘要是什么(?:\*\*)?(?:\?|：|:)\s*(.+?)$",
+                text,
+                re.MULTILINE,
+            )
+            summary = summary_match.group(1).strip() if summary_match else "(无摘要)"
+
+        # Extract project-level update items
+        project_items = []
+        if has_project_update:
+            project_items = re.findall(
+                r"项目内应更新什么(?:\*\*)?(?:\?|：|:).*?\n((?:\s+-.*?\n)+)",
+                text,
+                re.MULTILINE,
+            )
+            if project_items:
+                # Count the bullet items
+                bullets = re.findall(r"\s+-\s+(.+)", project_items[0])
+                if bullets and not summary:
+                    summary = f"{len(bullets)} 条项目级规则待更新"
+
+        # Determine level
+        level = "skill" if has_skill_candidate else "project"
 
         # Check if a candidate file already exists for this retro
         retro_base = fname.replace(".md", "").lower()
@@ -324,7 +345,7 @@ def _check_retro_upgrade_candidates(project_root: str) -> list[dict]:
             candidates.append({
                 "retro": fname,
                 "summary": summary[:120],
-                "level": "skill",
+                "level": level,
             })
 
     return candidates
@@ -1705,17 +1726,27 @@ def recommend_next(project_root: str, specs: list[dict] | None = None) -> dict:
                 "reason": "如果不确定是否采纳，先读一遍再决定。",
             },
         )
-    # Retro中声明但未提取的升级候选
+    # Retro中声明但未提取的升级候选（Skill级 + 项目级）
     retro_candidates = _check_retro_upgrade_candidates(project_root)
     if retro_candidates:
         rc = retro_candidates[0]
+        level_label = "Skill" if rc["level"] == "skill" else "项目级"
+        target_dir = ".agents/skill-upgrade-candidates" if rc["level"] == "skill" else ".agents/project-upgrade-candidates"
+        skill_count = sum(1 for c in retro_candidates if c["level"] == "skill")
+        proj_count = sum(1 for c in retro_candidates if c["level"] == "project")
+        counts = []
+        if skill_count:
+            counts.append(f"{skill_count} 个 Skill 级")
+        if proj_count:
+            counts.append(f"{proj_count} 个项目级")
+        counts_str = ", ".join(counts)
         return _recommendation(
-            f"提取 retro 中的升级候选 (来源: {rc['retro']})",
-            f"retro 声明了 'Skill 治理候选: yes' 但没有创建正式候选文件。"
+            f"提取 retro 中的{level_label}升级候选 (来源: {rc['retro']})",
+            f"retro 沉淀了 {counts_str} 升级候选但未创建正式文件。"
             f"摘要: {rc['summary']}",
             checks=[f"{len(retro_candidates)} 个 retro 声明候选但未提取"],
             why_not="未提取的候选不会出现在 vibe next 中，同样的失败模式会在后续 spec 中重复出现。",
-            action_command=f"cp .agents/retros/{rc['retro']} .agents/skill-upgrade-candidates/",
+            action_command=f"mkdir -p {target_dir} && cp .agents/retros/{rc['retro']} {target_dir}/",
             alternative={
                 "action": "先读 retro 沉淀落点再决定是否提取",
                 "reason": "如果候选已过时或 over-engineering，在 retro 中标记 'no' 即可。",
