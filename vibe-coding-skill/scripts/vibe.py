@@ -29,6 +29,7 @@ import archive_status
 import commit
 import upgrade
 import version_bump
+import tidy
 import verify_only
 import policy_sources
 import project_status
@@ -403,6 +404,13 @@ def main() -> None:
     archive_stale.add_argument("--json", action="store_true",
                                help="输出机器可读 JSON")
 
+    tidy_cmd = sub.add_parser("tidy", help="清理 .agents/ 目录结构 (Directory Contract)")
+    tidy_cmd.add_argument("project_root")
+    tidy_cmd.add_argument("--dry-run", action="store_true", default=True,
+                          help="预览清理操作，不实际执行 (默认: dry-run)")
+    tidy_cmd.add_argument("--apply", action="store_true",
+                          help="执行清理操作")
+
     # propose-skill-upgrade — create a skill upgrade candidate proposal
     propose_skill = sub.add_parser(
         "propose-skill-upgrade",
@@ -741,6 +749,8 @@ def main() -> None:
         )
         if result is None:
             raise SystemExit(1)
+    elif args.operation == "tidy":
+        tidy.tidy(root, dry_run=not getattr(args, 'apply', False))
     elif args.operation == "archive-stale":
         import json as _json
         findings = archive_status.find_stale(args.project_root)
