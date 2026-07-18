@@ -288,6 +288,44 @@ def _print_evidence_grep(project_root: str, diff_text: str) -> None:
         print()
 
 
+
+
+def _print_evidence_sufficiency_hint(review_summary: str) -> None:
+    """Advisory: review-summary claims verification but lacks concrete signals.
+
+    2/259 retros showed 'evidence exists, but does not prove the claimed behavior'.
+    The agent writes '测试通过' / '已验证' in review-summary but doesn't cite
+    HOW it verified (grep call-site / e2e / runtime trace / specific test names).
+
+    This is a soft check — it only prints an advisory, never blocks.
+    Complements degradation-path check (2026-07-19 候选 1): that one checks
+    'is there a degradation path test', this one checks 'does the review-summary
+    actually describe HOW verification was done'.
+    """
+    import re
+    if not review_summary:
+        return
+    # Claims of verification without concrete method
+    claim_re = re.compile(
+        r"测试通过|已验证|verified|all.pass|全量通过|确认无问题|no.issues",
+        re.IGNORECASE,
+    )
+    # Concrete verification signals
+    method_re = re.compile(
+        r"grep|call.site|e2e|playwright|selenium|runtime|trace|pytest|unittest"
+        r"|test_|spec.assert|snapshot|regression|degradation|error.path"
+        r"|exception.path|边界|空值|降级",
+        re.IGNORECASE,
+    )
+    has_claim = bool(claim_re.search(review_summary))
+    has_method = bool(method_re.search(review_summary))
+    if has_claim and not has_method:
+        print("⚠️  evidence-sufficiency advisory (2026-07-19 候选 3):")
+        print("   review-summary 声称验证通过但未引用具体验证方式")
+        print("   (grep call-site / e2e / runtime trace / 具体测试名 / 降级路径)")
+        print("   建议补充: 你是怎么验证的？测了哪些路径？")
+        print("<!-- vibe:commit_evidence_sufficiency: advisory -->")
+        print()
 def _run(argv: list[str], cwd: str) -> tuple[int, str, str]:
     """Run argv in cwd; return (exit_code, stdout, stderr)."""
     completed = subprocess.run(
@@ -707,6 +745,11 @@ def commit(
     # This is the lowest-cost, highest-value enhancement — it
     # doesn't block the commit, just highlights risk areas.
     _print_evidence_grep(project_root, full_diff)
+    # 2026-07-19 候选 3: evidence-sufficiency advisory.
+    # When --review-summary is provided, check if it claims verification
+    # without citing concrete methods. Advisory only.
+    if review_summary:
+        _print_evidence_sufficiency_hint(review_summary)
     # Pre-print expected file list (Rule 53 prevention layer):
     # when this commit will auto-include untracked files, surface
     # them BEFORE the review gate so the agent's review-summary

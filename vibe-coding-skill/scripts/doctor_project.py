@@ -399,6 +399,64 @@ def _audit_directory_structure(project_root: str, warnings: list[str]) -> None:
                 "Consider migrating to a declared directory or archiving."
             )
 
+
+
+def _audit_unbound_rules(project_root: str, warnings: list[str]) -> None:
+    """Check .agents/rules/ for TBD/TODO markers and stale proposed rules.
+
+    3/259 retros showed 'rule exists, but is not bound to a gate or command'.
+    Rules with TBD/TODO markers sit indefinitely until manually triggered.
+    This audit surfaces them so the agent can bind them to a gate or open
+    a follow-up spec.
+    """
+    agents_dir = os.path.join(project_root, ".agents")
+    if not os.path.isdir(agents_dir):
+        return
+
+    import time
+    now = time.time()
+
+    # 1. Scan all .md files in rules/ for TBD/TODO/待定 markers
+    rules_dir = os.path.join(agents_dir, "rules")
+    tbd_count = 0
+    if os.path.isdir(rules_dir):
+        tbd_re = re.compile(r"\b(TBD|TODO|待定|follow-up|follow up)\b", re.IGNORECASE)
+        for root_dir, _, files in os.walk(rules_dir):
+            for f in files:
+                if not f.endswith(".md"):
+                    continue
+                fpath = os.path.join(root_dir, f)
+                try:
+                    with open(fpath, encoding="utf-8") as handle:
+                        text = handle.read()
+                except OSError:
+                    continue
+                matches = tbd_re.findall(text)
+                if matches:
+                    tbd_count += len(matches)
+    if tbd_count > 0:
+        warnings.append(
+            f".agents/rules/ contains {tbd_count} TBD/TODO/待定 markers. "
+            "Consider binding them to a gate or opening a follow-up spec "
+            "(rule-binding enforcement, per 2026-07-19 候选 2)."
+        )
+
+    # 2. Scan rules/proposed/ for rules older than 30 days
+    proposed_dir = os.path.join(rules_dir, "proposed") if os.path.isdir(rules_dir) else None
+    if proposed_dir and os.path.isdir(proposed_dir):
+        stale_proposed = []
+        for f in os.listdir(proposed_dir):
+            if not f.endswith(".md"):
+                continue
+            fpath = os.path.join(proposed_dir, f)
+            if os.path.getmtime(fpath) < now - 30 * 86400:
+                stale_proposed.append(f)
+        if stale_proposed:
+            warnings.append(
+                f"rules/proposed/ has {len(stale_proposed)} rules older than 30 days "
+                "still in proposed status. Consider adopting, rejecting, or binding "
+                "them to a gate (rule-binding enforcement, per 2026-07-19 候选 2)."
+            )
 def doctor(project_root: str) -> dict:
     workflow, migrated = ensure_workflow(project_root)
     issues = []
@@ -449,6 +507,7 @@ def doctor(project_root: str) -> dict:
     _audit_reproduction_runtime_present(project_root, warnings)
     _audit_inbox_drift(project_root, warnings)
     _audit_directory_structure(project_root, warnings)
+    _audit_unbound_rules(project_root, warnings)
     # Rule 56: accumulate adjacent-location protection stats across specs
     adjacent_stats = {"total": 0, "protected": 0, "skipped": 0}
 

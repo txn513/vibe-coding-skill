@@ -326,6 +326,61 @@ def _check_frontend_browser_test(
     )
 
 
+
+# 2026-07-19 候选 1: degradation-path 验证覆盖 advisory。
+# 4/259 retro 出现 "happy-path verified, degradation-path missing"。
+# Agent 只验证正常路径，未验证降级/异常路径，导致 bug 在生产环境才暴露。
+# 跟 R28 互补: R28 说"不够", 本检查说"缺什么"。
+_DEGRADATION_KEYWORDS = re.compile(
+    r"错误处理|异常|降级|fallback|容错|retry|timeout|边界|空值|null|none|empty"
+    r"|条件分支|多角色|权限|denied|forbidden|403|404|500|error|exception"
+    r"|on.error|catch|except|try",
+    re.IGNORECASE,
+)
+_HAPPY_PATH_ONLY_SIGNALS = re.compile(
+    r"测试通过|已验证|verified|all.pass|100%.pass|全量通过",
+    re.IGNORECASE,
+)
+_NON_HAPPY_PATH_SIGNALS = re.compile(
+    r"error|exception|fail|denied|forbidden|403|404|500|timeout|retry"
+    r"|fallback|降级|空值|null|none|empty|边界|异常",
+    re.IGNORECASE,
+)
+
+
+def _check_degradation_path_coverage(
+    project_root: str, spec_name: str, spec_content: str, target: str,
+) -> str | None:
+    """Advisory: spec 涉及降级/异常逻辑但 verify evidence 只含 happy path。
+
+    只在以下条件同时满足时触发:
+    1. target 是 review/released/done (verify 阶段已完成)
+    2. spec 内容含降级/异常/错误处理关键词
+    3. verify evidence 存在
+    4. verify evidence 含 "测试通过" 类信号但不含任何非 happy path 信号
+    """
+    if target not in {"review", "released", "done"}:
+        return None
+    if not _DEGRADATION_KEYWORDS.search(spec_content):
+        return None
+    if not _has_evidence_file(project_root, spec_name, "verify"):
+        return None
+    verify_path = _evidence_file(project_root, spec_name, "verify")
+    try:
+        with open(verify_path, encoding="utf-8") as handle:
+            verify_text = handle.read()
+    except OSError:
+        return None
+    has_happy_claim = bool(_HAPPY_PATH_ONLY_SIGNALS.search(verify_text))
+    has_non_happy = bool(_NON_HAPPY_PATH_SIGNALS.search(verify_text))
+    if not has_happy_claim or has_non_happy:
+        return None
+    return (
+        "spec 涉及降级/异常/错误处理逻辑, verify evidence 只含 happy path 声明, "
+        "未发现降级路径验证 (error/exception/timeout/fallback/空值等)。 "
+        "建议补充 degradation path 验证 (advisory, 不阻塞)"
+    )
+
 def build_advance_checklist(
     project_root: str,
     spec_name: str,
@@ -394,6 +449,14 @@ def build_advance_checklist(
     #    提醒 agent "evidence record → commit → snapshot stale → fail" 死循环路径。
     hint = _check_recent_evidence_pending_commit(
         project_root, spec_name, target_status,
+    )
+    if hint:
+        hints.append(hint)
+
+    # 8. Degradation-path coverage (2026-07-19 候选 1).
+    #    Advisory: spec 涉及降级/异常逻辑但 verify evidence 只含 happy path。
+    hint = _check_degradation_path_coverage(
+        project_root, spec_name, spec_content, target_status,
     )
     if hint:
         hints.append(hint)
