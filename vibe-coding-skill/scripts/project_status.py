@@ -268,6 +268,67 @@ def _run_doctor_if_needed(project_root: str, max_age_seconds: int = 60) -> dict:
 _skill_upgrade_cache: dict[str, tuple[list[str], float]] = {}
 
 
+
+
+def _check_retro_upgrade_candidates(project_root: str) -> list[dict]:
+    """Scan retros for '沉淀落点' sections that declare Skill/项目 candidates
+    but have no matching file in .agents/skill-upgrade-candidates/ or archive/.
+
+    This closes the gap where retro authors write '是否形成 Skill 治理候选: yes'
+    but never create the formal candidate file, so vibe next never sees it.
+    """
+    retros_dir = os.path.join(project_root, ".agents", "retros")
+    if not os.path.isdir(retros_dir):
+        return []
+
+    # Collect existing candidate names (both active and archived)
+    existing_candidates = set()
+    for subdir in [".agents/skill-upgrade-candidates", ".agents/archive/skill-upgrade-candidates"]:
+        cdir = os.path.join(project_root, subdir)
+        if os.path.isdir(cdir):
+            for f in os.listdir(cdir):
+                if f.endswith(".md"):
+                    existing_candidates.add(f.lower())
+
+    candidates = []
+    for fname in sorted(os.listdir(retros_dir)):
+        if not fname.endswith(".md"):
+            continue
+        fpath = os.path.join(retros_dir, fname)
+        try:
+            with open(fpath, encoding="utf-8") as handle:
+                text = handle.read()
+        except OSError:
+            continue
+
+        # Check for 沉淀落点 section with Skill candidate declaration
+        if "是否形成 Skill 治理候选" not in text and "是否形成 Skill 候选" not in text:
+            continue
+        # Check if it says 'yes'
+        if not re.search(r"是否形成 Skill (?:治理)?候选(?:\*\*)?:\s*yes", text, re.IGNORECASE):
+            continue
+
+        # Extract the candidate summary
+        summary_match = re.search(
+            r"候选摘要是什么(?:\*\*)?(?:\?|：|:)\s*(.+?)$",
+            text,
+            re.MULTILINE,
+        )
+        summary = summary_match.group(1).strip() if summary_match else "(无摘要)"
+
+        # Check if a candidate file already exists for this retro
+        retro_base = fname.replace(".md", "").lower()
+        has_file = any(retro_base in ec for ec in existing_candidates)
+
+        if not has_file:
+            candidates.append({
+                "retro": fname,
+                "summary": summary[:120],
+                "level": "skill",
+            })
+
+    return candidates
+
 def _check_pending_skill_upgrades(project_root: str, max_age_seconds: int = 60) -> list[str]:
     """Check for pending skill upgrade candidates not yet archived."""
     import time
@@ -1644,6 +1705,23 @@ def recommend_next(project_root: str, specs: list[dict] | None = None) -> dict:
                 "reason": "如果不确定是否采纳，先读一遍再决定。",
             },
         )
+    # Retro中声明但未提取的升级候选
+    retro_candidates = _check_retro_upgrade_candidates(project_root)
+    if retro_candidates:
+        rc = retro_candidates[0]
+        return _recommendation(
+            f"提取 retro 中的升级候选 (来源: {rc['retro']})",
+            f"retro 声明了 'Skill 治理候选: yes' 但没有创建正式候选文件。"
+            f"摘要: {rc['summary']}",
+            checks=[f"{len(retro_candidates)} 个 retro 声明候选但未提取"],
+            why_not="未提取的候选不会出现在 vibe next 中，同样的失败模式会在后续 spec 中重复出现。",
+            action_command=f"cp .agents/retros/{rc['retro']} .agents/skill-upgrade-candidates/",
+            alternative={
+                "action": "先读 retro 沉淀落点再决定是否提取",
+                "reason": "如果候选已过时或 over-engineering，在 retro 中标记 'no' 即可。",
+            },
+        )
+
     # Pending skill/project upgrade candidates from retros
     pending_upgrades = _check_pending_skill_upgrades(project_root)
     if pending_upgrades:
