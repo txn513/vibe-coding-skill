@@ -1644,6 +1644,22 @@ def recommend_next(project_root: str, specs: list[dict] | None = None) -> dict:
                 "reason": "如果不确定是否采纳，先读一遍再决定。",
             },
         )
+    # Pending skill/project upgrade candidates from retros
+    pending_upgrades = _check_pending_skill_upgrades(project_root)
+    if pending_upgrades:
+        return _recommendation(
+            f"评审 {len(pending_upgrades)} 个待处理的升级候选提案",
+            f"retro 沉淀的升级候选尚未被评审或归档。这些提案来自实战反思，"
+            "不处理意味着同样的失败模式会在后续 spec 中重复出现。",
+            checks=[f"{len(pending_upgrades)} 个候选在 .agents/skill-upgrade-candidates/"],
+            why_not="现在不优先推进 Spec，因为未评审的升级候选意味着治理闭环未完成。",
+            action_command=f"ls .agents/skill-upgrade-candidates/",
+            alternative={
+                "action": "先读最新候选内容再决定是否升级",
+                "reason": "如果候选是 over-engineering，归档即可；如果是合理改进，升级到 Skill。",
+            },
+        )
+
     stall_warnings = stage_stall_warnings(project_root, specs)
     if stall_warnings:
         return _recommendation(
