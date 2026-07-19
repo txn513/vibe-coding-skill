@@ -775,6 +775,19 @@ artifacts merely because a template exists.
     (immediate reminder): 53b reduces the entry, 53c fires once, 53d
     persists until the review is actually done.
 
+    **Rule 53e — context-sensitive advisories triggered by staged file paths**:
+    Soft constraints become effective when they meet the agent on the
+    path the agent must walk (the commit gate). `vibe commit` step 1
+    scans staged file paths and triggers context-sensitive advisories:
+    - **Runtime code** (app/src/lib/backend + .py/.js/.ts/.go/etc.):
+      reminds to restart the service and run a smoke test before commit.
+    - **Security code** (safe/auth/security/middleware/ssl/tls):
+      reminds to add at least 1 non-mock test (complements Rule 28b).
+    Projects can extend these by adding markers in `.agents/rules/`
+    files: `<!-- vibe:commit-advisory: pattern="regex" message="text" -->`.
+    The Skill provides the framework and defaults; projects provide
+    domain-specific rules. Advisory only, never blocks commit.
+
     Per-file-summary line-ref hard gate (2026-07-08, scheme B): after
     the per-file mention gate passes, `vibe commit --reviewed` runs a
     second scan that rejects the commit (exit 9) if any per-file

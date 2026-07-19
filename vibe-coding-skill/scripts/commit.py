@@ -504,6 +504,117 @@ def _check_rule28b_mock_only_tests(project_root: str, diff_text: str) -> None:
         print("   标记方式: @pytest.mark.integration 或 skipif 无网络")
         print("<!-- vibe:commit_rule28b_advisory: mock_only_network_tests -->")
         print()
+
+
+# Rule 53e: context-sensitive advisories triggered by staged file paths.
+# Soft constraints become hard constraints when they meet the agent on
+# the path the agent must walk (commit gate). Project rules can extend
+# these via .agents/rules/ with <!-- vibe:commit-advisory: pattern="..." --> markers.
+
+_RULE53E_DEFAULTS = [
+    {
+        "name": "runtime-restart",
+        "pattern": r"(?:app|src|lib|backend)/.*\.(py|js|ts|jsx|tsx|go|rs|java|rb)$",
+        "message": (
+            "⚠️  Rule 53e advisory: 修改了 runtime 代码，commit 前请确认:\n"
+            "   1. 服务已重启（用守护脚本或手动重启）\n"
+            "   2. Smoke test 通过（首页/管理后台/API 入口可达）\n"
+            "   跳过可能导致'改完代码但服务跑旧版本'的问题"
+        ),
+        "marker": "runtime_restart",
+    },
+    {
+        "name": "security-nonmock",
+        "pattern": r"(?:safe|auth|security|middleware|ssl|tls|crypt|csrf|xss|sanitize).*\.(py|js|ts)$",
+        "message": (
+            "⚠️  Rule 53e advisory: 修改了安全相关代码，建议补充至少 1 个非 mock 测试 (Rule 28b)\n"
+            "   Mock 测试通过 ≠ 真实行为正确\n"
+            "   标记方式: @pytest.mark.integration 或 skipif 无网络"
+        ),
+        "marker": "security_nonmock",
+    },
+]
+
+
+def _check_rule53e_path_advisories(project_root: str) -> None:
+    """Rule 53e: trigger context-sensitive advisories based on staged file paths.
+
+    Built-in rules: runtime code -> restart reminder, security code ->
+    non-mock test reminder. Projects can extend via .agents/rules/ files
+    with <!-- vibe:commit-advisory: pattern="glob" message="..." --> markers.
+    """
+    import re as _re
+
+    # Get staged files
+    rc, out, _ = _run(["git", "diff", "--cached", "--name-only"], project_root)
+    if rc != 0 or not out.strip():
+        return
+    staged_files = [f.strip() for f in out.strip().splitlines() if f.strip()]
+    if not staged_files:
+        return
+
+    # Load project-level commit-advisory rules from .agents/rules/
+    project_rules = _load_project_commit_advisories(project_root)
+    all_rules = _RULE53E_DEFAULTS + project_rules
+
+    fired = set()
+    for rule in all_rules:
+        pattern = rule.get("pattern", "")
+        if not pattern:
+            continue
+        try:
+            regex = _re.compile(pattern, _re.IGNORECASE)
+        except _re.error:
+            continue
+        matching = [f for f in staged_files if regex.search(f)]
+        if matching:
+            marker = rule.get("marker", rule.get("name", ""))
+            if marker in fired:
+                continue  # Already fired this advisory
+            fired.add(marker)
+            print(rule.get("message", ""))
+            print(f"   匹配文件: {', '.join(matching[:3])}" +
+                  (f" +{len(matching)-3}" if len(matching) > 3 else ""))
+            print(f"<!-- vibe:commit_rule53e_advisory: {marker} -->")
+            print()
+
+
+def _load_project_commit_advisories(project_root: str) -> list[dict]:
+    """Load project-level commit advisory rules from .agents/rules/ files.
+
+    Format: <!-- vibe:commit-advisory: pattern="regex" message="text" -->
+    """
+    import re as _re
+    rules_dir = os.path.join(project_root, ".agents", "rules")
+    if not os.path.isdir(rules_dir):
+        return []
+
+    advisory_re = _re.compile(
+        r'<!--\s*vibe:commit-advisory:\s*pattern="([^"]+)"\s+message="([^"]+)"\s*-->',
+        _re.DOTALL,
+    )
+    project_rules = []
+    for root_dir, _, files in os.walk(rules_dir):
+        if "archive" in root_dir:
+            continue
+        for f in files:
+            if not f.endswith(".md"):
+                continue
+            fpath = os.path.join(root_dir, f)
+            try:
+                with open(fpath, encoding="utf-8") as handle:
+                    text = handle.read()
+            except OSError:
+                continue
+            for m in advisory_re.finditer(text):
+                project_rules.append({
+                    "name": f"project-{f}-{len(project_rules)}",
+                    "pattern": m.group(1),
+                    "message": m.group(2).replace("\\n", "\n"),
+                    "marker": f"project-{f}-{len(project_rules)}",
+                })
+    return project_rules
+
 def _run(argv: list[str], cwd: str) -> tuple[int, str, str]:
     """Run argv in cwd; return (exit_code, stdout, stderr)."""
     completed = subprocess.run(
@@ -905,6 +1016,8 @@ def commit(
         print("📝 完整 diff:")
         print(full_diff)
         print()
+    # Rule 53e: path-based context-sensitive advisories
+    _check_rule53e_path_advisories(project_root)
     # Rule 53 review declaration gate: Agent must confirm it
     # inspected the diff content. This is a structural forcing
     # function — the Agent must output a review summary before
