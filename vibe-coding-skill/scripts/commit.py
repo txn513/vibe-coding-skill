@@ -1344,6 +1344,14 @@ def commit(
     if reviewed and not quick and not no_verify and review_summary.strip():
         trailer_argv.extend(["--trailer", f"Review-Summary={review_summary.strip()}"])
     completed = subprocess.run(trailer_argv, cwd=project_root)
+    # Rule 53c: --quick skips agent self-review AND vibe review won't auto-trigger.
+    # Remind the agent that both review lines of defense are down.
+    if quick and completed.returncode == 0:
+        print()
+        print("⚠️  Rule 53c: --quick 跳过了 agent 自审，且 vibe review 不会自动触发。")
+        print("   两道审查防线同时失效: 自审 (step 1 diff 审查) + 独立审查 (sub-agent)。")
+        print("   业务代码建议补跑: vibe review <project_root> <spec_name>")
+        print("<!-- vibe:commit_rule53c_advisory: quick_both_defenses_down -->")
     return completed.returncode
 
 

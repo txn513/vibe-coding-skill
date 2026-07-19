@@ -731,6 +731,20 @@ artifacts merely because a template exists.
     runtime code — `--quick` is allowed for test-only changes since they
     don't change production behavior.
 
+    **Rule 53c — `--quick` disables both review lines of defense**:
+    The vibe coding review architecture has two lines of defense:
+    (1) agent self-review (`vibe commit` step 1 → step 2, same agent
+    reads diff and writes review-summary), and (2) independent review
+    (`vibe review`, sub-agent with separate identity). When `--quick`
+    is used, defense (1) is skipped. Defense (2) is NOT auto-triggered
+    — `vibe review` requires explicit invocation. The result: both
+    defenses are down simultaneously, and the commit lands with zero
+    review. After a `--quick` commit succeeds, the wrapper prints a
+    `⚠️ Rule 53c advisory` reminding the agent to run `vibe review`
+    for business code changes. This complements Rule 53b: 53b reduces
+    misuse (only docs-only), 53c catches the leaks (remind to add
+    independent review).
+
     Per-file-summary line-ref hard gate (2026-07-08, scheme B): after
     the per-file mention gate passes, `vibe commit --reviewed` runs a
     second scan that rejects the commit (exit 9) if any per-file
