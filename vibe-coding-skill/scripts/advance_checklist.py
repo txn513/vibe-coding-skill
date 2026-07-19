@@ -399,10 +399,7 @@ def _check_rule57_plan_structure(
     except OSError:
         return None
     # Check for ### sections with bullet content
-    sections = re.findall(r'###\s+.+?
-((?:[^
-]|
-(?!\s*###))*)', plan_text, re.DOTALL)
+    sections = re.findall(r'###\s+.+?\n((?:[^\n]|\n(?!\s*###))*)', plan_text, re.DOTALL)
     if not sections:
         return None
     empty_sections = 0
