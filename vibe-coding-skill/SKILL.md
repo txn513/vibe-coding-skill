@@ -745,6 +745,7 @@ artifacts merely because a template exists.
     Test files (`tests/`, `test/`, `__tests__/`, `spec/`) are NOT
     runtime code — `--quick` is allowed for test-only changes since they
     don't change production behavior.
+<!-- ENFORCE: id=R53b, hook=tool_call, tool=bash, match=vibe(?:\.py)?\s+commit.*(--quick|--no-verify), action=block_runtime_bypass, message=--quick/--no-verify forbidden on runtime code -->
 
     **Rule 53c — `--quick` disables both review lines of defense**:
     The vibe coding review architecture has two lines of defense:

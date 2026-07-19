@@ -300,6 +300,37 @@ function registerHandlers(pi: ExtensionAPI, rules: EnforceRule[], projectRoot: s
             return { block: true, reason: `${id}: ${message}` };
           }
 
+          // R53b: block --quick / --no-verify on runtime code
+          if (id === "R53b" && rule.action === "block_runtime_bypass") {
+            const isBypass = /--quick|--no-verify/.test(cmd);
+            if (!isBypass) {
+              appendEnforcerLog(projectRoot, id, "pass", cmd, "No bypass flag");
+            } else {
+              // Check if staged files contain runtime code
+              try {
+                const staged = require("child_process").execSync(
+                  "git diff --cached --name-only", { cwd: projectRoot, encoding: "utf-8" }
+                ).trim().split("\n").filter((l: string) => l.trim());
+                const runtimeExts = [".py", ".js", ".ts", ".jsx", ".tsx", ".go", ".rs", ".java", ".rb", ".php", ".c", ".cpp", ".swift", ".kt", ".sql"];
+                const testDirs = ["tests/", "test/", "__tests__/", "spec/"];
+                const runtimeFiles = staged.filter((f: string) => {
+                  const ext = f.substring(f.lastIndexOf("."));
+                  const isTest = testDirs.some((d: string) => f.includes(d));
+                  return !isTest && runtimeExts.includes(ext);
+                });
+                if (runtimeFiles.length > 0) {
+                  const msg = `Rule 53b: --quick/--no-verify on runtime code forbidden (${runtimeFiles.length} runtime files). Use full vibe commit two-step flow.`;
+                  ctx.ui.notify(`🚫 ${id}: ${msg}`, "warning");
+                  appendEnforcerLog(projectRoot, id, "block", cmd, msg);
+                  return { block: true, reason: msg };
+                }
+                appendEnforcerLog(projectRoot, id, "pass", cmd, "Docs-only bypass");
+              } catch (e) {
+                appendEnforcerLog(projectRoot, id, "error", cmd, String(e));
+              }
+            }
+          }
+
           // R4: verify commands check
           if (id === "R4" && rule.action === "verify_commands") {
             const result = checkVerifyCommands(projectRoot);
@@ -343,6 +374,14 @@ function registerHandlers(pi: ExtensionAPI, rules: EnforceRule[], projectRoot: s
           if (id === "R62" && rule.action === "check_call_sites") {
             const result = checkCallSites(projectRoot);
             if (!result.ok) ctx.ui.notify(`⚠️ ${id}: ${result.detail}`, "warning");
+          }
+
+          // R28b: block network code changes with only mock tests
+          if (id === "R28b" && rule.action === "block_mock_only_network") {
+            // Advisory only in extension - just warn, don't block
+            // (mock detection requires reading test files, too heavy for a pre-tool block)
+            ctx.ui.notify(`📝 ${id}: If modifying network code, ensure at least 1 non-mock test`, "info");
+            appendEnforcerLog(projectRoot, id, "advisory", cmd, "Network code mock test reminder");
           }
 
           // R67: override session separation
