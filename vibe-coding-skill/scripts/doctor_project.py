@@ -457,6 +457,94 @@ def _audit_unbound_rules(project_root: str, warnings: list[str]) -> None:
                 "still in proposed status. Consider adopting, rejecting, or binding "
                 "them to a gate (rule-binding enforcement, per 2026-07-19 候选 2)."
             )
+
+
+def _audit_rule_bloat(project_root: str, warnings: list[str]) -> None:
+    """Rule lifecycle governance: detect stale or bloated rule files.
+
+    Rules that are never triggered dilute the visibility of important
+    rules in the agent's context window. This audit checks:
+    1. Total rule file size (lines across all .agents/rules/*.md)
+    2. Rules not referenced in the last 5 retros
+    Advisory only — does not auto-archive.
+    """
+    rules_dir = os.path.join(project_root, ".agents", "rules")
+    if not os.path.isdir(rules_dir):
+        return
+
+    # 1. Total lines across all rule files
+    total_lines = 0
+    rule_files = []
+    for root_dir, _, files in os.walk(rules_dir):
+        # Skip archive subdirectory
+        if "archive" in root_dir:
+            continue
+        for f in files:
+            if not f.endswith(".md"):
+                continue
+            fpath = os.path.join(root_dir, f)
+            try:
+                with open(fpath, encoding="utf-8") as handle:
+                    lines = len(handle.readlines())
+                total_lines += lines
+                rule_files.append((fpath, lines, f))
+            except OSError:
+                continue
+
+    if total_lines > 2000:
+        warnings.append(
+            f"Rule bloat: .agents/rules/ has {total_lines} lines across "
+            f"{len(rule_files)} files. Agents with limited context windows "
+            "may not read all rules. Consider archiving stale rules to "
+            ".agents/rules/archive/."
+        )
+
+    # 2. Check if rules are referenced in recent retros
+    retros_dir = os.path.join(project_root, ".agents", "retros")
+    recent_retro_refs = set()
+    if os.path.isdir(retros_dir):
+        import time
+        now = time.time()
+        retro_files = []
+        for f in os.listdir(retros_dir):
+            if not f.endswith(".md"):
+                continue
+            fpath = os.path.join(retros_dir, f)
+            if os.path.getmtime(fpath) > now - 90 * 86400:  # last 90 days
+                retro_files.append(fpath)
+
+        rule_id_re = re.compile(r"(R-D-\d+|W-\d+|R-\d+|P-PSQ-\d+)", re.IGNORECASE)
+        for rf in retro_files:
+            try:
+                with open(rf, encoding="utf-8") as handle:
+                    text = handle.read()
+                for m in rule_id_re.finditer(text):
+                    recent_retro_refs.add(m.group(1).upper())
+            except OSError:
+                continue
+
+    # 3. Find rule IDs defined in rule files not referenced in retros
+    if recent_retro_refs and rule_files:
+        defined_ids = set()
+        rule_id_def_re = re.compile(r"(?:##|###)\s+(R-D-\d+|W-\d+|R-\d+|P-PSQ-\d+)", re.IGNORECASE)
+        for fpath, _, _ in rule_files:
+            try:
+                with open(fpath, encoding="utf-8") as handle:
+                    text = handle.read()
+                for m in rule_id_def_re.finditer(text):
+                    defined_ids.add(m.group(1).upper())
+            except OSError:
+                continue
+
+        stale_ids = defined_ids - recent_retro_refs
+        if len(stale_ids) > 10:
+            sample = sorted(stale_ids)[:5]
+            warnings.append(
+                f"Rule lifecycle: {len(stale_ids)} rule IDs not referenced in "
+                f"last 90 days of retros (sample: {', '.join(sample)}). "
+                "Consider archiving stale rules to .agents/rules/archive/ "
+                "or marking with > 状态: stale."
+            )
 def doctor(project_root: str) -> dict:
     workflow, migrated = ensure_workflow(project_root)
     issues = []
@@ -508,6 +596,7 @@ def doctor(project_root: str) -> dict:
     _audit_inbox_drift(project_root, warnings)
     _audit_directory_structure(project_root, warnings)
     _audit_unbound_rules(project_root, warnings)
+    _audit_rule_bloat(project_root, warnings)
     # Rule 53d: check for pending review markers (bypassed review gates)
     pending_reviews_path = os.path.join(project_root, ".agents", ".vibe-pending-reviews.json")
     if os.path.exists(pending_reviews_path):

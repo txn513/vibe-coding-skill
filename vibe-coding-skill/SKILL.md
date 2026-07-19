@@ -339,6 +339,21 @@ artifacts merely because a template exists.
     command, surface a non-blocking advisory reminding the author to attach
     the actual command line so a reviewer can reproduce the result. The
     advisory follows Rule 39 (default behaviour, opt-out).
+28b. **Mock tests do not prove real network behavior**: When a spec
+    modifies network request code (httpx, requests, aiohttp, urllib, fetch,
+    or any HTTP client), the corresponding test files MUST include at least
+    one test that exercises the REAL network behavior, not just mocks. Mock
+    tests verify that the mock returns what you expect — they do NOT verify
+    that the real API behaves the same way. Observed failure: a security fix
+    for `_safe_request` had 1687 mock tests passing, but the real network
+    call triggered TooManyRedirects because the mock never exercised the
+    redirect chain. Enforcement: advisory only. `vibe commit` prints a
+    Rule 28b advisory when the diff modifies network code and the test files
+    only contain mock patterns (patch/Mock/MonkeyMock) without any
+    real-network markers (@pytest.mark.integration, live_test, skipif
+    network). Complements Rule 28: Rule 28 says "unit tests aren't enough",
+    Rule 28b says "mock tests specifically don't prove network behavior".
+
 29. **Sub-spec Intent reconciliation gate**: When a spec is decomposed into
     multiple sub-specs, the final sub-spec advancing to `done` must complete
     a reconciliation of the parent spec's Intent and Acceptance Criteria.

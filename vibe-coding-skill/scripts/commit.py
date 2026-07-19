@@ -452,6 +452,58 @@ def _get_commit_short_hash(project_root: str) -> str:
         return out.strip()
     return "unknown"
 
+
+
+def _check_rule28b_mock_only_tests(project_root: str, diff_text: str) -> None:
+    """Rule 28b advisory: network behavior changes with only mock tests.
+
+    Complements Rule 28 ("unit tests alone are not sufficient"):
+    Rule 28 says "unit tests aren't enough", Rule 28b says "mock tests
+    don't prove real behavior". When the diff modifies network request
+    code and the corresponding test files only contain mocks, print an
+    advisory suggesting at least 1 real network test.
+    """
+    if not diff_text or diff_text == "(no tracked changes)":
+        return
+    import re
+    # Detect network request code changes
+    network_patterns = re.compile(
+        r"httpx|requests|aiohttp|urllib|fetch\(|\.get\(|\.post\(|"
+        r"_safe_request|session\.|client\.|http\.|https://",
+        re.IGNORECASE,
+    )
+    if not network_patterns.search(diff_text):
+        return
+
+    # Find test files in the diff
+    test_file_re = re.compile(r"^\+\+\+ b/(.*test.*\.py)", re.MULTILINE)
+    test_files = test_file_re.findall(diff_text)
+    if not test_files:
+        return
+
+    # Check if test files contain mock patterns
+    mock_re = re.compile(
+        r"patch\(|MagicMock|AsyncMock|Mock\(|monkeypatch|mock\.|"
+        r"return_value|side_effect",
+        re.IGNORECASE,
+    )
+    has_mock = mock_re.search(diff_text)
+
+    # Check for real network test markers
+    real_network_re = re.compile(
+        r"integration|real_network|no_mock|live_test|@pytest\.mark\.integration"
+        r"|skipif.*network|requests\.get\(|httpx\.Client\(",
+        re.IGNORECASE,
+    )
+    has_real = real_network_re.search(diff_text)
+
+    if has_mock and not has_real:
+        print("⚠️  Rule 28b advisory: 网络行为修改但测试全部 mock，"
+              "建议补充至少 1 个真实网络测试")
+        print("   mock 测试验证的是 mock 数据，不是真实 API 行为")
+        print("   标记方式: @pytest.mark.integration 或 skipif 无网络")
+        print("<!-- vibe:commit_rule28b_advisory: mock_only_network_tests -->")
+        print()
 def _run(argv: list[str], cwd: str) -> tuple[int, str, str]:
     """Run argv in cwd; return (exit_code, stdout, stderr)."""
     completed = subprocess.run(
@@ -871,6 +923,8 @@ def commit(
     # This is the lowest-cost, highest-value enhancement — it
     # doesn't block the commit, just highlights risk areas.
     _print_evidence_grep(project_root, full_diff)
+    # Rule 28b: network behavior changes with only mock tests
+    _check_rule28b_mock_only_tests(project_root, full_diff)
     # 2026-07-19 候选 3: evidence-sufficiency advisory.
     # When --review-summary is provided, check if it claims verification
     # without citing concrete methods. Advisory only.
