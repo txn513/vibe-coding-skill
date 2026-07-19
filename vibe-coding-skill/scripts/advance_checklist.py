@@ -381,6 +381,106 @@ def _check_degradation_path_coverage(
         "建议补充 degradation path 验证 (advisory, 不阻塞)"
     )
 
+
+
+# Rule 57.1: plan structure check
+def _check_rule57_plan_structure(
+    project_root: str, spec_name: str, target: str,
+) -> str | None:
+    """Advisory: plan should have phase/task sub-bullets with descriptions."""
+    if target not in {"in-progress", "review", "released", "done"}:
+        return None
+    plan_file = os.path.join(project_root, ".agents", "plans", f"{spec_name}.md")
+    if not os.path.exists(plan_file):
+        return None
+    try:
+        with open(plan_file, encoding="utf-8") as handle:
+            plan_text = handle.read()
+    except OSError:
+        return None
+    # Check for ### sections with bullet content
+    sections = re.findall(r'###\s+.+?
+((?:[^
+]|
+(?!\s*###))*)', plan_text, re.DOTALL)
+    if not sections:
+        return None
+    empty_sections = 0
+    for section in sections:
+        # Count bullets with actual description (not just checkbox)
+        bullets = re.findall(r'^\s*-+\s*(?:\[.\]\s*)?(.+)', section, re.MULTILINE)
+        meaningful = [b for b in bullets if len(b.strip()) > 5 and b.strip() not in {"TBD", "TODO", "待定"}]
+        if not meaningful:
+            empty_sections += 1
+    if empty_sections > 0:
+        return (
+            f"plan 有 {empty_sections} 个 phase 段缺少 sub-bullets 描述 (Rule 57.1); "
+            "每个 task bullet 应含: 做什么 + 怎么验证 + 涉及文件"
+        )
+    return None
+
+
+# Rule 12/44: composed-path and impact analysis checks
+_MULTI_COMPONENT_RE = re.compile(
+    r"parser.*download|download.*upload|frontend.*backend|"
+    r"client.*server|api.*db|ui.*api",
+    re.IGNORECASE,
+)
+_MODIFICATION_RE = re.compile(
+    r"修改|重构|替换|refactor|replace|rewrite|modify|改写",
+    re.IGNORECASE,
+)
+
+
+def _check_composed_path_coverage(
+    project_root: str, spec_name: str, spec_content: str, target: str,
+) -> str | None:
+    """Advisory (Rule 12): spec involving multiple components should verify composed paths."""
+    if target not in {"review", "released", "done"}:
+        return None
+    if not _MULTI_COMPONENT_RE.search(spec_content):
+        return None
+    if not _has_evidence_file(project_root, spec_name, "verify"):
+        return None
+    verify_path = _evidence_file(project_root, spec_name, "verify")
+    try:
+        with open(verify_path, encoding="utf-8") as handle:
+            verify_text = handle.read()
+    except OSError:
+        return None
+    # Check if evidence mentions composed/combined/integration path
+    composed_re = re.compile(
+        r"组合|composed|combined|integration|端到端|e2e|end.to.end|全链路",
+        re.IGNORECASE,
+    )
+    if composed_re.search(verify_text):
+        return None
+    return (
+        "spec 涉及多组件组合 (Rule 12), verify evidence 未发现组合路径验证, "
+        "建议补充端到端或组合路径测试 (advisory, 不阻塞)"
+    )
+
+
+def _check_impact_analysis_table(
+    spec_content: str, target: str,
+) -> str | None:
+    """Advisory (Rule 44): spec modifying existing features should have impact analysis."""
+    if target not in {"review", "released", "done"}:
+        return None
+    if not _MODIFICATION_RE.search(spec_content):
+        return None
+    # Check if spec has impact analysis section
+    impact_re = re.compile(
+        r"##\s+(?:影响分析|Impact.Analysis|影响范围分析|Read-Path Impact)",
+        re.IGNORECASE,
+    )
+    if impact_re.search(spec_content):
+        return None
+    return (
+        "spec 涉及修改现有功能 (Rule 44), 建议补 Impact Analysis Table, "
+        "列出每个受影响的调用点/消费者 (advisory, 不阻塞)"
+    )
+
 def build_advance_checklist(
     project_root: str,
     spec_name: str,
@@ -457,6 +557,27 @@ def build_advance_checklist(
     #    Advisory: spec 涉及降级/异常逻辑但 verify evidence 只含 happy path。
     hint = _check_degradation_path_coverage(
         project_root, spec_name, spec_content, target_status,
+    )
+    if hint:
+        hints.append(hint)
+
+    # 9. Plan structure (Rule 57.1): plan should have sub-bullets.
+    hint = _check_rule57_plan_structure(
+        project_root, spec_name, target_status,
+    )
+    if hint:
+        hints.append(hint)
+
+    # 10. Composed-path coverage (Rule 12): multi-component specs.
+    hint = _check_composed_path_coverage(
+        project_root, spec_name, spec_content, target_status,
+    )
+    if hint:
+        hints.append(hint)
+
+    # 11. Impact analysis table (Rule 44): modification specs.
+    hint = _check_impact_analysis_table(
+        spec_content, target_status,
     )
     if hint:
         hints.append(hint)

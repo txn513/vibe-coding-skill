@@ -105,6 +105,9 @@ def run_retrospective(project_root: str, spec_name: str = "") -> dict | None:
     else:
         print("   4. 暂无重复失败模式，不建议升级 Skill 核心")
 
+        # Rule 25.1: check failure-mode section is not empty
+        _check_rule25_failure_mode_filled(retro_file)
+
     return {
         "retro_file": retro_file,
         "report_file": report_file,
@@ -479,6 +482,65 @@ def _replace_bullet_field(content: str, field: str, new_value: str) -> str:
         )
     return content.rstrip() + f"\n\n- **{field}**: {new_value}\n"
 
+
+
+
+def _check_rule25_failure_mode_filled(retro_file: str) -> None:
+    """Rule 25.1 advisory: retro failure-mode section should not be empty.
+
+    Empty failure-mode sections cause self_analyze to miss upgrade signals.
+    Even when "nothing went wrong", the agent should record what could
+    have gone wrong but was avoided.
+    """
+    if not os.path.exists(retro_file):
+        return
+    try:
+        with open(retro_file, encoding="utf-8") as handle:
+            text = handle.read()
+    except OSError:
+        return
+
+    # Find failure-mode section
+    import re
+    # Match common section headers
+    section_re = re.compile(
+        r"(?:## 做错了什么|## 失败模式|## 失败模式与教训|## Failure Mode|## Lessons)",
+        re.IGNORECASE,
+    )
+    match = section_re.search(text)
+    if not match:
+        # No failure-mode section at all
+        print("⚠️  Rule 25.1 advisory: retro 缺少失败模式段。")
+        print("   失败模式是 self_analyze 提取 Skill 升级信号的唯一来源。")
+        print("   即使'这次没犯错'，也应记录'容易犯但避开了什么'。")
+        print("<!-- vibe:retro_rule25_1_advisory: missing_section -->")
+        print()
+        return
+
+    # Extract section content (until next ## or end of file)
+    start = match.end()
+    next_section = re.search(r'
+## ', text[start:])
+    end = start + next_section.start() if next_section else len(text)
+    section_text = text[start:end].strip()
+
+    # Count meaningful lines (exclude empty, placeholder, headers)
+    placeholder_re = re.compile(r"^(无|N/A|none|暂无|待补充|\-+$|\*+$)$", re.IGNORECASE)
+    meaningful = 0
+    for line in section_text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if placeholder_re.match(line):
+            continue
+        meaningful += 1
+
+    if meaningful < 3:
+        print("⚠️  Rule 25.1 advisory: retro 失败模式段为空或只有占位符。")
+        print("   失败模式是 self_analyze 提取 Skill 升级信号的唯一来源。")
+        print("   即使'这次没犯错'，也应记录'容易犯但避开了什么'（如'差点跳过 review'）。")
+        print("<!-- vibe:retro_rule25_1_advisory: empty_section -->")
+        print()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run a project retrospective workflow")
