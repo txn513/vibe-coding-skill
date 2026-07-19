@@ -223,6 +223,53 @@ def _signal_list(project_root: str) -> None:
                 print(f"   - {stripped}")
 
 
+
+def _print_rules_summary() -> None:
+    """Print a concise summary of the most important Skill rules."""
+    print("Vibe Coding Key Rules (full rules in SKILL.md):")
+    print()
+    rules = [
+        ("Rule 53", "Every commit needs two-step review: vibe commit -> vibe commit --reviewed"),
+        ("Rule 53b", "--quick / --no-verify are for docs-only, not runtime code"),
+        ("Rule 53d", "Bypass writes pending marker, vibe next/status reminds to review"),
+        ("Rule 53e", "Commit auto-triggers context advisories based on staged file paths"),
+        ("Rule 28b", "Network behavior fixes need at least 1 non-mock test"),
+        ("Rule 25.1", "Retro failure-mode section must not be empty"),
+        ("Rule 54", "Retro is mandatory after done, vibe next blocks skip"),
+        ("Rule 12", "Multi-component specs must verify composed paths end-to-end"),
+        ("Rule 18", "Skill core has no project knowledge, upgrades need cross-project evidence"),
+        ("Rule 64", "asyncio.create_task + shared AsyncSession triggers advisory"),
+    ]
+    for i, (rule, desc) in enumerate(rules, 1):
+        print(f"  {i}. {rule}: {desc}")
+    print()
+    print("Run `vibe doctor <project>` for project health status.")
+    print("<!-- vibe:rules_summary: shown -->")
+
+
+def _maybe_print_first_contact_hint(project_root: str) -> None:
+    """Print a one-time hint about vibe rules-summary on first contact."""
+    marker = os.path.join(project_root, ".agents", ".first-contact-shown")
+    if os.path.exists(marker):
+        return
+    print("First time with Vibe Coding? Run `vibe rules-summary` for key rules.")
+    print("<!-- vibe:first_contact_hint: shown -->")
+    os.makedirs(os.path.dirname(marker), exist_ok=True)
+    with open(marker, "w") as f:
+        f.write("shown")
+    # Ensure .gitignore covers the marker
+    gitignore = os.path.join(project_root, ".gitignore")
+    relpath = ".agents/.first-contact-shown"
+    existing = ""
+    if os.path.exists(gitignore):
+        with open(gitignore, "r") as gi:
+            existing = gi.read()
+    if relpath not in existing.splitlines():
+        with open(gitignore, "a") as gi:
+            if existing and not existing.endswith("\n"):
+                gi.write("\n")
+            gi.write(relpath + "\n")
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Unified Vibe Coding workflow dispatcher")
     sub = parser.add_subparsers(dest="operation", required=True)
@@ -490,6 +537,12 @@ def main() -> None:
     install_hook_cmd = sub.add_parser("install-precommit-hook")
     install_hook_cmd.add_argument("project_root", help="Project root to install pre-commit hook for")
 
+    rules_summary = sub.add_parser(
+        "rules-summary",
+        help="Print key rules summary (recommended on first contact)",
+    )
+    rules_summary.add_argument("project_root", nargs="?", default=".", help="Project root")
+
     version_bump_cmd = sub.add_parser(
         "version-bump",
         help="Skill self-maintenance: write VERSION = <HEAD>-<feat-slug> and land a chore commit. "
@@ -621,6 +674,10 @@ def main() -> None:
         return
 
     # version-bump is self-maintenance; doesn't need a project_root.
+    if args.operation == "rules-summary":
+        _print_rules_summary()
+        return
+
     if args.operation == "version-bump":
         raise SystemExit(version_bump.bump())
 
