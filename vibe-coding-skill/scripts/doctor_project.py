@@ -508,6 +508,22 @@ def doctor(project_root: str) -> dict:
     _audit_inbox_drift(project_root, warnings)
     _audit_directory_structure(project_root, warnings)
     _audit_unbound_rules(project_root, warnings)
+    # Rule 53d: check for pending review markers (bypassed review gates)
+    pending_reviews_path = os.path.join(project_root, ".agents", ".vibe-pending-reviews.json")
+    if os.path.exists(pending_reviews_path):
+        import json as _json
+        try:
+            with open(pending_reviews_path, "r", encoding="utf-8") as handle:
+                entries = _json.load(handle)
+            if entries:
+                warnings.append(
+                    f"Rule 53d: {len(entries)} commit(s) bypassed review gate "
+                    "and have not been reviewed. Run `vibe review` to address them, "
+                    "or delete .agents/.vibe-pending-reviews.json to dismiss."
+                )
+        except (OSError, _json.JSONDecodeError):
+            pass
+
     # Rule 56: accumulate adjacent-location protection stats across specs
     adjacent_stats = {"total": 0, "protected": 0, "skipped": 0}
 

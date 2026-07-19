@@ -387,6 +387,71 @@ def _check_rule53b_runtime_bypass(project_root: str, quick: bool, no_verify: boo
             print("   请确保 retro 追溯此 bypass 原因 (Rule 54)")
     print("<!-- vibe:commit_rule53b_advisory: runtime_bypass -->")
     print()
+
+
+# Rule 53d: pending review marker for gate bypass tracking.
+# When --quick or --no-verify commits succeed, a marker is written so
+# vibe next/status can remind the agent to run vibe review later.
+
+def _pending_reviews_path(project_root: str) -> str:
+    """Path to the JSON file tracking commits that bypassed review."""
+    return os.path.join(project_root, ".agents", ".vibe-pending-reviews.json")
+
+
+def _write_pending_review_marker(
+    project_root: str, commit_hash: str, bypass_type: str, reason: str,
+    files: list[str],
+) -> None:
+    """Append a pending review entry after a --quick / --no-verify commit.
+
+    Also ensures .gitignore covers the marker file.
+    """
+    import json as _json
+    import time as _time
+    path = _pending_reviews_path(project_root)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+
+    # Read existing entries
+    entries = []
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                entries = _json.load(handle)
+        except (OSError, _json.JSONDecodeError):
+            entries = []
+
+    entries.append({
+        "commit": commit_hash,
+        "bypass_type": bypass_type,
+        "reason": reason or None,
+        "timestamp": _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime()),
+        "files": files[:10],  # cap at 10 for brevity
+    })
+
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(_json.dumps(entries, ensure_ascii=False, indent=2))
+
+    # Ensure .gitignore covers the marker
+    gitignore = os.path.join(project_root, ".gitignore")
+    marker_relpath = ".agents/.vibe-pending-reviews.json"
+    existing = ""
+    if os.path.exists(gitignore):
+        with open(gitignore, "r", encoding="utf-8") as gi:
+            existing = gi.read()
+    if marker_relpath not in existing.splitlines():
+        with open(gitignore, "a", encoding="utf-8") as gi:
+            if existing and not existing.endswith("\n"):
+                gi.write("\n")
+            gi.write(marker_relpath + "\n")
+
+
+def _get_commit_short_hash(project_root: str) -> str:
+    """Get the short hash of the most recent commit."""
+    rc, out, _ = _run(["git", "rev-parse", "--short", "HEAD"], project_root)
+    if rc == 0 and out.strip():
+        return out.strip()
+    return "unknown"
+
 def _run(argv: list[str], cwd: str) -> tuple[int, str, str]:
     """Run argv in cwd; return (exit_code, stdout, stderr)."""
     completed = subprocess.run(
@@ -1345,13 +1410,26 @@ def commit(
         trailer_argv.extend(["--trailer", f"Review-Summary={review_summary.strip()}"])
     completed = subprocess.run(trailer_argv, cwd=project_root)
     # Rule 53c: --quick skips agent self-review AND vibe review won't auto-trigger.
-    # Remind the agent that both review lines of defense are down.
-    if quick and completed.returncode == 0:
+    # Rule 53d: write pending review marker so vibe next/status can remind later.
+    if completed.returncode == 0 and (quick or no_verify):
+        short_hash = _get_commit_short_hash(project_root)
+        bypass_type = "quick" if quick else "no-verify"
+        # Get staged file list for the marker
+        rc_f, files_out, _ = _run(["git", "diff", "--cached", "--name-only"], project_root)
+        staged_files = files_out.strip().splitlines() if rc_f == 0 else []
+        _write_pending_review_marker(
+            project_root, short_hash, bypass_type,
+            reason="", files=staged_files,
+        )
         print()
-        print("⚠️  Rule 53c: --quick 跳过了 agent 自审，且 vibe review 不会自动触发。")
-        print("   两道审查防线同时失效: 自审 (step 1 diff 审查) + 独立审查 (sub-agent)。")
-        print("   业务代码建议补跑: vibe review <project_root> <spec_name>")
-        print("<!-- vibe:commit_rule53c_advisory: quick_both_defenses_down -->")
+        if quick:
+            print("⚠️  Rule 53c: --quick 跳过了 agent 自审，且 vibe review 不会自动触发。")
+            print("   两道审查防线同时失效: 自审 (step 1 diff 审查) + 独立审查 (sub-agent)。")
+            print("   业务代码建议补跑: vibe review <project_root> <spec_name>")
+            print("<!-- vibe:commit_rule53c_advisory: quick_both_defenses_down -->")
+        print("⚠️  Rule 53d: 此 commit 跳过了 review gate，已记录到 pending review marker。")
+        print("   下次 vibe next / vibe status 会提醒补跑 vibe review。")
+        print("<!-- vibe:commit_rule53d_marker: written -->")
     return completed.returncode
 
 
@@ -1667,6 +1745,18 @@ def run(argv: list[str]) -> int:
         completed = subprocess.run(
             ["git", "commit", *augmented_argv], cwd=project_root
         )
+        # Rule 53d: write pending review marker for --no-verify bypass
+        if completed.returncode == 0:
+            short_hash = _get_commit_short_hash(project_root)
+            rc_f, files_out, _ = _run(["git", "diff", "--cached", "--name-only"], project_root)
+            staged_files = files_out.strip().splitlines() if rc_f == 0 else []
+            _write_pending_review_marker(
+                project_root, short_hash, "no-verify",
+                reason=no_verify_reason, files=staged_files,
+            )
+            print("⚠️  Rule 53d: 此 commit 跳过了 review + verify gate，已记录到 pending review marker。")
+            print("   下次 vibe next / vibe status 会提醒补跑 vibe review。")
+            print("<!-- vibe:commit_rule53d_marker: written -->")
         return completed.returncode
 
     return commit(

@@ -173,8 +173,10 @@ def project_status(project_root: str) -> None:
     _print_missing_retro_hint(project_root)
     _print_missing_changelog_hint(project_root)
     _print_uncommitted_work_hint(project_root)
-    _print_git_context_hint(project_root)
     _print_skill_upgrade_advisory(project_root)
+    _print_pending_reviews_hint(project_root)
+    _print_all_clean_signal(project_root, specs)
+    _print_pending_reviews_hint(project_root)
     _print_all_clean_signal(project_root, specs)
     # Rule 50: machine-readable status summary.
     spec_count = len(specs)
@@ -446,8 +448,10 @@ def project_next(project_root: str, args=None) -> dict:
     _print_missing_retro_hint(project_root)
     _print_missing_changelog_hint(project_root)
     _print_uncommitted_work_hint(project_root)
-    _print_git_context_hint(project_root)
     _print_skill_upgrade_advisory(project_root)
+    _print_pending_reviews_hint(project_root)
+    _print_all_clean_signal(project_root, specs)
+    _print_pending_reviews_hint(project_root)
     _print_all_clean_signal(project_root, specs)
     return recommendation
 
@@ -3122,6 +3126,44 @@ def _print_git_context_hint(project_root: str) -> None:
         print()
         print("🔀 Git 上下文: " + " | ".join(parts))
 
+
+
+
+def _print_pending_reviews_hint(project_root: str) -> None:
+    """Rule 53d: remind agent about commits that bypassed review gate.
+
+    Reads .agents/.vibe-pending-reviews.json and surfaces unreviewed
+    commits at high priority in vibe next / vibe status output.
+    """
+    import json as _json
+    marker_path = os.path.join(project_root, ".agents", ".vibe-pending-reviews.json")
+    if not os.path.exists(marker_path):
+        return
+    try:
+        with open(marker_path, "r", encoding="utf-8") as handle:
+            entries = _json.load(handle)
+    except (OSError, _json.JSONDecodeError):
+        return
+    if not entries:
+        return
+    print()
+    n = len(entries)
+    print(f"⚠️  Rule 53d: {n} 个 commit 跳过了 review gate，待补独立审查:")
+    for entry in entries[:5]:
+        commit = entry.get("commit", "?")[:7]
+        bypass = entry.get("bypass_type", "?")
+        reason = entry.get("reason", "")
+        files = entry.get("files", [])
+        file_summary = files[0] if files else "unknown"
+        if len(files) > 1:
+            file_summary += f" +{len(files)-1}"
+        reason_str = f" ({reason})" if reason else ""
+        print(f"   - {commit} (--{bypass}){reason_str}: {file_summary}")
+    if n > 5:
+        print(f"   ... 还有 {n-5} 个")
+    print("   补跑: vibe review <project_root> <spec_name>")
+    print("   清除: 补跑后 marker 自动删除；或手动删除 .agents/.vibe-pending-reviews.json")
+    print("<!-- vibe:pending_reviews_hint: count=%d -->" % n)
 
 def _print_all_clean_signal(project_root: str, specs: list) -> None:
     """Positive closing signal: nothing is pending, agent can stop.

@@ -138,8 +138,59 @@ def record_review(
     )
     atomic_write(review_file, content)
     print(f"✅ 已记录审查结论: {review_file}")
+
+    # Rule 53d: clear pending review marker if one exists.
+    # A review decision means the bypassed review has been addressed.
+    _clear_pending_review_marker(project_root)
+
     return review_file
 
+
+
+
+def _clear_pending_review_marker(project_root: str) -> None:
+    """Rule 53d: remove entries from .vibe-pending-reviews.json after review.
+
+    If all entries are cleared, delete the file entirely.
+    """
+    import json as _json
+    marker_path = os.path.join(project_root, ".agents", ".vibe-pending-reviews.json")
+    if not os.path.exists(marker_path):
+        return
+    try:
+        with open(marker_path, "r", encoding="utf-8") as handle:
+            entries = _json.load(handle)
+    except (OSError, _json.JSONDecodeError):
+        return
+    if not entries:
+        # Empty — just delete the file
+        os.remove(marker_path)
+        return
+    # Keep entries that are less than 1 day old (give some grace period)
+    # or remove all if only 1-2 remain
+    import time as _time
+    now = _time.time()
+    remaining = []
+    for entry in entries:
+        ts = entry.get("timestamp", "")
+        try:
+            from datetime import datetime, timezone
+            dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            age_hours = (now - dt.timestamp()) / 3600
+        except (ValueError, OSError):
+            age_hours = 999
+        # Remove entries older than 1 hour (review has been done)
+        if age_hours < 1:
+            continue  # too recent, keep
+        remaining.append(entry)
+    if not remaining:
+        os.remove(marker_path)
+        print("📋 Rule 53d: pending review marker 已清除（全部审查完成）")
+    elif len(remaining) < len(entries):
+        with open(marker_path, "w", encoding="utf-8") as handle:
+            handle.write(_json.dumps(remaining, ensure_ascii=False, indent=2))
+        cleared = len(entries) - len(remaining)
+        print(f"📋 Rule 53d: 已清除 {cleared} 条 pending review 记录，剩余 {len(remaining)} 条")
 
 def _latest_pending_review(project_root: str, spec_name: str) -> str | None:
     reviews_dir = os.path.join(project_root, ".agents", "reviews")

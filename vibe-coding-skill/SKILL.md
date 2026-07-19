@@ -745,6 +745,21 @@ artifacts merely because a template exists.
     misuse (only docs-only), 53c catches the leaks (remind to add
     independent review).
 
+    **Rule 53d — gate bypass tracking with pending review marker**:
+    When `--quick` or `--no-verify` commits succeed, the wrapper writes
+    a `.agents/.vibe-pending-reviews.json` marker file (gitignored)
+    recording the commit hash, bypass type, and files changed. The
+    marker creates a persistent reminder chain:
+    - `vibe next` and `vibe status` check the marker and display
+      pending reviews at high priority, listing each bypassed commit.
+    - `vibe doctor` also checks the marker as a routine inspection item.
+    - `vibe review-decision` clears matching entries from the marker
+      after a review is recorded, and deletes the file when empty.
+    This creates a closed loop: bypass → marker → persistent reminder
+    → review → clear. Complements 53b (reduce misuse) and 53c
+    (immediate reminder): 53b reduces the entry, 53c fires once, 53d
+    persists until the review is actually done.
+
     Per-file-summary line-ref hard gate (2026-07-08, scheme B): after
     the per-file mention gate passes, `vibe commit --reviewed` runs a
     second scan that rejects the commit (exit 9) if any per-file
