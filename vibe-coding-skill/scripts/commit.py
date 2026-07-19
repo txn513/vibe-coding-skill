@@ -326,6 +326,67 @@ def _print_evidence_sufficiency_hint(review_summary: str) -> None:
         print("   建议补充: 你是怎么验证的？测了哪些路径？")
         print("<!-- vibe:commit_evidence_sufficiency: advisory -->")
         print()
+
+
+def _check_rule53b_runtime_bypass(project_root: str, quick: bool, no_verify: bool, no_verify_reason: str) -> None:
+    """Rule 53b advisory: --quick / --no-verify should not be used for runtime code.
+
+    20/81 commits with Vibe-Commit: quick were business code changes (fix/feat),
+    not docs-only. This advisory reminds the agent that bypass flags are for
+    docs-only changes, not runtime code.
+
+    Advisory only (no hard gate) — agent may have legitimate emergency scenarios.
+    Retro should trace the bypass reason.
+    """
+    if not (quick or no_verify):
+        return
+
+    # Check if staged files contain runtime code
+    rc, out, _ = _run(["git", "diff", "--cached", "--name-only"], project_root)
+    if rc != 0 or not out.strip():
+        # Fallback: check all dirty files
+        rc, out, _ = _run(["git", "diff", "--name-only", "HEAD"], project_root)
+    if rc != 0 or not out.strip():
+        return
+
+    runtime_extensions = {
+        ".py", ".js", ".ts", ".jsx", ".tsx", ".go", ".rs", ".java",
+        ".rb", ".php", ".c", ".cpp", ".h", ".hpp", ".swift", ".kt",
+        ".scala", ".sh", ".bash", ".sql",
+    }
+    test_dirs = {"tests/", "test/", "__tests__/", "spec/", "_test/"}
+
+    runtime_files = []
+    test_files = []
+    for f in out.strip().splitlines():
+        ext = os.path.splitext(f)[1]
+        is_test = any(d in f for d in test_dirs)
+        if is_test:
+            test_files.append(f)
+        elif ext in runtime_extensions:
+            runtime_files.append(f)
+
+    if not runtime_files:
+        # Only docs / test changes — quick is fine
+        return
+
+    flag = "--quick" if quick else "--no-verify"
+    print("⚠️  Rule 53b advisory: " + flag + " 不应用于 runtime 代码")
+    print(f"   staged 含 {len(runtime_files)} 个 runtime 文件: {', '.join(runtime_files[:5])}")
+    if test_files:
+        print(f"   ({len(test_files)} 个测试文件: --quick 允许, 但 runtime 部分仍需完整 review)")
+    if quick:
+        print("   --quick 仅限 docs-only 改动。runtime 代码请用完整 vibe commit 两步流程。")
+        print("   如果确实紧急: 用 --no-verify '<reason>' 并在 retro 中追溯")
+    if no_verify:
+        if not no_verify_reason:
+            print("   --no-verify 跳过测试 + runtime 代码 = 极高风险")
+            print("   建议: vibe commit --no-verify '<具体原因>' (如 'P1 热修: XX 服务 500')")
+        else:
+            print(f"   --no-verify reason: {no_verify_reason}")
+            print("   请确保 retro 追溯此 bypass 原因 (Rule 54)")
+    print("<!-- vibe:commit_rule53b_advisory: runtime_bypass -->")
+    print()
 def _run(argv: list[str], cwd: str) -> tuple[int, str, str]:
     """Run argv in cwd; return (exit_code, stdout, stderr)."""
     completed = subprocess.run(
@@ -974,6 +1035,9 @@ def commit(
             print("<!-- vibe:commit_review_gate: active_inspection_advisory -->")
             return 9
 
+    # Rule 53b: --quick advisory for runtime code
+    if quick:
+        _check_rule53b_runtime_bypass(project_root, quick=True, no_verify=False, no_verify_reason="")
     print("🔒 Review 声明门禁 (Rule 53):")
     print("   Agent 必须确认已逐文件审查 diff 内容。")
     print("   加 --reviewed 标志声明审查完成，否则 commit 被阻止。")
@@ -1553,6 +1617,8 @@ def run(argv: list[str]) -> int:
     git_args = argv[1:]
 
     if no_verify:
+        # Rule 53b advisory: check if runtime code is being committed with --no-verify
+        _check_rule53b_runtime_bypass(project_root, quick=False, no_verify=True, no_verify_reason=no_verify_reason)
         # Direct hand-off, no gate. Documented escape hatch. Stage
         # selection is also skipped: the user opted out of the full
         # vibe commit flow.

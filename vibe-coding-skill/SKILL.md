@@ -709,6 +709,28 @@ artifacts merely because a template exists.
     distinguish quick commits from normal ones. This is the honest
     escape hatch — it does not hide that the gate was skipped.
 
+    **Rule 53b — `--quick` / `--no-verify` are for docs-only, not runtime code**:
+    The `--quick` and `--no-verify` escape hatches must NOT be used for
+    changes that affect runtime behavior (source code in `src/`, `app/`,
+    or any file with a runtime extension: `.py`, `.js`, `.ts`, `.go`,
+    `.rs`, `.java`, `.rb`, `.php`, `.c`, `.cpp`, `.swift`, `.kt`,
+    `.sql`, etc.). These flags bypass the review gate and/or verify gate,
+    which means regressions go undetected. Observed failure: 20/81 quick
+    commits were business code (fix/feat), not docs — the flag was used as
+    a general "gate is annoying" bypass rather than its intended docs-only
+    purpose. A specific regression: `_safe_request` DNS pinning broke
+    redirect chains for 4 days because the fix used `--quick` and the
+    reviewer never inspected the diff.
+
+    Enforcement: advisory only (no hard gate). When `--quick` or
+    `--no-verify` is used with staged runtime files, the wrapper prints
+    a `⚠️ Rule 53b advisory` reminding the agent to use the full
+    two-step review flow. The agent MAY still proceed (for genuine
+    emergencies), but MUST record the bypass reason in the retro (Rule 54).
+    Test files (`tests/`, `test/`, `__tests__/`, `spec/`) are NOT
+    runtime code — `--quick` is allowed for test-only changes since they
+    don't change production behavior.
+
     Per-file-summary line-ref hard gate (2026-07-08, scheme B): after
     the per-file mention gate passes, `vibe commit --reviewed` runs a
     second scan that rejects the commit (exit 9) if any per-file
