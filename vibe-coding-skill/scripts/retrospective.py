@@ -519,8 +519,7 @@ def _check_rule25_failure_mode_filled(retro_file: str) -> None:
 
     # Extract section content (until next ## or end of file)
     start = match.end()
-    next_section = re.search(r'
-## ', text[start:])
+    next_section = re.search(r"\n## ", text[start:])
     end = start + next_section.start() if next_section else len(text)
     section_text = text[start:end].strip()
 
