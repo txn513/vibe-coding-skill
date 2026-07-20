@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 import re
+import subprocess
 from pathlib import Path
 
 from common import (
@@ -1213,6 +1214,81 @@ def _audit_reproduction_runtime_present(project_root: str, warnings: list[str]) 
         )
 
 
+
+
+# ── Project-level doctor auto-discovery ──────────────────────────────
+
+def discover_project_doctors(project_root: str) -> list[str]:
+    """Auto-discover scripts/doctor_*.py in the project root.
+
+    Returns list of absolute paths. Skips files that are not readable
+    or not .py. Empty list if scripts/ dir does not exist.
+    """
+    scripts_dir = os.path.join(project_root, "scripts")
+    if not os.path.isdir(scripts_dir):
+        return []
+    result = []
+    for fname in sorted(os.listdir(scripts_dir)):
+        if fname.startswith("doctor_") and fname.endswith(".py"):
+            result.append(os.path.join(scripts_dir, fname))
+    return result
+
+
+def parse_doctor_phases(script_path: str) -> list[str] | None:
+    """Parse ADVANCE_PHASES: metadata from a doctor script.
+
+    Returns a list of phase names (e.g., ["review", "done"]), or None
+    if no ADVANCE_PHASES: line found (meaning: run on all phases).
+
+    Convention: the doctor script should contain a line like:
+        ADVANCE_PHASES: review, done
+    in its docstring or top-level comments.
+    """
+    try:
+        with open(script_path, encoding="utf-8") as f:
+            # Only scan first 30 lines — metadata should be near top
+            for line in f:
+                if f.tell() > 2048:
+                    break
+                m = re.search(r"ADVANCE_PHASES:\s*(.+)", line)
+                if m:
+                    phases = [p.strip().lower() for p in m.group(1).split(",") if p.strip()]
+                    return phases if phases else None
+    except OSError:
+        pass
+    return None
+
+
+def run_project_doctors(project_root: str, spec_name: str = "") -> list[dict]:
+    """Run all discovered project-level doctor scripts.
+
+    Returns list of result dicts with keys: script, exit_code, stdout, stderr.
+    """
+    results = []
+    for script_path in discover_project_doctors(project_root):
+        cmd = ["python3", script_path, "--project-root", project_root]
+        if spec_name:
+            cmd.extend(["--spec", spec_name])
+        try:
+            rc = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=30,
+            )
+            results.append({
+                "script": os.path.basename(script_path),
+                "exit_code": rc.returncode,
+                "stdout": rc.stdout,
+                "stderr": rc.stderr,
+            })
+        except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
+            results.append({
+                "script": os.path.basename(script_path),
+                "exit_code": -1,
+                "stdout": "",
+                "stderr": str(exc),
+            })
+    return results
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Audit project workflow integrity")
     parser.add_argument("project_root")
@@ -1230,4 +1306,14 @@ if __name__ == "__main__":
                         f"smoke: {cmd_result['phase']} command failed: "
                         f"{cmd_result.get('error', cmd_result.get('argv'))}"
                     )
+    # Project-level doctor auto-discovery (2026-07-20a)
+    proj_results = run_project_doctors(os.path.abspath(args.project_root))
+    for pr in proj_results:
+        if pr['exit_code'] != 0:
+            result['issues'].append(f"project doctor {pr['script']} failed (exit {pr['exit_code']})")
+        else:
+            for line in pr['stdout'].splitlines():
+                if '⚠️' in line or 'WARNING' in line.upper():
+                    result['warnings'].append(f"{pr['script']}: {line.strip()}")
+
     raise SystemExit(1 if result["issues"] else 0)
