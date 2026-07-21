@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """vibe commit — Rule 53 pre-commit verification gate.
 
 Wraps `git commit` with three discipline steps that the agent is
@@ -22,7 +23,6 @@ but the user can wire a pre-commit hook (one-line install) to
 enforce `vibe commit` for everyone.
 """
 
-from __future__ import annotations
 
 import argparse
 import os

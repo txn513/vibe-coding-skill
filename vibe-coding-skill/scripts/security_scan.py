@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """Security pattern scanner — detect common credential leakage patterns.
 
 Governance upgrade candidate 2026-07-12: OAuth credential in URL query.

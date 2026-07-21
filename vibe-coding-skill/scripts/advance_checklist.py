@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Pre-advance action checklist for `vibe advance`.
 
 Before `vibe advance` runs the hard gate (per-spec risk profile + spec
@@ -17,7 +18,6 @@ truth for hard blocking. To suppress, pass `--no-checklist` to
 `--no-verify` / `--quick` family).
 """
 
-from __future__ import annotations
 
 import os
 import re

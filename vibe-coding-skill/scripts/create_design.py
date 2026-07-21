@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """Create / iterate / rollback an architecture or design document.
 
 Implements Rule 42 (UI design iteration must be versioned, not overwritten):

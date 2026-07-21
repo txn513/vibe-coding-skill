@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """Generate a ready-to-use Agent prompt from AGENTS.md + spec + project rules.
 
 Usage:

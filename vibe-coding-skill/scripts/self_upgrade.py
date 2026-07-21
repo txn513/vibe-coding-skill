@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """Apply skill improvement suggestions from self_analyze.py.
 
 IMPORTANT: All additions go to the PROJECT's .agents/ directory, NOT to the skill itself.

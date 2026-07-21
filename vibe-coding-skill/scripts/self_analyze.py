@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """Analyze project retros to identify project-local workflow improvements.
 
 Scans all retrospectives in a project, finds recurring issues, and generates

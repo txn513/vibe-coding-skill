@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """Scan project-level upgrade-candidate files (cross-source signals).
 
 Aggregates "Skill upgrade candidate" / "Project-level adoption" proposals
@@ -21,7 +22,6 @@ Usage as a CLI:
     python3 upgrade_signals.py <project_root> [--output report.md]
 """
 
-from __future__ import annotations
 
 import argparse
 import os

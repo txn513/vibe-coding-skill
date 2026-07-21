@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """Scan project retros for open gaps that may have been closed by new evidence.
 
 This module is deliberately read-only. It identifies candidate gaps from
@@ -12,7 +13,6 @@ new evidence references the same spec name; closure is then decided by
 the user (Rule 17: discovery is not authorization).
 """
 
-from __future__ import annotations
 
 import os
 import re

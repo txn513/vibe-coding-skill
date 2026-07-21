@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """Prune stale rules and checklist items to prevent skill bloat.
 
 Analyzes retro data to identify:

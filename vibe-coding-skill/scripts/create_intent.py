@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """Create a project-local discovery record before design or specification."""
 
 import argparse

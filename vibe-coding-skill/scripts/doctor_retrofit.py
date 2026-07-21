@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """Doctor retrofit tool: batch-add Rule 56/57 compliance to done specs.
 
 Walks .agents/specs/*.md and for each spec with status=done:

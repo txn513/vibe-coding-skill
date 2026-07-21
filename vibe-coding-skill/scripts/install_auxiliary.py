@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """Install a Vibe Coding auxiliary Skill by symlinking it into ~/.codex/skills/.
 
 The core Skill uses this to pull sibling auxiliaries (e.g. vibe-coding-reviewer)
@@ -14,7 +15,6 @@ Symlink is preferred over copy: edits to the monorepo stay in sync, and the
 source of truth remains one place.
 """
 
-from __future__ import annotations
 
 import argparse
 import os

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """Weighted relevance scoring for completed specs.
 
 Shared by retrospective and self-analyze to rank which specs are most
@@ -12,7 +13,6 @@ Weights:
   regression_from metadata = +15 bonus (bug fix with lessons)
 """
 
-from __future__ import annotations
 
 import os
 import re

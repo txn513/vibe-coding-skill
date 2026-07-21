@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """Audit a project's workflow schema and artifact freshness."""
 
 import argparse

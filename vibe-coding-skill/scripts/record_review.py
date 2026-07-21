@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """Record a structured decision on the latest pending review for a spec."""
 
 import argparse

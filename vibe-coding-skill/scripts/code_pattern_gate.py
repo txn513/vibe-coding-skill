@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Static scan for asyncio.create_task + shared AsyncSession commit.
 
 Rule 64: `asyncio.create_task` MUST NOT be used to call
@@ -26,7 +27,6 @@ identifier that *resolves* to a session-style attribute on a name that
 appears as `commit()`'s receiver inside the body).
 """
 
-from __future__ import annotations
 
 import ast
 import os

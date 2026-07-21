@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """Identify and archive stale artifacts under .agents/.
 
 Scans `.agents/specs`, `.agents/evidence`, and `.agents/rules` (or whatever
@@ -23,7 +24,6 @@ The script never recurses into `.agents/archive/` itself. It also honours
 specific directories without touching the script.
 """
 
-from __future__ import annotations
 
 import argparse
 import os

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """Tidy .agents/ directory structure per the Directory Contract.
 
 Detects and fixes overlapping/deprecated/unknown directories that

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """Record a requirements change (amendment) to a spec.
 
 Creates an amendment record in .agents/specs/<name>-amendments.md

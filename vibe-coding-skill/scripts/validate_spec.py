@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """Validate a spec file for completeness before coding starts.
 
 Checks for:

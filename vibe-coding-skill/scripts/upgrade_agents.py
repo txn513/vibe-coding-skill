@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """Upgrade project's AGENTS.md from template, preserving user content."""
 
 import argparse

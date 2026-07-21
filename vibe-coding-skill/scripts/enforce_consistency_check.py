@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """Check ENFORCE comment consistency between SKILL.md and CLI scripts.
 
 Pi Extension parses SKILL.md ENFORCE comments at runtime.

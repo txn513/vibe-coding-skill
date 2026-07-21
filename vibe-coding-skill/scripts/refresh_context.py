@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """Scan project and update AGENTS.md with current state."""
 
 import argparse

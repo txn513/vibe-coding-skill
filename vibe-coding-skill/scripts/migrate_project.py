@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """Migrate an existing project's workflow metadata without changing project rules."""
 
 import argparse

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """vibe upgrade — bring an existing project up to the current Skill.
 
 For a project that was initialised by an older version of the Skill,
@@ -24,7 +25,6 @@ Usage:
     vibe upgrade <project_root>
 """
 
-from __future__ import annotations
 
 import argparse
 import os

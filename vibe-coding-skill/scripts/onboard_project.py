@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """Scan an existing codebase and generate AGENTS.md from detected context.
 
 Usage:

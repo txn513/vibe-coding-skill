@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """Update project's AGENTS.md with the latest phase-gates template from Skill.
 
 Supports project-level overrides via the `## 阶段覆盖声明` section in AGENTS.md.

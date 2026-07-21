@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """vibe verify — standalone verification runner.
 
 Runs the configured verify commands from workflow.json without committing.
@@ -16,7 +17,6 @@ Usage:
   vibe verify <project_root> --full    # runs verify_full
 """
 
-from __future__ import annotations
 
 import os
 import subprocess

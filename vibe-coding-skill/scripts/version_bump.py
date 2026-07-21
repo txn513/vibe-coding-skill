@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """vibe version-bump — Skill self-maintenance, automate the chore commit.
 
 The Skill's `VERSION` file follows the convention `<7-char-head-hash>-<slug>`
@@ -43,7 +44,6 @@ is needed — the Skill is its own repo). Exit code 0 on success, 1 on
 git failure, 2 on missing VERSION file.
 """
 
-from __future__ import annotations
 
 import os
 import re

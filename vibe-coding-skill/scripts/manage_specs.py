@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """Manage multiple specs: list, detect conflicts, suggest priority."""
 
 import argparse

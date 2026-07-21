@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """Single dispatcher for the Vibe Coding workflow.
 
 Codex should invoke this internally after interpreting the user's natural language.

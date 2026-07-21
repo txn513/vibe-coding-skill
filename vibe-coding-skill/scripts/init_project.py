@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """Initialize a project for Vibe Coding — creates AGENTS.md and .agents/rules/."""
 
 import argparse
