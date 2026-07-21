@@ -245,6 +245,18 @@ def set_status(
                         print(f"❌ Bug 进入审查前证据不完整: {bug_reason}")
                     else:
                         print("❌ Bug 进入审查前需要 reproduction 与 fix-regression 双向证据")
+                    # 2026-07-21g: supplement with Command-Digests diagnostic
+                    # so agent knows if file exists but digest mismatched
+                    for _purpose in ("reproduction", "fix-regression"):
+                        _missing_d, _cfg_cmds = _missing_command_digests(
+                            project_root, spec_name, "verify", workflow,
+                            purpose=_purpose,
+                        )
+                        if _missing_d:
+                            print(f"   ⚠️ verify-{_purpose} Command-Digests 不匹配: {', '.join(_missing_d)}")
+                            if _cfg_cmds:
+                                print(f"      期望命令: {' '.join(_cfg_cmds[0]) if _cfg_cmds else 'N/A'}")
+                            print(f"      修复: vibe evidence . {spec_name} verify passed --purpose {_purpose} --configured")
                     print("   💡 标准顺序: in-progress → record reproduction → 修复 bug → record fix-regression → review")
                     return None
                 _emit_fix_state_advisory(project_root, spec_name)

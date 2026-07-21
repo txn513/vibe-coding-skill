@@ -73,6 +73,10 @@ def record_evidence(
     commands = configured_commands(workflow, phase) if configured else []
     if configured and not commands:
         raise ValueError(f"项目未配置 {phase} 命令")
+    # 2026-07-21g: show expected commands so agent knows what to run
+    if configured and commands:
+        for cmd in commands:
+            print(f"📋 期望验证命令: {' '.join(cmd)}")
     if command:
         commands = [command]
 
