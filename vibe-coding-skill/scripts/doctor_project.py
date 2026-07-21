@@ -1049,10 +1049,26 @@ def _audit_retro_gap_candidates(project_root, warnings):
         path = os.path.join(retros_dir, entry)
         try:
             content = open(path, encoding="utf-8").read()
-            mtime = os.path.getmtime(path)
         except OSError:
             continue
-        is_recent = (_now - mtime) <= _window
+        # 2026-07-22: use Created-At from content, not mtime (mtime unreliable after git ops)
+        _ca_match = re.search(r">\s*Created-At:\s*(\S+)", content)
+        if not _ca_match:
+            _ca_match = re.search(r">\s*创建:\s*(.+?)\s*\|", content)
+        is_recent = True  # default to recent if no timestamp found
+        if _ca_match:
+            _raw = _ca_match.group(1).strip().replace("Z", "+00:00")
+            # Handle "2026-07-12 22:41 UTC" format
+            if _raw.endswith(" UTC"):
+                _raw = _raw[:-4] + "+00:00"
+            try:
+                from datetime import datetime as _dt, timezone as _tz
+                _dt_val = _dt.fromisoformat(_raw)
+                if _dt_val.tzinfo is None:
+                    _dt_val = _dt_val.replace(tzinfo=_tz.utc)
+                is_recent = (_now - _dt_val.timestamp()) <= _window
+            except (ValueError, OSError):
+                pass
         for _title, body, _ in _rgs._iter_gap_sections(content):
             for line in body.splitlines():
                 if line.lstrip().startswith(("-", "*")):
@@ -1122,14 +1138,22 @@ def _audit_evidence_commit_freshness(project_root: str, warnings: list[str]) -> 
             recorded = m.group(1)
             if recorded == current_head:
                 continue
-            # 2026-07-21: skip evidence for specs modified >30 days ago (historical debt)
-            try:
-                spec_mtime = os.path.getmtime(fpath)
-            except OSError:
-                spec_mtime = 0
-            import time as _time
-            if _time.time() - spec_mtime > 30 * 86400:
-                continue  # frozen, not reported
+            # 2026-07-22: skip evidence created >30 days ago (historical debt)
+            # Use Created-At from content, not mtime (mtime unreliable after git ops)
+            _ev_ca = re.search(r">\s*Created-At:\s*(\S+)", content)
+            if _ev_ca:
+                _raw = _ev_ca.group(1).strip().replace("Z", "+00:00")
+                if _raw.endswith(" UTC"):
+                    _raw = _raw[:-4] + "+00:00"
+                try:
+                    from datetime import datetime as _dt, timezone as _tz
+                    _dt_val = _dt.fromisoformat(_raw)
+                    if _dt_val.tzinfo is None:
+                        _dt_val = _dt_val.replace(tzinfo=_tz.utc)
+                    if _time.time() - _dt_val.timestamp() > 30 * 86400:
+                        continue  # frozen, not reported
+                except (ValueError, OSError):
+                    pass
             # recorded 仍然存在?
             try:
                 exists = subprocess.run(

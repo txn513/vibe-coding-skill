@@ -1214,14 +1214,29 @@ def _print_missing_changelog_hint(project_root: str) -> None:
         try:
             with open(path, encoding="utf-8") as fp:
                 content = fp.read()
-            spec_mtime = os.path.getmtime(path)
         except OSError:
             continue
         m = re.search(r">\s*状态:\s*(\S+)", content)
         if m and m.group(1) in {"done", "released"}:
             name = entry[:-3]
             if name not in existing:
-                if _now - spec_mtime > _window:
+                # 2026-07-22: use spec's 创建: timestamp, not mtime
+                # (mtime unreliable after git checkout/add operations)
+                _ca = re.search(r">\s*创建:\s*(.+?)(?:\s*\||\s*$)", content)
+                is_recent = True  # default recent if no timestamp
+                if _ca:
+                    _raw = _ca.group(1).strip().replace("Z", "+00:00")
+                    if _raw.endswith(" UTC"):
+                        _raw = _raw[:-4] + "+00:00"
+                    try:
+                        from datetime import datetime as _dt, timezone as _tz
+                        _dt_val = _dt.fromisoformat(_raw)
+                        if _dt_val.tzinfo is None:
+                            _dt_val = _dt_val.replace(tzinfo=_tz.utc)
+                        is_recent = (_now - _dt_val.timestamp()) <= _window
+                    except (ValueError, OSError):
+                        pass
+                if not is_recent:
                     old_missing += 1
                 else:
                     recent_missing.append((name, m.group(1)))
