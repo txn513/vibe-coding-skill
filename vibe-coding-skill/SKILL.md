@@ -1090,6 +1090,8 @@ artifacts merely because a template exists.
     This prevents self-review from being silently accepted.
 
 <!-- ENFORCE: id=R60f, hook=tool_call, tool=bash, match=vibe(?:\.py)?\s+advance.*done, action=block_unresolved_followup, message=retro含follow-up但未建draft spec不能advance done -->
+<!-- ENFORCE: id=R-D-68, hook=tool_call, action=block_direct_spec_status_edit, message=禁止直接改spec状态行，必须用vibe advance让门禁检查evidence/review -->
+
 
     60f. **Retro follow-up resolution gate**: When advancing a
     spec to done, if the retro contains a `[follow-up: <id>]`

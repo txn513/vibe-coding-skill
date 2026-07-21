@@ -691,7 +691,32 @@ export default function vibeEnforcerExtension(pi: ExtensionAPI) {
               }
               appendEnforcerLog(projectRoot, id, "pass", cmd, "OK");
             }
-          }}
+          }
+
+          // R-D-68: block direct spec status edit (bypass vibe advance)
+          if (id === "R-D-68" && rule.action === "block_direct_spec_status_edit") {
+            const filePath = event.input?.path ?? event.input?.file_path ?? "";
+            const edits = event.input?.edits ?? event.input?.diff ?? "";
+            const editsStr = typeof edits === "string" ? edits : JSON.stringify(edits);
+
+            // Detection 1: bash command writing spec file with status change
+            const writesSpec = /\.agents\/specs\/.*\.md/.test(cmd) &&
+              /(write_text|\.write\(|echo.*>|sed.*-i|>\s*状态:)/.test(cmd);
+            const changesStatus = /状态:/.test(cmd) || />\s*状态:/.test(cmd);
+
+            // Detection 2: edit/write tool directly modifying spec file
+            const isSpecFile = /\.agents\/specs\/.*\.md/.test(filePath) ||
+                               /\.agents\/specs\/.*\.md/.test(cmd);
+            const editChangesStatus = />\s*状态:/.test(editsStr) || /状态:/.test(editsStr);
+
+            if ((writesSpec && changesStatus) || (isSpecFile && editChangesStatus)) {
+              const msg = "禁止直接改 spec 状态行。必须用 `vibe advance <project> <spec> <new_status>`，让门禁检查 evidence/review。";
+              ctx.ui.notify(`🚫 R-D-68: ${msg}`, "warning");
+              appendEnforcerLog(projectRoot, id, "block", cmd || filePath, msg);
+              return { block: true, reason: msg };
+            }
+          }
+}
 
 // Pi Extension loader requires id export
 export const id = "vibe-enforcer";

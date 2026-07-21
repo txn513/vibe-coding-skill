@@ -598,6 +598,7 @@ def doctor(project_root: str) -> dict:
     _audit_inbox_drift(project_root, warnings)
     _audit_directory_structure(project_root, warnings)
     _audit_unbound_rules(project_root, warnings)
+    _audit_spec_status_drift(project_root, warnings)
     _audit_rule_bloat(project_root, warnings)
     # Rule 53d: check for pending review markers (bypassed review gates)
     pending_reviews_path = os.path.join(project_root, ".agents", ".vibe-pending-reviews.json")
@@ -1263,6 +1264,56 @@ def _audit_reproduction_runtime_present(project_root: str, warnings: list[str]) 
 
 
 # ── Project-level doctor auto-discovery ──────────────────────────────
+
+def _audit_spec_status_drift(project_root: str, warnings: list[str]) -> None:
+    """R-D-68 doctor: detect specs whose > 状态: line doesn't match
+    workflow.json's recorded status. Indicates someone bypassed vibe advance
+    and directly edited the spec file.
+    """
+    import json as _json
+    workflow_path = os.path.join(project_root, ".agents", "workflow.json")
+    specs_dir = os.path.join(project_root, ".agents", "specs")
+    if not os.path.isfile(workflow_path) or not os.path.isdir(specs_dir):
+        return
+    try:
+        with open(workflow_path, encoding="utf-8") as f:
+            workflow = _json.load(f)
+    except (OSError, ValueError):
+        return
+    wf_specs = workflow.get("specs", {})
+    drift_count = 0
+    for entry in sorted(os.listdir(specs_dir)):
+        if not entry.endswith(".md") or entry.endswith("-amendments.md"):
+            continue
+        name = entry[:-3]
+        spec_path = os.path.join(specs_dir, entry)
+        try:
+            with open(spec_path, encoding="utf-8") as f:
+                content = f.read()
+        except OSError:
+            continue
+        m = re.search(r">\s*状态:\s*(\S+)", content)
+        if not m:
+            continue
+        file_status = m.group(1)
+        wf_status = wf_specs.get(name, {}).get("status", "")
+        if wf_status and file_status != wf_status:
+            drift_count += 1
+            if drift_count <= 5:
+                warnings.append(
+                    f"spec {name}: file says > 状态: {file_status} "
+                    f"but workflow.json says {wf_status} — likely bypassed vibe advance (R-D-68)"
+                )
+    if drift_count > 5:
+        warnings.append(
+            f"... and {drift_count - 5} more specs with status drift (R-D-68)"
+        )
+    if drift_count > 0:
+        warnings.append(
+            f"{drift_count} spec(s) bypassed vibe advance. "
+            "Use `vibe advance <project> <spec> <status>` for status transitions."
+        )
+
 
 def discover_project_doctors(project_root: str) -> list[str]:
     """Auto-discover scripts/doctor_*.py in the project root.
