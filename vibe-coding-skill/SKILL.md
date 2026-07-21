@@ -1091,6 +1091,7 @@ artifacts merely because a template exists.
 
 <!-- ENFORCE: id=R60f, hook=tool_call, tool=bash, match=vibe(?:\.py)?\s+advance.*done, action=block_unresolved_followup, message=retro含follow-up但未建draft spec不能advance done -->
 <!-- ENFORCE: id=R-D-68, hook=tool_call, action=block_direct_spec_status_edit, message=禁止直接改spec状态行，必须用vibe advance让门禁检查evidence/review -->
+<!-- ENFORCE: id=R66, hook=tool_call, action=block_no_vibe_status, message=前3次工具调用内必须先跑vibe status+vibe next，禁止凭记忆继续 -->
 
 
     60f. **Retro follow-up resolution gate**: When advancing a

@@ -130,6 +130,19 @@
 >   - 管理员评审后归档到 `.agents/archive/skill-upgrade-candidates/`
 >   - `vibe next` 会自动检测未归档的提案并提醒管理员评审
 
+## 实质合规自证 (R-D-69)
+
+> ⚠️ 本段是 retro 质量底线。缺失或填"无" = retro 不完整。
+> 目的: 区分"形式合规"和"实质合规"，防止走过场。
+
+- **evidence 命令是否真实执行**: (逐条确认每条 evidence 里的命令是否真的跑了，不是凭记忆填)
+- **review 是否真正独立**: (reviewer session ID / 审查过程描述 / 是否发现真实问题)
+- **observe 是否获取真实输出**: (observe evidence 的输出是真实 HTTP 响应/log，还是模板占位符)
+- **spec Fix Scope 与实际改动是否一致**: (spec 说不改的文件，实际是否真的没改)
+- **AC 验证是逐条跑命令还是凭记忆填写**: (每条 AC 是否有对应的命令输出证据)
+
+**如果任何一项回答"否"或"不确定"，必须在本 retro 的行动项中补充验证步骤。**
+
 ## 沉淀清单 (R-沉淀-enforcement)
 
 > 每条沉淀必带 R6.1 三选一 tag + id + 层级. 无 tag 或层级不明 = 形式合规假阳性。

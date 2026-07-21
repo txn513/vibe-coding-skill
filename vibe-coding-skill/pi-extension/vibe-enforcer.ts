@@ -718,5 +718,29 @@ export default function vibeEnforcerExtension(pi: ExtensionAPI) {
           }
 }
 
+// R66: session recovery — enforce vibe status within first 3 tool calls
+let r66ToolCallCount = 0;
+let r66StatusSeen = false;
+pi.on("tool_call", async (event, ctx) => {
+  r66ToolCallCount++;
+  // Check if this is a vibe status/next command
+  const cmd = event.input?.command ?? "";
+  if (/vibe(?:\.py)?\s+(status|next)/.test(cmd)) {
+    r66StatusSeen = true;
+  }
+  // Warn on first 2 calls, block on 3rd if no vibe status
+  if (!r66StatusSeen && r66ToolCallCount <= 3) {
+    const msg = `R66: 前 3 次工具调用内必须先跑 \`vibe status .\` + \`vibe next .\`。当前是第 ${r66ToolCallCount} 次调用。`;
+    if (r66ToolCallCount === 3) {
+      ctx.ui.notify(`🚫 ${msg}`, "warning");
+      appendEnforcerLog(projectRoot, "R66", "block", cmd, msg);
+      return { block: true, reason: msg };
+    } else {
+      ctx.ui.notify(`⚠️ ${msg}`, "warning");
+      appendEnforcerLog(projectRoot, "R66", "warning", cmd, "vibe status not yet called");
+    }
+  }
+});
+
 // Pi Extension loader requires id export
 export const id = "vibe-enforcer";

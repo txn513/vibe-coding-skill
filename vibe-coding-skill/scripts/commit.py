@@ -164,6 +164,33 @@ def _review_marker_path(project_root: str) -> str:
     return os.path.join(project_root, ".agents", ".vibe-review-pending")
 
 
+def _append_enforcer_log_step1(project_root: str) -> None:
+    """Write a step-1 entry to .agents/enforcer-log.md.
+
+    2026-07-22 (gate-process-integrity): commit.py step 1 previously
+    only wrote the .vibe-review-pending marker file, but the Pi
+    extension R53b block_without_review checks enforcer-log for step 1
+    evidence. This mismatch caused false blocks and incentivized agents
+    to inject fake enforcer-log entries. Now step 1 writes both.
+    """
+    import time as _time
+    log_path = os.path.join(project_root, ".agents", "enforcer-log.md")
+    ts = _time.strftime("%Y-%m-%dT%H:%M:%S.000Z", _time.gmtime())
+    line = (
+        f"- `{ts}` `R53b` `action=pass` "
+        f"cmd=`vibe commit (step 1 diff shown)` "
+        f"message=`Step 1 diff shown, review marker written`\n"
+    )
+    try:
+        if not os.path.exists(log_path):
+            with open(log_path, "w", encoding="utf-8") as f:
+                f.write("# Vibe Coding Enforcer Audit Log\n\n> Auto-generated. Do not edit.\n\n")
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(line)
+    except OSError:
+        pass  # Non-critical; marker file is the primary record
+
+
 def _write_review_marker(project_root: str) -> None:
     """Write the marker after step 1 (vibe commit shows diff).
 
@@ -1285,6 +1312,10 @@ def commit(
         print("   如果发现问题: 先修复，再从第 1 步重新开始。")
         # Write the step-1 marker so a subsequent --reviewed can verify step 1 happened.
         _write_review_marker(project_root)
+        # 2026-07-22: also write enforcer-log so R53b can verify step 1 happened
+        # (previously only marker file was written, enforcer checked enforcer-log
+        # and found nothing → false block → agent injected fake records)
+        _append_enforcer_log_step1(project_root)
         print("<!-- vibe:commit_review: marker_written -->")
         print("<!-- vibe:commit_review: blocked_pending_review -->")
         return 5
