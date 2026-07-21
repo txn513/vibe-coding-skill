@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """Install a commit-msg hook that blocks raw `git commit`.
 
 The hook requires every commit to have a `Vibe-Commit:` trailer,
@@ -31,9 +32,9 @@ fi
 COMMIT_MSG_FILE="$1"
 
 if ! grep -q "^Vibe-Commit:" "$COMMIT_MSG_FILE"; then
-    echo "❌ 错误：此项目必须使用 \`vibe commit\` 提交代码（Rule 53）"
+    echo "❌ 错误：此项目必须使用 \\`vibe commit\\` 提交代码（Rule 53）"
     echo ""
-    echo "   当前提交缺少 Vibe-Commit trailer，说明是用 \`git commit\` 直接提交的。"
+    echo "   当前提交缺少 Vibe-Commit trailer，说明是用 \\`git commit\\` 直接提交的。"
     echo "   这绕过了 review + verify gate，会导致失败模式不可见、同样错误重复。"
     echo ""
     echo "   修复步骤（任选其一）："
@@ -41,7 +42,7 @@ if ! grep -q "^Vibe-Commit:" "$COMMIT_MSG_FILE"; then
     echo "   2. 用 vibe commit 重新提交（两步流程：看 diff → verify → commit）"
     echo "   3. 如果实在要跳过（如 docs-only）：vibe commit --quick"
     echo ""
-    echo "   禁止用 \`git commit\` 直接提交 —— 这是防错 guard rail，不是可选 overhead。"
+    echo "   禁止用 \\`git commit\\` 直接提交 —— 这是防错 guard rail，不是可选 overhead。"
     exit 1
 fi
 '''

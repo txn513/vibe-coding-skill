@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """Create a skill upgrade candidate proposal in the project.
 
 Usage:
@@ -11,6 +12,15 @@ filename following the convention: skill-upgrade-candidate-YYYYMMDD<N>.md
 import argparse
 import os
 import re
+
+
+def _project_slug(project_root: str) -> str:
+    """Derive a short slug from the project directory name for candidate filenames."""
+    dirname = os.path.basename(os.path.abspath(project_root))
+    # Replace non-alphanumeric with hyphens, strip leading/trailing hyphens
+    slug = re.sub(r"[^a-zA-Z0-9]+", "-", dirname).strip("-")
+    return slug or "proj"
+
 from datetime import datetime, timezone
 
 
@@ -59,12 +69,10 @@ def propose_skill_upgrade(project_root: str, title: str) -> str:
     
     today = datetime.now(timezone.utc).strftime("%Y%m%d")
     suffix = _find_next_suffix(project_root)
+    slug = _project_slug(project_root)
     
-    # Build filename: skill-upgrade-candidate-YYYYMMDD.md or ...-YYYYMMDD<N>.md
-    if suffix:
-        filename = f"skill-upgrade-candidate-{today}{suffix}.md"
-    else:
-        filename = f"skill-upgrade-candidate-{today}.md"
+    # Build filename: skill-upgrade-candidate-YYYYMMDD-<slug>.md or ...-<slug>b.md
+    filename = f"skill-upgrade-candidate-{today}-{slug}{suffix}.md"
     
     filepath = os.path.join(candidates_dir, filename)
     
