@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """Record typed verification, release, or observation evidence for a spec."""
 
 import argparse
@@ -252,6 +253,10 @@ def record_evidence(
             print(f"⚠️  verify 证据缺少验收标准引用: {', '.join(missing_ac)}")
             if expected:
                 print(f"   建议在证据中标注覆盖: {expected}")
+    # 2026-07-21: degradation-path advisory — if spec has happy-path ACs
+    # but no failure/degradation evidence, remind the agent.
+    if phase == "verify" and result == "passed" and spec_fields.get("risk") in {"high", "medium"}:
+        _check_degradation_path_coverage(spec_content, evidence, spec_name)
     print(f"✅ 已记录 {phase} 证据: {evidence_file}")
     if _evidence_missing_rerun_command(content, command):
         _emit_rerun_advisory(content)
@@ -407,6 +412,38 @@ def _record_retro_skip_all(project_root):
         os.path.join(project_root, ".agents", "workflow.json"),
         workflow,
     )
+
+
+def _check_degradation_path_coverage(spec_content: str, evidence_content: str, spec_name: str) -> None:
+    """Advisory: if spec has happy-path ACs but no failure/degradation evidence,
+    remind the agent to verify the degradation path too.
+
+    This is advisory-only — it does not block advance. The goal is to
+    surface the "only happy path verified" anti-pattern (2026-07-21e candidate).
+    """
+    # Count ACs that are happy-path vs degradation-path
+    happy_count = len(re.findall(r"\[happy-path\]", spec_content))
+    degrad_count = len(re.findall(r"\[degradation-path\]", spec_content))
+    # If spec has no explicit tags, check for implicit happy-path ACs
+    # (ACs without degradation-path tag)
+    ac_ids = re.findall(r"\*\*AC\d+\*\*", spec_content)
+    if not ac_ids:
+        return
+    # Check if evidence mentions degradation / failure / error handling
+    has_degradation_evidence = bool(
+        re.search(
+            r"(degradation|失败|降级|fallback|error.handle|failure.mode|异常处理|边界条件|错误恢复)",
+            evidence_content,
+            re.IGNORECASE,
+        )
+    )
+    # Only warn if: spec has ACs, but no degradation-path ACs AND no degradation evidence
+    if degrad_count == 0 and not has_degradation_evidence and len(ac_ids) >= 2:
+        print()
+        print(f"💡 [可选] spec `{spec_name}` 有 {len(ac_ids)} 个验收标准但无 degradation-path 验证。")
+        print("   建议补充: 异常/降级路径的 verify 证据（如: 网络超时、依赖不可用、边界输入）。")
+        print("   标记方式: 在 spec AC 后加 `[degradation-path]`，或直接在证据中描述异常场景。")
+        print("<!-- vibe:degradation_path_advisory -->")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Record verification or release evidence")

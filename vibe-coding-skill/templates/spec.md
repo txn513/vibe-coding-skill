@@ -38,6 +38,8 @@
 
 ## 验收标准 (Acceptance Criteria)
 
+> 每条 AC 标注 [happy-path] 或 [degradation-path]。degradation-path AC 至少 1 条：失败/错误/降级/边界场景。
+
 ### 正常路径
 1. AC1: {{HAPPY_PATH_1}}
 2. AC2: {{HAPPY_PATH_2}}

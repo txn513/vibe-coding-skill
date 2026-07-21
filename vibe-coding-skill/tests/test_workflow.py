@@ -3143,14 +3143,17 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, msg=_combined(r))
         candidates_dir = self.project / ".agents" / "skill-upgrade-candidates"
         today = datetime.now(timezone.utc).strftime("%Y%m%d")
-        first_file = candidates_dir / f"skill-upgrade-candidate-{today}.md"
-        self.assertTrue(first_file.exists(), "first proposal not created")
+        # Filename now includes project slug: skill-upgrade-candidate-YYYYMMDD-<slug>.md
+        from propose_skill_upgrade import _project_slug
+        slug = _project_slug(str(self.project))
+        first_file = candidates_dir / f"skill-upgrade-candidate-{today}-{slug}.md"
+        self.assertTrue(first_file.exists(), f"first proposal not created (expected {first_file.name})")
         content1 = first_file.read_text(encoding="utf-8")
         self.assertIn("first proposal", content1)
-        # Second proposal same day should create ...b.md, not overwrite
+        # Second proposal same day should create ...<slug>b.md, not overwrite
         r = self._vibe("propose-skill-upgrade", str(self.project), "second proposal")
         self.assertEqual(r.returncode, 0, msg=_combined(r))
-        second_file = candidates_dir / f"skill-upgrade-candidate-{today}b.md"
+        second_file = candidates_dir / f"skill-upgrade-candidate-{today}-{slug}b.md"
         self.assertTrue(second_file.exists(), "second proposal not created with b suffix")
         content2 = second_file.read_text(encoding="utf-8")
         self.assertIn("second proposal", content2)

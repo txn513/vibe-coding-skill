@@ -94,6 +94,8 @@ artifacts merely because a template exists.
 
 <!-- ENFORCE: id=R5b, hook=tool_call, tool=bash, match=vibe(?:\.py)?\s+next.*review, action=block_self_review_session, message=reviewer 必须是不同 session 或 sub-agent，禁止同一 session self-review -->
 
+<!-- ENFORCE: id=R5d, hook=tool_call, tool=bash, match=vibe(?:\.py)?\s+(advance.*review|commit.*--reviewed), action=block_same_session_review, message=review 必须用独立 session，推荐 pi --print --no-session 或 codex exec 启动 reviewer，禁止同一 session self-review -->
+
     5b. **Review session separation (hard gate)**: When advancing
     to review, the reviewer MUST be a different session or
     sub-agent from the builder. In Pi, the current session ID
@@ -103,6 +105,17 @@ artifacts merely because a template exists.
     are skipped with a warning (not blocked). To bypass in
     solo-session emergencies, use `--role override_approver`
     with `--future-session` (R67).
+
+    5d. **Review must use independent session (hard gate)**:
+    When executing `vibe advance review` or `vibe commit
+    --reviewed`, the current session is checked against the
+    builder session. If they match, the operation is blocked
+    with the message: "Review 必须用独立 session。推荐用
+    `pi --print --no-session` 或 `codex exec` 启动独立
+    reviewer session。" This gate enforces the principle that
+    the implementer cannot review their own code. Projects
+    may configure `workflow.json.review.independent_session:
+    false` to downgrade to advisory (warning only).
 
 5. Validate actor and declared role. Separated roles (reviewer, releaser,
    observer) must use a different identity from the builder, and the spec's
@@ -1035,6 +1048,14 @@ artifacts merely because a template exists.
 <!-- ENFORCE: id=R53b, hook=tool_call, tool=bash, match=vibe(?:\.py)?\s+commit.*--reviewed, action=block_without_review, message=必须先跑 vibe commit (step 1) 看 diff，才能加 --reviewed -->
 
 <!-- ENFORCE: id=R53c, hook=tool_call, tool=bash, match=vibe(?:\.py)?\s+commit(?!.*--quick), action=block_governance_batch, message=governance文件>5个时必须分commit或用--quick -->
+<!-- ENFORCE: id=R53d, hook=tool_call, tool=bash, match=git\s+commit.*/tmp/, action=block_tmp_bypass, message=禁止用 /tmp 脚本绕过 vibe commit，必须用 vibe commit 两步流程 -->
+
+<!-- ENFORCE: id=R8.43, hook=tool_call, tool=bash, match=VIBE_SKIP_COMMIT_MSG_HOOK, action=block_skip_hook, message=禁止跳过 commit-msg hook (VIBE_SKIP_COMMIT_MSG_HOOK)，hook 是门禁不是可选步骤 -->
+
+<!-- ENFORCE: id=R59, hook=tool_call, tool=bash, match=vibe(?:\.py)?\s+advance.*--force, action=block_force_non_emergency, message=--force 仅限 emergency，必须声明 emergency reason 或用 override_approver -->
+
+<!-- ENFORCE: id=R30c, hook=tool_call, tool=bash, match=vibe(?:\.py)?\s+evidence.*observe(?!.*--configured), action=block_observe_no_configured, message=observe evidence 必须带 --configured，否则 Command-Digests 为 N/A -->
+
 
     53c. **Governance batch review gate**: When committing, if the
     staged set includes both business code (src/, backend/,
@@ -1159,8 +1180,30 @@ not listed here. Each piece of information has exactly one canonical location
 - Do not create subdirectories not listed above without Skill update
 - `reports/` is a derived view of `retros/`; the source of truth is `retros/`
 - `skill-upgrade-proposals/` is deprecated; use `skill-upgrade-candidates/`
+- `skill-upgrade-candidates/` filenames must include project slug: `skill-upgrade-candidate-YYYYMMDD-<project-slug>.md` (e.g., `skill-upgrade-candidate-20260719-gemkeep.md`). Multiple proposals same day: append letter suffix (`...-gemkeepb.md`, `...-gemkeepc.md`). This avoids filename collisions when multiple projects submit candidates on the same date.
 - `discovery/` files older than 30 days should be archived
 - Only one writer owns each directory (no dual-write)
+
+## Project-Level Doctor Auto-Discovery (2026-07-20a)
+
+Projects can place `scripts/doctor_*.py` in their root to add custom health checks.
+These are automatically discovered and executed by `vibe doctor` and `vibe advance`.
+
+- `vibe doctor` runs all discovered doctor scripts; failures appear as issues
+- `vibe advance` runs only scripts matching the target phase (via `ADVANCE_PHASES:` metadata)
+- Default: advisory (warnings only, does not block advance)
+- Set `workflow.json` `advance_doctor_gate: "hard"` to make advance block on project doctor failure
+- `--force` skips project-level doctor gates (same as other gates)
+
+Doctor script metadata convention:
+```python
+"""doctor_r_d_58.py — R-D-58 evidence recording order
+
+ADVANCE_PHASES: review, done
+"""
+```
+
+No `ADVANCE_PHASES:` line means the script runs on all phases.
 
 ## Project Boundary
 

@@ -4,6 +4,14 @@
 
 ## 失败模式分类
 
+> 从以下选择 1-3 个 (不要写"无"):
+> - happy-path verified, degradation-path missing
+> - evidence exists, but does not prove the claimed behavior
+> - rule exists, but is not bound to a gate or command
+> - component capability exists, routing or selection wrong
+> - steady-state verified, time-state missing
+> - 其他 (请具体描述)
+
 - **主失败模式**: {{PRIMARY_FAILURE_MODE}}
 - **次级失败模式**: {{SECONDARY_FAILURE_MODE}}
 - **为什么归到这个类别**: {{FAILURE_MODE_RATIONALE}}

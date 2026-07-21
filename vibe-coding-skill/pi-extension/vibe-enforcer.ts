@@ -331,6 +331,92 @@ function registerHandlers(pi: ExtensionAPI, rules: EnforceRule[], projectRoot: s
             }
           }
 
+          // R53b (2nd): block --reviewed without step 1 review
+          if (id === "R53b" && rule.action === "block_without_review") {
+            // Check if enforcer-log has a step 1 (vibe commit without --reviewed) entry
+            // for the current project in the last 10 minutes
+            const logPath = path.join(projectRoot, ".agents", "enforcer-log.md");
+            let hasStep1 = false;
+            try {
+              if (fs.existsSync(logPath)) {
+                const logContent = fs.readFileSync(logPath, "utf-8");
+                const lines = logContent.split("\n").reverse().slice(0, 50);
+                for (const line of lines) {
+                  if (line.includes("vibe commit") && !line.includes("--reviewed") && !line.includes("--quick")) {
+                    hasStep1 = true;
+                    break;
+                  }
+                }
+              }
+            } catch {}
+            if (!hasStep1) {
+              const msg = "必须先跑 vibe commit (step 1) 看 diff 并审查，才能加 --reviewed。不能跳过 step 1 直接 step 2。";
+              ctx.ui.notify(`🚫 R53b: ${msg}`, "warning");
+              appendEnforcerLog(projectRoot, "R53b", "block", cmd, msg);
+              return { block: true, reason: msg };
+            }
+            appendEnforcerLog(projectRoot, "R53b", "pass", cmd, "Step 1 review found in log");
+          }
+
+          // R53c: governance batch review gate
+          if (id === "R53c" && rule.action === "block_governance_batch") {
+            try {
+              const staged = require("child_process").execSync(
+                "git diff --cached --name-only", { cwd: projectRoot, encoding: "utf-8" }
+              ).trim().split("\n").filter((l: string) => l.trim());
+              const govFiles = staged.filter((l: string) => l.startsWith(".agents/"));
+              const bizFiles = staged.filter((l: string) => {
+                return !l.startsWith(".agents/") && (l.startsWith("src/") || l.startsWith("backend/") || l.startsWith("frontend/"));
+              });
+              if (govFiles.length > 5 && bizFiles.length > 0) {
+                const msg = `Governance batch: ${govFiles.length} gov files + ${bizFiles.length} biz files. Use --quick or split commits.`;
+                ctx.ui.notify(`🚫 R53c: ${msg}`, "warning");
+                appendEnforcerLog(projectRoot, "R53c", "block", cmd, msg);
+                return { block: true, reason: msg };
+              }
+              appendEnforcerLog(projectRoot, "R53c", "pass", cmd, "OK");
+            } catch (e) {
+              appendEnforcerLog(projectRoot, "R53c", "error", cmd, String(e));
+            }
+          }
+
+          // R53d: block /tmp script bypass of vibe commit
+          if (id === "R53d" && rule.action === "block_tmp_bypass") {
+            const msg = "禁止用 /tmp 脚本绕过 vibe commit。必须用 vibe commit 两步流程 (step 1: 看 diff → step 2: --reviewed)。";
+            ctx.ui.notify(`🚫 R53d: ${msg}`, "warning");
+            appendEnforcerLog(projectRoot, "R53d", "block", cmd, msg);
+            return { block: true, reason: msg };
+          }
+
+          // R8.43: block VIBE_SKIP_COMMIT_MSG_HOOK
+          if (id === "R8.43" && rule.action === "block_skip_hook") {
+            const msg = "禁止跳过 commit-msg hook (VIBE_SKIP_COMMIT_MSG_HOOK=1)。Hook 是门禁不是可选步骤。";
+            ctx.ui.notify(`🚫 R8.43: ${msg}`, "warning");
+            appendEnforcerLog(projectRoot, "R8.43", "block", cmd, msg);
+            return { block: true, reason: msg };
+          }
+
+          // R59: block --force non-emergency
+          if (id === "R59" && rule.action === "block_force_non_emergency") {
+            // --force is allowed only with explicit emergency reason
+            const hasEmergencyReason = /emergency|urgent|hotfix|critical/i.test(cmd);
+            if (!hasEmergencyReason) {
+              const msg = "--force 仅限 emergency。如需跳过门禁，请：(1) 声明 emergency reason，或 (2) 用 override_approver (R67)。";
+              ctx.ui.notify(`🚫 R59: ${msg}`, "warning");
+              appendEnforcerLog(projectRoot, "R59", "block", cmd, msg);
+              return { block: true, reason: msg };
+            }
+            appendEnforcerLog(projectRoot, "R59", "pass", cmd, "Emergency reason declared");
+          }
+
+          // R30c: block observe evidence without --configured
+          if (id === "R30c" && rule.action === "block_observe_no_configured") {
+            const msg = "observe evidence 必须带 --configured，否则 Command-Digests 为 N/A，advance gate 会拒绝。";
+            ctx.ui.notify(`🚫 R30c: ${msg}`, "warning");
+            appendEnforcerLog(projectRoot, "R30c", "block", cmd, msg);
+            return { block: true, reason: msg };
+          }
+
           // R4: verify commands check
           if (id === "R4" && rule.action === "verify_commands") {
             const result = checkVerifyCommands(projectRoot);
@@ -526,6 +612,58 @@ export default function vibeEnforcerExtension(pi: ExtensionAPI) {
                 }
               }
               appendEnforcerLog(projectRoot, id, "pass", cmd, "OK");
+            }
+          }
+
+          // R5d: block same-session review — must use independent session (pi --print --no-session / codex exec)
+          if (id === "R5d" && rule.action === "block_same_session_review") {
+            // Core logic: the session that built the code cannot review it.
+            // If PI_SESSION_FILE/ID is available, check if this session also
+            // appears as the builder in activity.md. If so, block.
+            const sessionFile = process.env.PI_SESSION_FILE || "";
+            const sessionId = process.env.PI_SESSION_ID || "";
+            let currentSession = "";
+            if (sessionFile) {
+              const basename = path.basename(sessionFile);
+              const parts = basename.split("_");
+              if (parts.length >= 2) currentSession = parts[parts.length - 1].replace(".jsonl", "");
+            }
+            if (!currentSession && sessionId) currentSession = sessionId;
+
+            // Check if workflow.json has review.independent_session: false (advisory mode)
+            const workflowPath = path.join(projectRoot, ".agents", "workflow.json");
+            let advisoryOnly = false;
+            try {
+              if (fs.existsSync(workflowPath)) {
+                const wf = JSON.parse(fs.readFileSync(workflowPath, "utf-8"));
+                if (wf?.review?.independent_session === false) advisoryOnly = true;
+              }
+            } catch {}
+
+            const reviewTip = "Review 必须用独立 session。推荐用 pi --print --no-session 或 codex exec 启动独立 reviewer，或用 spawn_reviewer.sh。";
+
+            if (!currentSession) {
+              // No session context (non-Pi agent) — advisory only, cannot enforce
+              ctx.ui.notify(`⚠️ R5d: ${reviewTip}`, "warning");
+              appendEnforcerLog(projectRoot, id, "advisory", cmd, "No session context");
+            } else {
+              // Check activity.md: find last builder actor session
+              // If the builder's Actor value matches currentSession → same session self-review
+              const result = checkReviewerIdentity(projectRoot, "*");
+              if (!result.ok) {
+                // Builder = Reviewer identity → block (or advisory if configured)
+                if (advisoryOnly) {
+                  ctx.ui.notify(`⚠️ R5d (advisory): ${result.detail}. ${reviewTip}`, "warning");
+                  appendEnforcerLog(projectRoot, id, "advisory", cmd, result.detail);
+                } else {
+                  const msg = `🚫 R5d: ${result.detail}. ${reviewTip}`;
+                  ctx.ui.notify(msg, "warning");
+                  appendEnforcerLog(projectRoot, id, "block", cmd, msg);
+                  return { block: true, reason: msg };
+                }
+              } else {
+                appendEnforcerLog(projectRoot, id, "pass", cmd, "OK");
+              }
             }
           }
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """Show a holistic project status overview.
 
 Usage:
@@ -352,8 +353,12 @@ def _check_retro_upgrade_candidates(project_root: str) -> list[dict]:
 
     return candidates
 
-def _check_pending_skill_upgrades(project_root: str, max_age_seconds: int = 60) -> list[str]:
-    """Check for pending skill upgrade candidates not yet archived."""
+def _check_pending_skill_upgrades(project_root: str, max_age_seconds: int = 60) -> list[dict]:
+    """Check for pending skill upgrade candidates not yet archived.
+    
+    Returns list of dicts with keys: fname, age_days, status.
+    Candidates with 状态: accepted/rejected/已实施 in their header are excluded.
+    """
     import time
     cache_key = str(project_root)
     now = time.time()
@@ -374,23 +379,51 @@ def _check_pending_skill_upgrades(project_root: str, max_age_seconds: int = 60) 
         archive_dir = os.path.join(project_root, ".agents", "archive", "skill-upgrade-candidates")
         if os.path.exists(os.path.join(archive_dir, fname)):
             continue
-        candidates.append(fname)
+        fpath = os.path.join(candidates_dir, fname)
+        # Check candidate status header (lifecycle state machine)
+        status = "proposed"
+        try:
+            with open(fpath, encoding="utf-8") as f:
+                for line in f:
+                    if line.startswith("## ") or line.startswith("# "):
+                        break  # past header area
+                    m = re.search(r">\s*状态:\s*(\S+)", line)
+                    if m:
+                        status = m.group(1).lower()
+                        break
+        except OSError:
+            pass
+        # Skip candidates that are already decided
+        if status in ("accepted", "rejected", "已实施", "已拒绝"):
+            continue
+        # Calculate age
+        try:
+            mtime = os.path.getmtime(fpath)
+            age_days = (now - mtime) / 86400
+        except OSError:
+            age_days = 0
+        candidates.append({"fname": fname, "age_days": age_days, "status": status})
 
     _skill_upgrade_cache[cache_key] = (candidates, now)
     return candidates
 
 
 def _print_skill_upgrade_advisory(project_root: str) -> None:
-    """Print advisory about pending skill upgrade candidates."""
+    """Print advisory about pending skill upgrade candidates with SLA warnings."""
     candidates = _check_pending_skill_upgrades(project_root)
     if not candidates:
         return
     print()
-    print(f"💡 项目有 {len(candidates)} 个待评审的 Skill 升级候选提案:")
-    for fname in candidates:
-        print(f"   - .agents/skill-upgrade-candidates/{fname}")
-    print("   请管理员评审后归档到 .agents/archive/skill-upgrade-candidates/")
-    print("<!-- vibe:pending_skill_upgrades: " + ",".join(candidates) + " -->")
+    stale_count = sum(1 for c in candidates if c["age_days"] > 7)
+    sla_warning = f" ({stale_count} 个超过 7 天未评审)" if stale_count else ""
+    print(f"💡 项目有 {len(candidates)} 个待评审的 Skill 升级候选提案{sla_warning}:")
+    for c in candidates:
+        age_tag = f" ({int(c['age_days'])}d)" if c["age_days"] > 3 else ""
+        status_tag = f" [{c['status']}]" if c["status"] != "proposed" else ""
+        print(f"   - .agents/skill-upgrade-candidates/{c['fname']}{age_tag}{status_tag}")
+    print("   管理员评审后: 改 状态 为 accepted/rejected, 或移至 archive/")
+    fnames = [c["fname"] for c in candidates]
+    print("<!-- vibe:pending_skill_upgrades: " + ",".join(fnames) + " -->")
 
 
 def project_next(project_root: str, args=None) -> dict:
@@ -1169,7 +1202,11 @@ def _print_missing_changelog_hint(project_root: str) -> None:
         entry[:-3] for entry in os.listdir(changelogs_dir)
         if entry.endswith(".md") and entry != ".gitkeep"
     }
-    missing = []
+    import time as _time
+    _now = _time.time()
+    _window = 30 * 86400  # 30 days
+    recent_missing = []
+    old_missing = 0
     for entry in sorted(os.listdir(specs_dir)):
         if not entry.endswith(".md") or entry.endswith("-amendments.md"):
             continue
@@ -1177,30 +1214,36 @@ def _print_missing_changelog_hint(project_root: str) -> None:
         try:
             with open(path, encoding="utf-8") as fp:
                 content = fp.read()
+            spec_mtime = os.path.getmtime(path)
         except OSError:
             continue
         m = re.search(r">\s*状态:\s*(\S+)", content)
         if m and m.group(1) in {"done", "released"}:
             name = entry[:-3]
             if name not in existing:
-                missing.append((name, m.group(1)))
-    if not missing:
+                if _now - spec_mtime > _window:
+                    old_missing += 1
+                else:
+                    recent_missing.append((name, m.group(1)))
+    total_missing = len(recent_missing) + old_missing
+    if total_missing == 0:
         return
     print()
     # 2026-07-08: 软提示语气 ("[可选]" / "某些项目可能定义了一个悬空门槛
-    # 如 7 天")。快看不再看起来像“必须上东”。
+    # 如 7 天)。快看不再看起来像"必须上东"。
+    # 2026-07-21: 30-day window — recent shown individually, old summarized.
     print(
-        f"📝 [可选] {len(missing)} 个已 done/released 的 spec 尚未补 CHANGELOG 行。"
+        f"📝 [可选] {total_missing} 个已 done/released 的 spec 尚未补 CHANGELOG 行。"
         "未补 CHANGELOG 不阻塞 workflow；"
         "仅作为发布门面的软提示，你可能在决定 release 节奏后一并补。"
     )
-    for name, status in missing[:10]:
+    for name, status in recent_missing[:10]:
         print(f"   - {name} ({status})")
-    if len(missing) > 10:
-        print(f"   ... 还有 {len(missing) - 10} 个")
+    if old_missing > 0:
+        print(f"   ... 还有 {old_missing} 个超过 30 天的历史欠账（不逐一列出）")
     print("   如需现在补: `vibe changelog <project> <spec-name>`")
     print("   如需调整项目自定缺失门槛: 项目级 rules 表达（如 7 天）。")
-    print(f"<!-- vibe:missing_changelogs: {len(missing)} -->")
+    print(f"<!-- vibe:missing_changelogs: {total_missing} -->")
 
 
 def _uncommitted_count(project_root: str) -> int:
