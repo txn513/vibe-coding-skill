@@ -1038,21 +1038,34 @@ def _audit_retro_gap_candidates(project_root, warnings):
     if not os.path.isdir(retros_dir):
         return
     import retro_gap_scan as _rgs
-    total = 0
+    import time as _time
+    _now = _time.time()
+    _window = 30 * 86400  # 30 days
+    recent_total = 0
+    old_total = 0
     for entry in sorted(os.listdir(retros_dir)):
         if not entry.endswith(".md"):
             continue
+        path = os.path.join(retros_dir, entry)
         try:
-            content = open(os.path.join(retros_dir, entry), encoding="utf-8").read()
+            content = open(path, encoding="utf-8").read()
+            mtime = os.path.getmtime(path)
         except OSError:
             continue
+        is_recent = (_now - mtime) <= _window
         for _title, body, _ in _rgs._iter_gap_sections(content):
             for line in body.splitlines():
                 if line.lstrip().startswith(("-", "*")):
-                    total += 1
+                    if is_recent:
+                        recent_total += 1
+                    else:
+                        old_total += 1
+    total = recent_total + old_total
     if total > 0:
-        warnings.append(
-            f"retro gap 候选 {total} 个未确认（新 verify evidence 写入时会逐条提示）"
+        msg = f"retro gap 候选 {recent_total} 个未确认（新 verify evidence 写入时会逐条提示）"
+        if old_total > 0:
+            msg += f" + {old_total} 个历史 gap（30 天前，不逐一确认）"
+        warnings.append(msg
         )
 
 
@@ -1109,6 +1122,14 @@ def _audit_evidence_commit_freshness(project_root: str, warnings: list[str]) -> 
             recorded = m.group(1)
             if recorded == current_head:
                 continue
+            # 2026-07-21: skip evidence for specs modified >30 days ago (historical debt)
+            try:
+                spec_mtime = os.path.getmtime(fpath)
+            except OSError:
+                spec_mtime = 0
+            import time as _time
+            if _time.time() - spec_mtime > 30 * 86400:
+                continue  # frozen, not reported
             # recorded 仍然存在?
             try:
                 exists = subprocess.run(

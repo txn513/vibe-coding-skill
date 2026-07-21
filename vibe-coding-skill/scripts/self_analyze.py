@@ -458,12 +458,16 @@ def _is_placeholder(s: str) -> bool:
         return True
     if text in {"-", "无", "N/A"}:
         return False
+    # 2026-07-21: common failure mode placeholder text
+    if text.lower() in {"none", "无失败模式", "n/a"}:
+        return True
     markers = (
         "(什么", "(Agent", "(哪些", "(如何", "(描述", "(计划", "(请", "（请",
         "(从 spec 复制", "(实际交付了什么)", "(参与回顾的人)", "(上线日期)",
         "(做得好的地方)", "(做得不好的地方)", "(应该补充什么规则",
         "(Review Agent 漏掉了什么)", "(更新 AGENTS.md", "(更新哪些规则文件)",
         "(是否需要调整 spec 模板)", "(是否需要调整 review checklist)", "(其他行动项)",
+        "从共享失败模式中选择", "明确写 none", "none", "无失败模式",
     )
     return any(marker in text for marker in markers)
 

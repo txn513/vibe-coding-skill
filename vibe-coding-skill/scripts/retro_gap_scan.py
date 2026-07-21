@@ -223,6 +223,15 @@ _ACTION_ITEM_RE = re.compile(
 )
 _OPEN_STATE = " "  # the literal space inside `[ ]`
 
+# Template self-check patterns to exclude from stale action item scanning.
+# These are retro template prompts (yes/no questions, phase checklists)
+# that are not real action items — they guide thinking, not track work.
+_TEMPLATE_CHECK_PATTERNS = [
+    re.compile(r"是否|是\s*/\s*否"),
+    re.compile(r"\*\*(?:Discovery|Spec|Plan|Execute|Verify|Review|Release|Observe|Done)\*\*"),
+]
+
+
 
 @dataclass
 class ActionItem:
@@ -322,6 +331,9 @@ def scan_stale_action_items(
         retro_name = os.path.basename(path)[:-3]
         for state, text in _iter_action_items(content):
             if state == "open" and text:
+                # Skip template self-check items (yes/no questions, phase checklists)
+                if any(pat.search(text) for pat in _TEMPLATE_CHECK_PATTERNS):
+                    continue
                 # Parse the original line for richer reporting
                 raw_line = next(
                     (ln for ln in content.splitlines()
