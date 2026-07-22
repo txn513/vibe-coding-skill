@@ -1209,7 +1209,7 @@ def commit(
         # 审查了, 实际只是凭记忆写"。Bypass: --quick (整段跳过 review)
         # 或 --no-verify (整段跳过), 与现有 per-file gate 一致。
         line_ref_pattern = re.compile(
-            r"(?:L[0-9]+|line\s+[0-9]+|:[0-9]+|`[^`]+`)", re.IGNORECASE
+            r"(?:L[0-9]+(?:-[0-9]+)?|line\s+[0-9]+|:[0-9]+|`[^`]+`)", re.IGNORECASE
         )
         # 2026-07-08: accept either newline OR ";" as file-entry separator.
         # The original ";" separator collided with descriptions that contain
@@ -1627,11 +1627,54 @@ def commit(
     # vibe commit (raw `git commit` won't have this trailer).
     print("✅ Verify 全通过" + (" + 调用点覆盖通过" if call_site_commands else "") + "，转交 git commit")
     trailer_key = "quick" if quick else "yes"
-    trailer_argv = ["git", "commit", *commit_argv, "--trailer", f"Vibe-Commit={trailer_key}"]
-    if verify_exception:
-        trailer_argv.extend(["--trailer", f"Verify-Crash={type(verify_exception).__name__}"])
+
+    # 2026-07-22 (Improvement A+B): write COMMIT_EDITMSG with full message
+    # so project-level pre-commit hooks (R8.43, R-D-63) can read it.
+    # Previously used git commit -m which doesn't populate COMMIT_EDITMSG.
+    commit_message = _extract_commit_message(commit_argv)
+
+    # 2026-07-22 (Improvement B): auto-add spec: <name> trailer
+    if not re.search(r"spec[:\s]+[a-z0-9-]+", commit_message, re.IGNORECASE):
+        in_progress_specs = _get_in_progress_specs(project_root)
+        if len(in_progress_specs) == 1:
+            commit_message = commit_message + "\n\nspec: " + in_progress_specs[0]
+        elif len(in_progress_specs) > 1:
+            prefix_match = re.match(r"\w+\(([\w-]+)\)", commit_message)
+            if prefix_match:
+                prefix = prefix_match.group(1)
+                matched = [s for s in in_progress_specs if s.startswith(prefix)]
+                if len(matched) == 1:
+                    commit_message = commit_message + "\n\nspec: " + matched[0]
+
+    # Build full commit message with trailers
+    full_message = commit_message + "\n\n"
     if reviewed and not quick and not no_verify and review_summary.strip():
-        trailer_argv.extend(["--trailer", f"Review-Summary={review_summary.strip()}"])
+        full_message += "Review-Summary: " + review_summary.strip() + "\n"
+    full_message += "Vibe-Commit: " + trailer_key
+    if verify_exception:
+        full_message += "\nVerify-Crash: " + type(verify_exception).__name__
+
+    # Write COMMIT_EDITMSG (lets pre-commit hooks read the full message)
+    commit_editmsg_path = os.path.join(project_root, ".git", "COMMIT_EDITMSG")
+    try:
+        with open(commit_editmsg_path, "w", encoding="utf-8") as f:
+            f.write(full_message + "\n")
+    except OSError:
+        pass  # Non-critical; commit will still work via -m fallback
+
+    # Use -F to commit (reads from COMMIT_EDITMSG, hooks can access it)
+    # Strip -m from commit_argv (we use -F instead), keep other flags
+    filtered_argv = []
+    _skip_next = False
+    for _i, _arg in enumerate(commit_argv):
+        if _skip_next:
+            _skip_next = False
+            continue
+        if _arg == "-m":
+            _skip_next = True
+            continue
+        filtered_argv.append(_arg)
+    trailer_argv = ["git", "commit", *filtered_argv, "-F", commit_editmsg_path]
     completed = subprocess.run(trailer_argv, cwd=project_root)
     # Rule 53c: --quick skips agent self-review AND vibe review won't auto-trigger.
     # Rule 53d: write pending review marker so vibe next/status can remind later.
