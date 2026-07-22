@@ -1133,6 +1133,30 @@ to push a spec to
     files enter the commit rather than staying dirty.
 
 
+## Rule R-D-70: Test Environment Isolation
+
+Tests MUST NOT operate on production databases. Two sub-rules:
+
+### R-D-70a: Test env vars must override, not setdefault
+
+Test fixtures that set environment variables MUST use `os.environ["KEY"] = "value"` (force override). `os.environ.setdefault("KEY", "value")` is **prohibited** for any env var that affects database selection, API endpoints, or data persistence.
+
+`setdefault` silently skips when the variable is already loaded (e.g., from `.env`), causing tests to run against the development database.
+
+**Exception**: `setdefault` is allowed for non-critical config (e.g., `DEBUG=True`, `LOG_LEVEL=DEBUG`).
+
+### R-D-70b: TestClient must use isolated database
+
+When using `TestClient(app)` (or equivalent) that triggers application lifespan/startup, the test fixture MUST ensure the application connects to a temporary or in-memory database, not the development/production database.
+
+This is a governance rule (what must be true), not an implementation prescription (how to achieve it). Projects implement isolation via their own mechanism — temp files, in-memory SQLite, test containers, etc.
+
+### R-D-70c: Auto-backup is project-level, not Skill-level
+
+Auto-backup of development databases before test runs is a project-level safety net, not a Skill rule. The Skill only requires isolation (R-D-70a + R-D-70b). Projects that want an additional safety net can implement backup logic in their test fixtures.
+
+Source: 20260723-test-db-isolation candidate (fix-test-env-vars-overwrite-dev-db retro).
+
 ## State Model
 
 Normal states are:

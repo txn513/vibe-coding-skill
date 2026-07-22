@@ -599,6 +599,7 @@ def doctor(project_root: str) -> dict:
     _audit_directory_structure(project_root, warnings)
     _audit_unbound_rules(project_root, warnings)
     _audit_spec_status_drift(project_root, warnings)
+    _audit_test_setdefault(project_root, warnings)
     _audit_rule_bloat(project_root, warnings)
     # Rule 53d: check for pending review markers (bypassed review gates)
     pending_reviews_path = os.path.join(project_root, ".agents", ".vibe-pending-reviews.json")
@@ -1313,6 +1314,51 @@ def _audit_spec_status_drift(project_root: str, warnings: list[str]) -> None:
             f"{drift_count} spec(s) bypassed vibe advance. "
             "Use `vibe advance <project> <spec> <status>` for status transitions."
         )
+
+
+def _audit_test_setdefault(project_root: str, warnings: list[str]) -> None:
+    """R-D-70a advisory: scan test files for setdefault on DB-related env vars.
+
+    setdefault silently skips when the env var is already loaded from .env,
+    causing tests to run against the development database.
+    """
+    import glob as _glob
+    # Common patterns for test files
+    test_patterns = [
+        os.path.join(project_root, "tests", "**", "*.py"),
+        os.path.join(project_root, "test", "**", "*.py"),
+        os.path.join(project_root, "**", "conftest.py"),
+    ]
+    # Env vars that affect DB selection
+    db_env_patterns = [
+        "ENVIRONMENT", "DATABASE_URL", "DB_PATH", "DB_NAME",
+        "DATABASE", "DB_HOST", "POSTGRES_DB", "MONGO_DB",
+    ]
+    hits = []
+    for pattern in test_patterns:
+        for filepath in _glob.glob(pattern, recursive=True):
+            try:
+                with open(filepath, encoding="utf-8") as f:
+                    lines = f.readlines()
+            except OSError:
+                continue
+            for i, line in enumerate(lines, 1):
+                if "setdefault" not in line:
+                    continue
+                for env_var in db_env_patterns:
+                    if env_var in line:
+                        rel = os.path.relpath(filepath, project_root)
+                        hits.append(f"{rel}:{i} setdefault({env_var}) — use os.environ[\"{env_var}\"] = ... instead")
+                        break
+    if hits:
+        warnings.append(
+            f"R-D-70a: {len(hits)} test file(s) use setdefault for DB env vars "
+            "(silently fails when .env already sets them):"
+        )
+        for h in hits[:5]:
+            warnings.append(f"  - {h}")
+        if len(hits) > 5:
+            warnings.append(f"  ... and {len(hits) - 5} more")
 
 
 def discover_project_doctors(project_root: str) -> list[str]:
