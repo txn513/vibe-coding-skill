@@ -153,6 +153,29 @@ def _is_governance_file(filepath: str) -> bool:
 REVIEW_MARKER_TTL_SECONDS = 600
 
 
+def _get_in_progress_specs(project_root: str) -> list[str]:
+    """Return list of spec names currently in-progress.
+    
+    Used by vibe commit to auto-add spec: <name> trailer (Improvement B).
+    """
+    specs_dir = os.path.join(project_root, ".agents", "specs")
+    if not os.path.isdir(specs_dir):
+        return []
+    in_progress = []
+    for entry in os.listdir(specs_dir):
+        if not entry.endswith(".md") or entry.endswith("-amendments.md"):
+            continue
+        path = os.path.join(specs_dir, entry)
+        try:
+            with open(path, encoding="utf-8") as f:
+                text = f.read()
+        except OSError:
+            continue
+        if re.search(r">\s*状态:\s*in-progress", text):
+            in_progress.append(entry[:-3])
+    return in_progress
+
+
 def _review_marker_path(project_root: str) -> str:
     """Path to the marker file that records "step 1 (diff shown) was run".
 
