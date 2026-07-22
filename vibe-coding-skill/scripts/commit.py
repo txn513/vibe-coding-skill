@@ -1211,6 +1211,14 @@ def commit(
         line_ref_pattern = re.compile(
             r"(?:L[0-9]+(?:-[0-9]+)?|line\s+[0-9]+|:[0-9]+|`[^`]+`)", re.IGNORECASE
         )
+        # 2026-07-22: strip fenced code blocks before splitting into parts.
+        # Fenced blocks (```bash\n...\n```) contain grep/curl/pytest output
+        # that looks like "327:class UserCredit(Base):" - this has a colon
+        # and would be misidentified as a file-entry conclusion, triggering
+        # false missing_line_refs. Real file-entry lines are outside blocks.
+        summary_stripped = re.sub(
+            r"`{3}[a-z]*\n[\s\S]+?\n`{3}", "", review_summary
+        )
         # 2026-07-08: accept either newline OR ";" as file-entry separator.
         # The original ";" separator collided with descriptions that contain
         # ";" (eg "L789 area; L1130 area"), causing false missing-line-ref
@@ -1220,7 +1228,7 @@ def commit(
         # agent output still parses.
         file_parts = [
             part.strip()
-            for part in re.split(r"[\n;]+", summary)
+            for part in re.split(r"[\n;]+", summary_stripped)
             if part.strip()
         ]
         # 2026-07-08g: substantive-review soft advisory.
