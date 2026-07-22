@@ -1133,6 +1133,29 @@ to push a spec to
     files enter the commit rather than staying dirty.
 
 
+
+## Rule R-D-59: Independent Review Must Be Genuinely Independent
+
+When a review claims `--reviewer independent`, the enforcer-log MUST contain evidence of an independent session (e.g., `pi agent --print --no-session`, `codex exec`, or `spawn_reviewer`). If no independent session record exists, the review is blocked.
+
+This prevents the failure mode where an agent claims independent review but actually self-reviews in the same session. The enforcer-log is the single source of truth for session identity.
+
+<!-- ENFORCE: id=R-D-59, hook=tool_call, tool=bash, match=record_review.*--reviewer.*independent, action=block_fake_independent_review, message=声称独立review但enforcer-log无独立session记录，请先用pi --print --no-session或codex exec启动独立review -->
+
+## Rule R-D-69: Retro Self-Proof (Substantive Compliance)
+
+When advancing a spec to done, the retro MUST contain a "实质合规自证" (substantive compliance self-proof) section. Each self-proof item MUST include specific evidence (command + output + file reference), not just "是" (yes) without elaboration.
+
+Lazy answers (e.g., "evidence 命令是否真实执行: 是" without citing the actual command and output) are rejected. The 5 required self-proof items are:
+
+1. Evidence commands were actually executed (cite command + exit code)
+2. Review was genuinely independent (cite reviewer session method)
+3. Observe produced real output (cite actual HTTP response or test result)
+4. Spec Fix Scope matches actual changes (cite diff stat vs spec scope)
+5. AC verified per-item (cite each AC + corresponding test/evidence)
+
+This prevents the failure mode where retro is form-compliant but substantively empty — the agent fills in the template without actually verifying each claim.
+
 ## Rule R-D-70: Test Environment Isolation
 
 Tests MUST NOT operate on production databases. Two sub-rules:
