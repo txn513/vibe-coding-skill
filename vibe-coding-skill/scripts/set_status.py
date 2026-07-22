@@ -384,6 +384,18 @@ def set_status(
                     print("   observe 真实输出 / spec Fix Scope 一致 / AC 逐条验证")
                     print("   缺失 = retro 不完整 = 阻塞 done")
                     return None
+                # 2026-07-22: also check for lazy answers (just "是" without evidence)
+                _lazy_patterns = [
+                    r"evidence 命令是否真实执行.*:\s*是\s*$",
+                    r"review 是否真正独立.*:\s*是\s*$",
+                    r"AC 验证.*:\s*是\s*$",
+                ]
+                for _pat in _lazy_patterns:
+                    if re.search(_pat, _retro_content, re.MULTILINE | re.IGNORECASE):
+                        print("❌ retro R-D-69 自证段有敷衍回答（只填'是'无具体证据）")
+                        print("   每条自检必须附具体证据：命令 + 输出 + 文件引用")
+                        print("   示例: '是，跑了 pytest tests/ -v → 9/9 passed (exit 0)'")
+                        return None
 
     if not force and new_status not in ALLOWED_TRANSITIONS.get(current_status, set()):
         allowed = ", ".join(sorted(ALLOWED_TRANSITIONS.get(current_status, set()))) or "无"
@@ -439,6 +451,9 @@ def set_status(
     # advisory, machine marker, no gate interference). 2026-07-11.
     if new_status == "done" and not force:
         _print_retro_reminder_at_done(project_root, spec_name)
+    # 2026-07-22: Improvement A — advance to review prints independent review prompt
+    if new_status == "review" and not force:
+        _print_independent_review_prompt(project_root, spec_name)
     # Rule 50: machine-readable gate verdict.
     verdict = "pass"
     if force:
@@ -502,6 +517,44 @@ def _is_retro_placeholder(retro_path: str) -> bool:
 
     # If fewer than 5 meaningful lines, it's likely an unedited template
     return meaningful_lines < 5
+
+
+def _print_independent_review_prompt(project_root: str, spec_name: str) -> None:
+    """Print independent review startup command after advancing to review.
+
+    2026-07-22 (Improvement A Layer 1): R-D-59 requires independent
+    review. This prompt makes the correct startup command discoverable
+    at the exact moment the agent needs it — after advance to review.
+    """
+    # Get current commit hash for the review context
+    import subprocess as _sp
+    try:
+        head = _sp.run(
+            ["git", "-C", project_root, "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+        )
+        commit_hash = head.stdout.strip() if head.returncode == 0 else "HEAD"
+    except (OSError, _sp.TimeoutExpired):
+        commit_hash = "HEAD"
+    print()
+    print("📋 Review 阶段 — 需要独立 reviewer (R-D-59)")
+    print()
+    print("请用以下命令启动独立 review session:")
+    print("  pi agent --print --no-session")
+    print()
+    print("将以下内容作为 prompt:")
+    print("  ---")
+    print(f"  请审查 spec: {spec_name}")
+    print(f"  项目路径: {project_root}")
+    print(f"  Spec 文件: .agents/specs/{spec_name}.md")
+    print(f"  Commit: {commit_hash}")
+    print(f"  Evidence: .agents/evidence/{spec_name}/")
+    print("  ---")
+    print()
+    print("审查完成后运行:")
+    print(f"  vibe review-decision {project_root} {spec_name} approved '<审查结论>'")
+    print()
+    print("<!-- vibe:independent_review_prompt: spec={spec_name} -->")
 
 
 def _print_retro_reminder_at_done(project_root: str, spec_name: str) -> None:

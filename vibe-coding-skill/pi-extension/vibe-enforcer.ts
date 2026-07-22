@@ -718,6 +718,34 @@ export default function vibeEnforcerExtension(pi: ExtensionAPI) {
           }
 }
 
+// R-D-59: block fake independent review — claims independent but no pi session record
+pi.on("tool_call", async (event, ctx) => {
+  if (event.toolName !== "bash") return;
+  const cmd = event.input?.command ?? "";
+  
+  // Detect record_review.py claiming independent reviewer
+  if (cmd.includes("record_review") && /--reviewer\s+\S*independent/.test(cmd)) {
+    const logPath = path.join(projectRoot, ".agents", "enforcer-log.md");
+    let hasIndependentSession = false;
+    try {
+      if (fs.existsSync(logPath)) {
+        const log = fs.readFileSync(logPath, "utf-8");
+        hasIndependentSession = /pi\s+(agent|run)\s+--(print|no-session)/.test(log) ||
+                                /codex\s+exec/.test(log) ||
+                                /spawn_reviewer/.test(log);
+      }
+    } catch {}
+    
+    if (!hasIndependentSession) {
+      const msg = "R-D-59: 声称独立 review (--reviewer independent) 但 enforcer-log 无独立 session 调用记录。" +
+                  "请先用 `pi agent --print --no-session` 或 `codex exec` 启动独立 review session。";
+      ctx.ui.notify(`🚫 ${msg}`, "warning");
+      appendEnforcerLog(projectRoot, "R-D-59", "block", cmd, msg);
+      return { block: true, reason: msg };
+    }
+  }
+});
+
 // R66: session recovery — enforce vibe status within first 3 bash tool calls.
 // Per-session counter — resets on extension reload (session start / compact recovery).
 // This is intentional: every session should start with vibe status.

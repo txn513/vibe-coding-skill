@@ -39,7 +39,7 @@ def record_evidence(
     command: list[str] | None = None,
     configured: bool = False,
     purpose: str = "standard",
-    execute: bool = False,
+    execute: bool | None = None,
 ) -> str | None:
     spec_name = validate_artifact_name(spec_name, "规格名称")
     if phase not in PHASES:
@@ -79,10 +79,16 @@ def record_evidence(
         for cmd in commands:
             print(f"📋 期望验证命令: {' '.join(cmd)}")
 
+    # 2026-07-22: auto-execute for verify phase (Improvement B)
+    # When execute is None (not explicitly set), default to True for verify phase
+    # Use --no-execute to disable auto-execute
+    if execute is None:
+        execute = (phase == "verify")
+    
     # 2026-07-22: --execute actually runs configured commands and captures output
     # Prevents "evidence filled from memory" anti-pattern (R-D-69)
     execute_outputs: list[str] = []
-    if execute and configured and commands:
+    if execute and (configured or command) and commands:
         import subprocess as _sp
         for cmd in commands:
             cmd_str = " ".join(cmd)
@@ -498,7 +504,8 @@ if __name__ == "__main__":
     parser.add_argument("--role", default="", help="Workflow role")
     parser.add_argument("--command", nargs=argparse.REMAINDER, help="Run and capture a real command")
     parser.add_argument("--configured", action="store_true", help="Run all configured commands for the phase")
-    parser.add_argument("--execute", action="store_true", help="Actually execute configured commands and capture output (default: only record digests)")
+    parser.add_argument("--execute", action="store_true", default=None, help="Actually execute configured commands and capture output (default: auto for verify phase)")
+    parser.add_argument("--no-execute", action="store_true", help="Disable auto-execute for verify phase")
     parser.add_argument("--purpose", choices=sorted(PURPOSES), default="standard")
     args = parser.parse_args()
     misplaced = misplaced_vibe_options(args.command)
@@ -518,5 +525,5 @@ if __name__ == "__main__":
         args.command,
         args.configured,
         args.purpose,
-        execute=args.execute,
+        execute=(True if args.execute else (False if args.no_execute else None)),
     )

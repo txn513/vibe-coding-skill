@@ -11626,8 +11626,8 @@ class AdvanceDoneRetroReminderTests(unittest.TestCase):
             retro_dir.mkdir(parents=True, exist_ok=True)
             (retro_dir / "demo.md").write_text(
                 "# demo retro\n\n## 实质合规自证 (R-D-69)\n\n"
-                "- **evidence 命令是否真实执行**: 是\n"
-                "- **review 是否真正独立**: 是\n\n"
+                "- **evidence 命令是否真实执行**: 是，pytest tests/ -v → 9/9 passed\n"
+                "- **review 是否真正独立**: 是，pi agent --print --no-session 审查了 3 个文件\n\n"
                 "## 沉淀落点\n\n"
                 "- **是否形成 Skill 治理候选**: 否\n"
                 "- **如果形成，候选摘要是什么**: 不形成\n",
