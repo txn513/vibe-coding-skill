@@ -718,27 +718,33 @@ export default function vibeEnforcerExtension(pi: ExtensionAPI) {
           }
 }
 
-// R66: session recovery — enforce vibe status within first 3 tool calls
+// R66: session recovery — enforce vibe status within first 3 bash tool calls.
+// Per-session counter — resets on extension reload (session start / compact recovery).
+// This is intentional: every session should start with vibe status.
+// Only bash tool calls are counted (read/edit/write don't count — Agent needs
+// to read files before it can decide to run vibe status, and vibe status
+// itself is only executable via bash).
 let r66ToolCallCount = 0;
 let r66StatusSeen = false;
 pi.on("tool_call", async (event, ctx) => {
-  r66ToolCallCount++;
-  // Check if this is a vibe status/next command
+  // Only count bash tool calls — vibe status can only run via bash
+  if (event.toolName !== "bash") return;
   const cmd = event.input?.command ?? "";
+  // Check if this is a vibe status/next command — counts as compliance, not business operation
   if (/vibe(?:\.py)?\s+(status|next)/.test(cmd)) {
     r66StatusSeen = true;
+    return; // vibe status itself doesn't count as a "business" bash call
   }
-  // Warn on first 2 calls, block on 3rd if no vibe status
-  if (!r66StatusSeen && r66ToolCallCount <= 3) {
-    const msg = `R66: 前 3 次工具调用内必须先跑 \`vibe status .\` + \`vibe next .\`。当前是第 ${r66ToolCallCount} 次调用。`;
-    if (r66ToolCallCount === 3) {
-      ctx.ui.notify(`🚫 ${msg}`, "warning");
-      appendEnforcerLog(projectRoot, "R66", "block", cmd, msg);
-      return { block: true, reason: msg };
-    } else {
-      ctx.ui.notify(`⚠️ ${msg}`, "warning");
-      appendEnforcerLog(projectRoot, "R66", "warning", cmd, "vibe status not yet called");
-    }
+  r66ToolCallCount++;
+  // Warn on first 2 bash calls, block on 3rd if no vibe status
+  if (!r66StatusSeen && r66ToolCallCount >= 3) {
+    const msg = `R66: 前 3 次 bash 调用内必须先跑 \`vibe status .\` + \`vibe next .\`。当前是第 ${r66ToolCallCount} 次 bash 调用。`;
+    ctx.ui.notify(`🚫 ${msg}`, "warning");
+    appendEnforcerLog(projectRoot, "R66", "block", cmd, msg);
+    return { block: true, reason: msg };
+  } else if (!r66StatusSeen && r66ToolCallCount < 3) {
+    ctx.ui.notify(`⚠️ R66: 还没跑 vibe status，当前第 ${r66ToolCallCount} 次 bash 调用`, "warning");
+    appendEnforcerLog(projectRoot, "R66", "warning", cmd, "vibe status not yet called");
   }
 });
 

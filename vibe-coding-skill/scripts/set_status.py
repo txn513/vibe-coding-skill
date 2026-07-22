@@ -372,6 +372,18 @@ def set_status(
                         f"自动抓 workflow.json observe 命令 digest"
                     )
                 return None
+            # 2026-07-22: R-D-69 retro self-proof audit check
+            # retro must contain "实质合规自证" section before advance to done
+            _retro_path = os.path.join(project_root, ".agents", "retros", f"{spec_name}.md")
+            if os.path.exists(_retro_path):
+                with open(_retro_path, encoding="utf-8") as _rf:
+                    _retro_content = _rf.read()
+                if "实质合规自证" not in _retro_content:
+                    print("❌ retro 缺少'实质合规自证 (R-D-69)'段")
+                    print("   在 retro 中补充 5 条自检: evidence 命令真实执行 / review 真正独立 /")
+                    print("   observe 真实输出 / spec Fix Scope 一致 / AC 逐条验证")
+                    print("   缺失 = retro 不完整 = 阻塞 done")
+                    return None
 
     if not force and new_status not in ALLOWED_TRANSITIONS.get(current_status, set()):
         allowed = ", ".join(sorted(ALLOWED_TRANSITIONS.get(current_status, set()))) or "无"

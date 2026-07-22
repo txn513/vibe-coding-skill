@@ -176,10 +176,13 @@ def _append_enforcer_log_step1(project_root: str) -> None:
     import time as _time
     log_path = os.path.join(project_root, ".agents", "enforcer-log.md")
     ts = _time.strftime("%Y-%m-%dT%H:%M:%S.000Z", _time.gmtime())
+    # Truncate to match TypeScript appendEnforcerLog (cmd: 120, message: 200)
+    _cmd_str = "vibe commit (step 1 diff shown)"[:120]
+    _msg_str = "Step 1 diff shown, review marker written"[:200]
     line = (
         f"- `{ts}` `R53b` `action=pass` "
-        f"cmd=`vibe commit (step 1 diff shown)` "
-        f"message=`Step 1 diff shown, review marker written`\n"
+        f"cmd=`{_cmd_str}` "
+        f"message=`{_msg_str}`\n"
     )
     try:
         if not os.path.exists(log_path):

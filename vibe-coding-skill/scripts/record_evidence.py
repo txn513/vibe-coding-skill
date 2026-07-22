@@ -222,6 +222,9 @@ def record_evidence(
                 passed = False
                 output = f"command timed out after {error.timeout} seconds"
             outputs.append(f"$ {_redact_output(shlex.join(argv))}\n{output}")
+            # 2026-07-22: also capture into execute_outputs when --execute is on
+            if execute:
+                execute_outputs.append(f"$ {_redact_output(shlex.join(argv))}\n{output}")
         result = "passed" if passed else "failed"
         command_output = "\n\n".join(outputs)
         evidence = evidence or f"执行 {len(commands)} 个项目命令"
