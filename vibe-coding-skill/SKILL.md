@@ -328,7 +328,9 @@ artifacts merely because a template exists.
     values) must be exercised under a realistic configuration, not just the
     safe default that disables the feature. For acceptance criteria whose
     verb is "show", "display", "render", "include", "list", "expose", "呈现",
-    "展示", "显示", "包含" or similar UI-presentation verbs, the user-perceivable
+    "展示", "显示", "包含", "看到", "暴露", "可见", "字样", "字段值",
+    "重新", "重置", "恢复", "变化", "卡在", "进度", "弹出", "关闭",
+    "更新", "不再" or similar UI-presentation or state-change verbs, the user-perceivable
     evidence must be a UI-layer artifact — a real screenshot of the rendered
     surface, a Live HTTP response carrying the actual rendered HTML/DOM, a
     frontend component test that asserts what is visible, or an equivalent
@@ -1207,6 +1209,35 @@ Happy-path-only verification is insufficient when the spec explicitly defines fa
 Source: 2026-07-23 S2 candidate (9/287 retros had happy-path-only verification).
 
 <!-- ENFORCE: id=R-D-72, hook=tool_call, tool=bash, match=vibe(?:\.py)?\s+evidence.*verify, action=check_degradation_coverage, message=spec含degradation-path AC但evidence未覆盖，需补degradation-path验证 -->
+
+## Rule R-D-73: AC Numeric Claims Must Be Grep-Verified
+
+When an Acceptance Criterion contains a numeric claim (e.g., "13 处", "5 个调用点"), the spec-ready or verify phase MUST include a grep/count command that reproduces the number. Agents must not estimate counts from memory.
+
+**Detection**: Advisory at spec-ready; projects may opt into hard gates via validate_spec.py.
+
+Source: 2026-07-23 NC2 candidate (AC "13 处" was actually 11).
+
+<!-- ENFORCE: id=R-D-73, hook=agent_end, action=check_ac_numeric_grep, message=AC含数字声明但无grep实测，数字必须由grep/count复现 -->
+
+## Rule R-D-74: Snapshot Recency Tolerance
+
+Evidence snapshots (fix-regression, observe, review) are valid if created within the same commit batch or within 30 minutes of the advance check. Strict "must be HEAD" requirements cause dead loops when each commit updates the snapshot.
+
+This codifies the existing 30-minute tolerance in `set_status.py` into a formal Skill rule, preventing agents from over-enforcing snapshot freshness.
+
+Source: 2026-07-23 NC3 candidate (snapshot staleness dead loop).
+
+## Rule R-D-75: Follow-Up Tag Must Include Spec-ID
+
+When a spec Out of Scope section uses `[follow-up]` tags, each tag MUST include a spec-id: `[follow-up: spec-id]`. Bare `[follow-up]` without a spec-id causes `vibe advance` to fail because the gate cannot match the follow-up to a draft spec.
+
+The spec template already shows the format with spec-id; this rule makes it a hard requirement, not just a template convention.
+
+Source: 2026-07-23 NC6 candidate (csrf-jwt-hardening advance failure).
+
+<!-- ENFORCE: id=R-D-75, hook=tool_call, tool=bash, match=vibe(?:\.py)?\s+advance, action=check_followup_format, message=follow-up tag必须含spec-id，[follow-up]无id会导致advance失败 -->
+
 
 
 
