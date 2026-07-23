@@ -219,17 +219,18 @@ def find_vibe_py() -> str:
 
     Search order:
     1. VIBE_PY env var
-    2. /Users/lance/.pi/agent/skills/vibe-coding/scripts/vibe.py (Lance's default)
-    3. Try common skill paths
+    2. Relative to this script (same skill repo)
+    3. Common skill install paths
     """
     import os
     env_path = os.environ.get("VIBE_PY")
     if env_path and Path(env_path).exists():
         return env_path
-    # 妙藏项目专用路径 (Lance's machine)
-    default_path = Path("/Users/lance/.pi/agent/skills/vibe-coding/scripts/vibe.py")
-    if default_path.exists():
-        return str(default_path)
+    # Relative to this script — works regardless of install location
+    this_dir = Path(__file__).resolve().parent
+    relative_path = this_dir / "vibe.py"
+    if relative_path.exists():
+        return str(relative_path)
     # fallback: 搜常见位置
     candidates = [
         Path.home() / ".pi" / "agent" / "skills" / "vibe-coding" / "scripts" / "vibe.py",

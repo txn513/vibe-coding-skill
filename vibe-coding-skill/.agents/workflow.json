@@ -1,5 +1,5 @@
 {
-  "schema_version": 10,
+  "schema_version": 11,
   "project_id": "2026-06-12-vibe-coding-10-vibe-coding-agent-2",
   "roles": {
     "owner": "",
@@ -39,11 +39,50 @@
     }
   },
   "commands": {
-    "verify": [["python3", "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py", "-t", "."]],
+    "verify": [
+      [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-p",
+        "test_*.py",
+        "-t",
+        "."
+      ]
+    ],
     "release": [],
     "observe": [],
-    "verify_scope": [["python3", "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py", "-t", "."]],
-    "verify_full": [["python3", "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py", "-t", "."]]
+    "verify_scope": [
+      [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-p",
+        "test_*.py",
+        "-t",
+        "."
+      ]
+    ],
+    "verify_full": [
+      [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-p",
+        "test_*.py",
+        "-t",
+        "."
+      ]
+    ]
   },
   "repositories": [],
   "model_tiers": {},
@@ -76,5 +115,9 @@
     "required_for": [
       "high"
     ]
+  },
+  "bugs": {
+    "inbox": false,
+    "ledger": false
   }
 }

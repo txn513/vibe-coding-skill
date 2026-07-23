@@ -51,14 +51,33 @@ _PURE_EXTENSION_RULES = {
     # interceptors — Pi Extension hooks into Agent tool calls / startup
     "R4",
     "R5",
+    "R5b",   # block self-review session
+    "R5c",   # block solo review without declaration
+    "R5d",   # block same-session review, require pi --print --no-session
     "R10",
+    "R10p",  # block sandbox async DB
     "R22",
     "R25",
+    "R28b",  # block advance to done without user evidence
+    "R29b",  # block advance to review without review doc
     "R30",
+    "R30b",  # block advance to released without changelog
+    "R30c",  # block observe evidence without --configured
     "R47",
+    "R53c",  # block governance batch without --quick
+    "R53d",  # block /tmp script bypass
+    "R59",   # block --force non-emergency
     "R60",
+    "R60f",  # block advance done with unresolved follow-up
     "R62",
     "R66",
+    "R67",   # block self-override
+    "R68",   # block write when spec not in-progress
+    "R68e",  # block edit when spec not in-progress
+    "R69",   # check ignored .agents/ files
+    "R8.43", # block VIBE_SKIP_COMMIT_MSG_HOOK
+    "R-D-71", # ghost test ban (advisory)
+    "R-D-72", # degradation-path coverage (advisory)
 }
 
 # Known CLI gate functions / markers mapped by ENFORCE id.
@@ -66,6 +85,18 @@ _PURE_EXTENSION_RULES = {
 _KNOWN_CLI_IMPLS: dict[str, list[tuple[str, str]]] = {
     "R53": [
         ("commit.py", "review_summary"),
+    ],
+    "R53b": [
+        ("commit.py", "block_runtime_bypass"),
+    ],
+    "R8.43": [
+        ("commit.py", "commit_msg_hook"),
+    ],
+    "R-D-59": [
+        ("set_status.py", "independent_review"),
+    ],
+    "R-D-68": [
+        ("doctor_project.py", "spec_status_drift"),
     ],
 }
 

@@ -1179,6 +1179,36 @@ This is a governance rule (what must be true), not an implementation prescriptio
 Auto-backup of development databases before test runs is a project-level safety net, not a Skill rule. The Skill only requires isolation (R-D-70a + R-D-70b). Projects that want an additional safety net can implement backup logic in their test fixtures.
 
 Source: 20260723-test-db-isolation candidate (fix-test-env-vars-overwrite-dev-db retro).
+## Rule R-D-71: Ghost Test Ban (No Mocking the System Under Test)
+
+Tests MUST NOT mock the system under test. Mocking is for dependencies (external services, databases, file I/O); the code being tested must run as-is. A test that patches the function it claims to verify is a ghost test — it passes even if the implementation is deleted.
+
+**Detection**: If removing the implementation code causes the test to still pass, the test is a ghost. Common patterns:
+- `@patch('module.function_under_test')` — patching the function being tested
+- `MagicMock(return_value=...)` replacing the method under test
+- `monkeypatch.setattr(cls, 'method_under_test', mock)` — replacing the method being tested
+
+**Exception**: Mocking internal private helpers called by the public method under test is allowed, as long as the public method itself is not mocked.
+
+This is a governance rule (what must be true). Projects implement detection via their own grep/lint rules. The Skill provides the principle; projects add the enforcement mechanism.
+
+Source: 2026-07-23 S1 candidate (dlink-test-coverage retro: 6/7 tests were ghost tests).
+
+<!-- ENFORCE: id=R-D-71, hook=agent_end, action=check_ghost_tests, message=测试不能mock被测方法本身，ghost test比没测试更危险 -->
+
+## Rule R-D-72: Degradation-Path Coverage Required
+
+When a spec's Acceptance Criteria include degradation-path items (error handling, fallback, boundary conditions), the verify evidence MUST cover those degradation-path ACs, not just happy-path ACs.
+
+Happy-path-only verification is insufficient when the spec explicitly defines failure/fallback scenarios. The spec template already requires labeling each AC as `[happy-path]` or `[degradation-path]`; this rule ensures the evidence matches that labeling.
+
+**Detection**: `vibe evidence` for verify phase checks whether the spec has degradation-path ACs. If present, the evidence description must reference at least one degradation-path test or manual verification. Advisory (warning only, not blocking) at the Skill level; projects may opt into hard gates via `workflow.json`.
+
+Source: 2026-07-23 S2 candidate (9/287 retros had happy-path-only verification).
+
+<!-- ENFORCE: id=R-D-72, hook=tool_call, tool=bash, match=vibe(?:\.py)?\s+evidence.*verify, action=check_degradation_coverage, message=spec含degradation-path AC但evidence未覆盖，需补degradation-path验证 -->
+
+
 
 ## State Model
 

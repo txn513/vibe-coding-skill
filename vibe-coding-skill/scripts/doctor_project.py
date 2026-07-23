@@ -600,6 +600,7 @@ def doctor(project_root: str) -> dict:
     _audit_unbound_rules(project_root, warnings)
     _audit_spec_status_drift(project_root, warnings)
     _audit_test_setdefault(project_root, warnings)
+    _audit_ghost_tests(project_root, warnings)
     _audit_rule_bloat(project_root, warnings)
     # Rule 53d: check for pending review markers (bypassed review gates)
     pending_reviews_path = os.path.join(project_root, ".agents", ".vibe-pending-reviews.json")
@@ -1360,6 +1361,62 @@ def _audit_test_setdefault(project_root: str, warnings: list[str]) -> None:
         if len(hits) > 5:
             warnings.append(f"  ... and {len(hits) - 5} more")
 
+
+
+
+def _audit_ghost_tests(project_root: str, warnings: list[str]) -> None:
+    """R-D-71 advisory: scan test files for ghost test patterns.
+
+    Ghost tests mock the system under test instead of its dependencies.
+    They pass even when the implementation is deleted.
+    """
+    import glob as _glob
+    import re as _re
+    test_patterns = [
+        os.path.join(project_root, "tests", "**", "*.py"),
+        os.path.join(project_root, "test", "**", "*.py"),
+        os.path.join(project_root, "**", "conftest.py"),
+    ]
+    # Pattern: @patch or monkeypatch targeting the function/method being tested
+    # Heuristic: patch path contains the test module's own import path
+    ghost_patterns = [
+        _re.compile(r"@patch\(['\"](\w[\w.]*)\.\w+['\"]\)"),
+        _re.compile(r"monkeypatch\.setattr\(['\"](\w[\w.]*)\.\w+['\"]"),
+        _re.compile(r"MagicMock\(.*spec\s*=\s*\["),
+    ]
+    hits = []
+    for pattern in test_patterns:
+        for filepath in _glob.glob(pattern, recursive=True):
+            try:
+                with open(filepath, encoding="utf-8") as f:
+                    lines = f.readlines()
+            except OSError:
+                continue
+            # Extract module path from test file imports
+            module_imports = set()
+            for line in lines:
+                m = _re.match(r"from\s+(\S+)\s+import|import\s+(\S+)", line)
+                if m:
+                    module_imports.add(m.group(1) or m.group(2))
+            for i, line in enumerate(lines, 1):
+                for pat in ghost_patterns:
+                    m = pat.search(line)
+                    if m:
+                        patched_path = m.group(1) if m.lastindex else ""
+                        # If patching something from the same module being tested
+                        if patched_path and any(patched_path.startswith(imp.split(".")[0]) for imp in module_imports if not imp.startswith("unittest") and not imp.startswith("mock")):
+                            rel = os.path.relpath(filepath, project_root)
+                            hits.append(f"{rel}:{i} possible ghost test (patching system under test)")
+                            break
+    if hits:
+        warnings.append(
+            f"R-D-71: {len(hits)} test file(s) may contain ghost tests "
+            "(mocking the system under test instead of dependencies):"
+        )
+        for h in hits[:5]:
+            warnings.append(f"  - {h}")
+        if len(hits) > 5:
+            warnings.append(f"  ... and {len(hits) - 5} more")
 
 def discover_project_doctors(project_root: str) -> list[str]:
     """Auto-discover scripts/doctor_*.py in the project root.

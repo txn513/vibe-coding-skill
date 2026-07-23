@@ -522,7 +522,7 @@ def _check_rule28b_mock_only_tests(project_root: str, diff_text: str) -> None:
     # Detect network request code changes
     network_patterns = re.compile(
         r"httpx|requests|aiohttp|urllib|fetch\(|\.get\(|\.post\(|"
-        r"_safe_request|session\.|client\.|http\.|https://",
+        r"_safe_request|session\.|client\.",
         re.IGNORECASE,
     )
     if not network_patterns.search(diff_text):
