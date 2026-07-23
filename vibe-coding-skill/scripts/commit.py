@@ -99,9 +99,14 @@ AUTO_GENERATED_PATH_PREFIXES = (
     ".agents/plans/",
     ".agents/reviews/",
     ".agents/changelogs/",
+    ".agents/specs/",
+    ".agents/intents/",
+    ".agents/retros/",
+    ".agents/skill-upgrade-candidates/",
 )
 AUTO_GENERATED_PATH_EXACT = {
     ".agents/activity.md",
+    ".agents/audit.md",
 }
 
 
@@ -150,7 +155,7 @@ def _is_governance_file(filepath: str) -> bool:
 # was written within this many seconds. After the window, the agent
 # must re-run step 1 — protects against crashes / Ctrl-C / mid-flow
 # distraction leaving a stale marker.
-REVIEW_MARKER_TTL_SECONDS = 600
+REVIEW_MARKER_TTL_SECONDS = 1800  # 30 min — allows full verify runs
 
 
 def _get_in_progress_specs(project_root: str) -> list[str]:
@@ -260,7 +265,7 @@ def _read_and_clear_review_marker(project_root: str) -> str | None:
     2026-07-12b (TTL window + cross-project guard): marker payload is
     JSON with created_at + project_root. Step 2 considers the marker
     valid only when:
-      - created_at within REVIEW_MARKER_TTL_SECONDS (default 600s = 10min)
+      - created_at within REVIEW_MARKER_TTL_SECONDS (default 1800s = 30min)
       - project_root matches abs path of current project (prevents
         cross-project marker confusion when agent switches mid-flow)
       - JSON parseable (older plain-text markers fall through to
@@ -1919,6 +1924,20 @@ def _parse_manual_argv(argv: list[str]) -> tuple[list[str], dict]:
             if i < len(argv):
                 review_summary = argv[i]
                 i += 1
+            continue
+        if a == "--review-summary-file":
+            # C1: Read review summary from file to avoid shell escaping
+            # issues (backticks, $(), ${}, etc.)
+            i += 1
+            if i < len(argv):
+                rsf_path = argv[i]
+                i += 1
+                try:
+                    with open(rsf_path, encoding="utf-8") as rsf:
+                        review_summary = rsf.read().strip()
+                except OSError as e:
+                    print(f"❌ --review-summary-file: cannot read {rsf_path}: {e}")
+                    return 1
             continue
         if a == "--paths":
             # Collect subsequent comma-separated tokens until the next
