@@ -304,6 +304,21 @@ def _check_retro_upgrade_candidates(project_root: str) -> list[dict]:
         except OSError:
             continue
 
+        # Skip placeholder retros (unfilled templates) — they have no
+        # real content to extract candidates from. Detection: key sections
+        # still contain template instructions in parentheses.
+        _placeholder_signals = [
+            r"项目内应更新什么[^：:]*[：:]\s*\(",
+            r"候选摘要是什么[^：:]*[：:?？]\s*\(",
+            r"是否形成 Skill[^：:]*[：:]\s*\(yes",
+            r"做错了什么[^：:]*[：:]\s*\(.*\)\s*$",
+        ]
+        _is_placeholder_retro = any(
+            re.search(pat, text, re.MULTILINE) for pat in _placeholder_signals
+        )
+        if _is_placeholder_retro:
+            continue
+
         # Check for 沉淀落点 section with Skill or project candidate declaration
         has_skill_candidate = bool(
             re.search(r"是否形成 Skill (?:治理)?候选(?:\*\*)?:\s*yes", text, re.IGNORECASE)
