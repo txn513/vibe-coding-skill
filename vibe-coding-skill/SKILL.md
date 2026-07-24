@@ -1142,7 +1142,7 @@ When a review claims `--reviewer independent`, the enforcer-log MUST contain evi
 
 This prevents the failure mode where an agent claims independent review but actually self-reviews in the same session. The enforcer-log is the single source of truth for session identity.
 
-<!-- ENFORCE: id=R-D-59, hook=tool_call, tool=bash, match=record_review.*--reviewer.*independent, action=block_fake_independent_review, message=声称独立review但enforcer-log无独立session记录，请先用pi --print --no-session或codex exec启动独立review -->
+<!-- ENFORCE: id=R-D-59, hook=tool_call, tool=bash, match=(record_review\.py.*--reviewer|vibe(?:\.py)?\s+(commit.*--reviewed|advance.*review)), action=block_fake_independent_review, message=声称独立review但enforcer-log无独立session记录，请先用pi --print --no-session或codex exec启动独立review -->
 
 ## Rule R-D-69: Retro Self-Proof (Substantive Compliance)
 
@@ -1237,6 +1237,17 @@ The spec template already shows the format with spec-id; this rule makes it a ha
 Source: 2026-07-23 NC6 candidate (csrf-jwt-hardening advance failure).
 
 <!-- ENFORCE: id=R-D-75, hook=tool_call, tool=bash, match=vibe(?:\.py)?\s+advance, action=check_followup_format, message=follow-up tag必须含spec-id，[follow-up]无id会导致advance失败 -->
+
+## Rule R-D-76: Review Must Be Verifiably Independent (Script-Path Gate)
+
+`record_review.py` is an escape hatch: calling it directly bypasses `vibe commit --reviewed` and `vibe advance review`, which means R5b/R5d/R-D-59 ENFORCE gates (which only match `vibe` CLI commands) do not fire. This rule closes that gap.
+
+When `record_review.py` is called with `--reviewer` containing "independent", the script MUST verify that `.agents/enforcer-log.md` contains evidence of a real independent session (`pi --print --no-session`, `codex exec`, or `spawn_reviewer`). If no evidence is found, the call raises `ValueError` and the review is not recorded.
+
+This prevents the failure mode where an agent fabricates a reviewer name to claim independence without actually running a separate session.
+
+<!-- ENFORCE: id=R-D-76, hook=tool_call, tool=bash, match=scripts/record_review\.py, action=verify_independent_session, message=record_review 调用前必须先实际跑独立 session (pi --print --no-session 或 codex exec) 并把输出落盘到 .agents/reviews/ -->
+
 
 
 

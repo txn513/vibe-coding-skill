@@ -94,6 +94,10 @@ def record_review(
         print(identity_warn)
         print("<!-- vibe:review_identity_advisory: surfaced -->")
 
+    # R-D-76: If reviewer claims independent, verify enforcer-log has evidence
+    if reviewer and "independent" in reviewer.lower():
+        _enforce_independent_session(project_root, reviewer)
+
     review_file = _latest_pending_review(project_root, spec_name)
     if not review_file:
         generated = generate_review(project_root, spec_name, reviewer)
@@ -262,6 +266,42 @@ def _check_reviewer_identity(
             "参考 advance released 的等价机制。"
         )
     return ""
+
+
+def _enforce_independent_session(project_root: str, reviewer: str) -> None:
+    """R-D-76: Verify that enforcer-log contains evidence of an independent
+    review session before allowing a claim of independent review.
+
+    Without this check, an agent can call record_review.py directly
+    with --reviewer "independent" and bypass all R-D-59 / R5b / R5d
+    ENFORCE gates that only match vibe CLI commands.
+    """
+    log_path = os.path.join(project_root, ".agents", "enforcer-log.md")
+    if not os.path.exists(log_path):
+        raise ValueError(
+            f"R-D-76: claimed independent review by {reviewer!r} but "
+            f"enforcer-log.md does not exist. Run an independent review "
+            f"session first (pi --print --no-session or codex exec)."
+        )
+    try:
+        with open(log_path, encoding="utf-8") as f:
+            log_content = f.read()
+    except OSError:
+        log_content = ""
+
+    # Check for evidence of independent session in enforcer-log
+    has_session = bool(
+        re.search(r"pi\s+(agent|run)\s+--(print|no-session)", log_content)
+        or re.search(r"codex\s+exec", log_content)
+        or re.search(r"spawn_reviewer", log_content)
+    )
+    if not has_session:
+        raise ValueError(
+            f"R-D-76: claimed independent review by {reviewer!r} but "
+            f"enforcer-log has no independent session record. "
+            f"Run `pi --print --no-session -ne '<prompt>'` or "
+            f"`codex exec --allowedTools Read,Bash,Grep` to start one."
+        )
 
 
 if __name__ == "__main__":

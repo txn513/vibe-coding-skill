@@ -81,6 +81,7 @@ _PURE_EXTENSION_RULES = {
     "R-D-73", # AC numeric grep verification (advisory)
     "R-D-74", # snapshot recency tolerance
     "R-D-75", # follow-up tag must include spec-id
+    "R-D-76", # review must be verifiably independent (script-path gate)
 }
 
 # Known CLI gate functions / markers mapped by ENFORCE id.
