@@ -305,6 +305,7 @@ def record_evidence(
     # but no failure/degradation evidence, remind the agent.
     if phase == "verify" and result == "passed" and spec_fields.get("risk") in {"high", "medium"}:
         _check_degradation_path_coverage(spec_content, evidence, spec_name)
+        _check_evidence_quality(evidence, spec_name)
     print(f"✅ 已记录 {phase} 证据: {evidence_file}")
     if _evidence_missing_rerun_command(content, command):
         _emit_rerun_advisory(content)
@@ -485,13 +486,46 @@ def _check_degradation_path_coverage(spec_content: str, evidence_content: str, s
             re.IGNORECASE,
         )
     )
-    # Only warn if: spec has ACs, but no degradation-path ACs AND no degradation evidence
+    # Case 1: spec has ACs, but no degradation-path ACs AND no degradation evidence
     if degrad_count == 0 and not has_degradation_evidence and len(ac_ids) >= 2:
         print()
         print(f"💡 [可选] spec `{spec_name}` 有 {len(ac_ids)} 个验收标准但无 degradation-path 验证。")
         print("   建议补充: 异常/降级路径的 verify 证据（如: 网络超时、依赖不可用、边界输入）。")
         print("   标记方式: 在 spec AC 后加 `[degradation-path]`，或直接在证据中描述异常场景。")
         print("<!-- vibe:degradation_path_advisory -->")
+
+    # Case 2 (R-D-72): spec HAS degradation-path ACs but evidence doesn't mention any
+    if degrad_count > 0 and not has_degradation_evidence:
+        print()
+        print(f"⚠️  spec `{spec_name}` 有 {degrad_count} 个 [degradation-path] AC 但 evidence 未覆盖。")
+        print("   每条 degradation-path AC 必须有对应的失败/降级/边界验证证据。")
+        print("   关键词: 失败/降级/fallback/timeout/边界/错误恢复/异常处理")
+        print("<!-- vibe:degradation_path_missing -->")
+
+def _check_evidence_quality(evidence_content: str, spec_name: str) -> None:
+    """R-D-71 advisory: check if evidence contains real command output
+    vs pure inference/estimation.
+
+    Detects evidence that passes form-compliance but doesn't actually
+    prove the claimed behavior (ghost evidence).
+    """
+    # Signals of real verification: command prompts, exit codes, file paths
+    has_real_command = bool(
+        re.search(r"\$\s|exit=|pytest|grep\s|curl\s|rg\s|python3?\s",
+                  evidence_content, re.IGNORECASE)
+    )
+    # Signals of pure inference: no commands, only narrative text
+    has_inference_only = bool(
+        re.search(r"推断|推断出|应该|理论上|逻辑上|根据.*推断",
+                  evidence_content)
+    )
+    if has_inference_only and not has_real_command:
+        print()
+        print(f"⚠️  evidence `{spec_name}` 含纯推断无真实命令输出。")
+        print("   证据必须包含实际执行的命令及其输出，不能只写逻辑推断。")
+        print("   关键词: pytest/grep/curl/rg + exit code + 实际输出")
+        print("<!-- vibe:evidence_quality_advisory -->")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Record verification or release evidence")
