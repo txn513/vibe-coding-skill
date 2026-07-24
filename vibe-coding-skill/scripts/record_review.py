@@ -291,7 +291,8 @@ def _enforce_independent_session(project_root: str, reviewer: str) -> None:
 
     # Check for evidence of independent session in enforcer-log
     has_session = bool(
-        re.search(r"pi\s+(agent|run)\s+--(print|no-session)", log_content)
+        re.search(r"pi\s+(agent|run)?\s*--(print|no-session)", log_content)
+        or re.search(r"pi\b.*--(print|no-session)", log_content)
         or re.search(r"codex\s+exec", log_content)
         or re.search(r"spawn_reviewer", log_content)
     )

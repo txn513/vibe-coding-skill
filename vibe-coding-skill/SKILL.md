@@ -1246,7 +1246,7 @@ When `record_review.py` is called with `--reviewer` containing "independent", th
 
 This prevents the failure mode where an agent fabricates a reviewer name to claim independence without actually running a separate session.
 
-<!-- ENFORCE: id=R-D-76, hook=tool_call, tool=bash, match=scripts/record_review\.py, action=verify_independent_session, message=record_review 调用前必须先实际跑独立 session (pi --print --no-session 或 codex exec) 并把输出落盘到 .agents/reviews/ -->
+<!-- ENFORCE: id=R-D-76, hook=tool_call, tool=bash, match=scripts/record_review\.py, action=verify_independent_session, message=record_review 调用前必须先实际跑独立 session (pi --print --no-session / pi agent --print --no-session / codex exec / spawn_reviewer) 并把输出落盘到 .agents/reviews/ -->
 
 
 
