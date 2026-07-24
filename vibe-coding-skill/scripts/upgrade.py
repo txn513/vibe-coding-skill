@@ -5,6 +5,9 @@ from __future__ import annotations
 For a project that was initialised by an older version of the Skill,
 this command:
 
+  0. Git pulls the Skill repo (--ff-only) so local code matches GitHub.
+     This ensures symlink-based installs always have the latest code.
+
   1. Records the current Skill VERSION in .agents/.skill-version so
      Rule 52 (version drift detection) can start working on the next
      `vibe doctor` run. Pre-Rule-52 projects (no .skill-version)
@@ -15,9 +18,9 @@ this command:
      to add. `vibe commit` refuses to run on a project without a
      verify command (Rule 53 hard-fail).
 
-The command is idempotent: re-running it is safe. It only writes
-`.agents/.skill-version`; it does not modify AGENTS.md, workflow.json,
-specs, plans, or any other project file. The verify-command step is
+The command is idempotent: re-running it is safe. Step 0 is a
+fast-forward-only pull; if it fails (diverged branches, no git repo),
+the command continues with the local code. The verify-command step is
 advisory-only (the user must choose the right command for their
 project's stack).
 
@@ -59,8 +62,33 @@ def upgrade(project_root: str) -> int:
         print("   先运行 `vibe init` 或 `python3 scripts/init_project.py`")
         return 1
 
-    # Pre-step: detect VERSION drift before any version comparison
+    # Pre-step 0: git pull the skill repo to get latest code from GitHub
     skill_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    print("🔄 拉取 Skill 最新代码...")
+    try:
+        import subprocess as _sp
+        pull_result = _sp.run(
+            ["git", "pull", "--ff-only"],
+            cwd=skill_dir, capture_output=True, text=True, timeout=30,
+        )
+        if pull_result.returncode == 0:
+            if "Already up to date" in pull_result.stdout:
+                print("   ✅ Skill 仓库已是最新")
+            else:
+                print("   ✅ Skill 仓库已更新")
+                for line in pull_result.stdout.strip().split("\n")[:5]:
+                    print(f"   {line}")
+        else:
+            print(f"   ⚠️  git pull 失败 (exit {pull_result.returncode})")
+            if pull_result.stderr.strip():
+                print(f"   {pull_result.stderr.strip()[:200]}")
+            print("   本地代码可能不是最新，建议手动 git pull")
+    except Exception as exc:
+        print(f"   ⚠️  无法 git pull: {exc}")
+        print("   如果 skill 不是 git 仓库（如 pip install），可以忽略此提示")
+    print()
+
+    # Pre-step 1: detect VERSION drift before any version comparison
     drift_warning = check_skill_version_drift(skill_dir)
     if drift_warning:
         print(f"⚠️  {drift_warning}")
