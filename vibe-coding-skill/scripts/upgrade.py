@@ -5,6 +5,10 @@ from __future__ import annotations
 For a project that was initialised by an older version of the Skill,
 this command:
 
+  0. Attempts git pull --ff-only if the skill directory is inside a git
+     repo with a remote. Skips silently otherwise. Set VIBE_SKIP_PULL=1
+     to disable (e.g. air-gapped environments).
+
   1. Records the current Skill VERSION in .agents/.skill-version so
      Rule 52 (version drift detection) can start working on the next
      `vibe doctor` run. Pre-Rule-52 projects (no .skill-version)
@@ -15,9 +19,9 @@ this command:
      to add. `vibe commit` refuses to run on a project without a
      verify command (Rule 53 hard-fail).
 
-The command is idempotent: re-running it is safe. It only writes
-`.agents/.skill-version`; it does not modify AGENTS.md, workflow.json,
-specs, plans, or any other project file. The verify-command step is
+The command is idempotent: re-running it is safe. Step 0 is a
+fast-forward-only pull (standalone only); if it fails, the command
+continues with the local code. The verify-command step is
 advisory-only (the user must choose the right command for their
 project's stack).
 
@@ -51,6 +55,60 @@ def _read_current_version() -> str:
 
 
 
+def _maybe_git_pull_skill(skill_dir: str) -> None:
+    """Try git pull --ff-only if skill is a git repo with a remote.
+
+    Detects the install mode:
+    - If skill_dir is inside a git repo with a remote URL, attempt git pull.
+      This covers both standalone clones and local repos accessed via symlink
+      (symlinks resolve to the same repo, so one git pull updates all).
+    - If not a git repo or no remote, skip silently.
+    - Respects VIBE_SKIP_PULL=1 env var for air-gapped environments.
+    """
+    if os.environ.get("VIBE_SKIP_PULL") == "1":
+        return
+
+    import subprocess as _sp
+    try:
+        # Check if skill_dir is inside a git repo
+        result = _sp.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=skill_dir, capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode != 0:
+            return  # Not a git repo
+
+        # Check if there's a remote
+        remote_result = _sp.run(
+            ["git", "remote"],
+            cwd=skill_dir, capture_output=True, text=True, timeout=5,
+        )
+        if not remote_result.stdout.strip():
+            return  # No remote configured
+
+        # Attempt git pull --ff-only
+        print("🔄 拉取 Skill 最新代码...")
+        pull_result = _sp.run(
+            ["git", "pull", "--ff-only"],
+            cwd=skill_dir, capture_output=True, text=True, timeout=30,
+        )
+        if pull_result.returncode == 0:
+            if "Already up to date" in pull_result.stdout:
+                print("   ✅ Skill 仓库已是最新")
+            else:
+                print("   ✅ Skill 仓库已更新")
+                for line in pull_result.stdout.strip().split("\n")[:5]:
+                    print(f"   {line}")
+        else:
+            print(f"   ⚠️  git pull 失败 (exit {pull_result.returncode})")
+            if pull_result.stderr.strip():
+                print(f"   {pull_result.stderr.strip()[:200]}")
+            print("   建议手动 git pull 或重新安装 skill")
+    except Exception as exc:
+        # Not a git repo, network issue, etc. — not a blocker
+        pass
+
+
 def upgrade(project_root: str) -> int:
     project_root = os.path.abspath(project_root)
     agents_dir = os.path.join(project_root, ".agents")
@@ -59,8 +117,12 @@ def upgrade(project_root: str) -> int:
         print("   先运行 `vibe init` 或 `python3 scripts/init_project.py`")
         return 1
 
-    # Pre-step: detect VERSION drift before any version comparison
+    # Pre-step 0: try git pull if skill is a git repo with remote
     skill_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    _maybe_git_pull_skill(skill_dir)
+    print()
+
+    # Pre-step 1: detect VERSION drift before any version comparison
     drift_warning = check_skill_version_drift(skill_dir)
     if drift_warning:
         print(f"⚠️  {drift_warning}")
