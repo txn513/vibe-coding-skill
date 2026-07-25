@@ -1231,11 +1231,33 @@ def commit(
         # because review-summary templates now routinely emit multi-line
         # forms, but ";" remains as a compatibility fallback so existing
         # agent output still parses.
-        file_parts = [
-            part.strip()
-            for part in re.split(r"[\n;]+", summary_stripped)
-            if part.strip()
-        ]
+        # 2026-07-25e: NON_FILE_PATTERNS whitelist — skip lines that look
+        # like titles/meta info but contain ":", which the partition(":")
+        # splitter would otherwise misclassify as file-entries. Common
+        # false-positive triggers:
+        #   "业务结论 (line refs):" — Chinese title line with colon
+        #   "变更文件: ..." — section header
+        #   "Bypass: <reason>" — meta line
+        # The whitelist is conservative: only matches explicit title/meta
+        # patterns. Real file-entry lines (which start with "<path>:" or
+        # "- <path>:") are unaffected.
+        _NON_FILE_TITLE_PATTERNS = re.compile(
+            r"^(?:"
+            r"业务结论|审查要点|变更文件|结论依据|已核对的验证证据|"
+            r"Verify|Review|Bypass|Hotfix"
+            r")(?:\s|\(|[:(：])",
+            re.UNICODE | re.IGNORECASE,
+        )
+        _SPEC_TITLE_PATTERN = re.compile(r"^spec[:\s]", re.UNICODE | re.IGNORECASE)
+
+        file_parts = []
+        for part in re.split(r"[\n;]+", summary_stripped):
+            part = part.strip()
+            if not part:
+                continue
+            if _NON_FILE_TITLE_PATTERNS.match(part) or _SPEC_TITLE_PATTERN.match(part):
+                continue  # skip title/meta lines
+            file_parts.append(part)
         # 2026-07-08g: substantive-review soft advisory.
         # Lance retro: passing line-ref gate with content like
         # "app.py: L25 重命名变量，语义等价"
