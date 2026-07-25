@@ -1281,6 +1281,67 @@ Source: 2026-07-25 medium-risk-must-use-pi-agent candidate (feat-dev-seed-and-cl
 
 <!-- ENFORCE: id=R-D-77, hook=tool_call, tool=bash, match=record_review.*--reviewer.*grep-independent-review-fallback.*--risk.*(medium|high), action=block_grep_fallback_for_medium_high, message=medium/high-risk spec 禁止 grep fallback, 必须真独立 session. 拒绝 advance. -->
 
+## Rule R-D-79: Bug Diagnosis "Three-Layer Evidence Method"
+
+When debugging a bug, agents MUST follow an evidence-driven (not hypothesis-driven) diagnostic flow. The 7-step framework below prevents wasted rounds (observed: 56 → 7, ~8x speedup) and identifies the binary split point within 5 rounds.
+
+### Diagnostic Steps
+
+| Step | Name | Action | Tool | Round budget |
+|------|------|--------|------|--------------|
+| 0 | Reproduce + describe | Ask user for specific observable behavior | dialogue | 1 |
+| 1a | Passive evidence | Tail backend log — was there a request after user action? | `tail server.log` | 1 |
+| 1b | Active evidence | Curl the API directly (bypass frontend) | `curl -s API` | 1 |
+| 2 | Binary split | Was there a request? Branch into appropriate layer | reasoning | 1 |
+| 3 | Minimal Console | Ask user to run 3 Console checks | F12 | 1-2 |
+| 4 | Code location | Grep function name + 10-line context | `grep -n -A 10` | 1 |
+| 5 | Fix + verify | git diff + retest | tools | 1 |
+
+### Layer Matrix (where can the bug live?)
+
+```
+L1 - User input layer    : which button was clicked
+L2 - Event binding layer : click handler bound?
+L3 - JS execution layer  : handler actually runs?
+L4 - Data request layer  : API request actually sent?
+L5 - Backend service     : API returns correctly?
+L6 - Third-party dep     : external API (Baidu/WeChat/Alipay) normal?
+L7 - Browser env layer   : DOM/CSS/CORS/CSP/cache
+```
+
+### Binary Decision Tree
+
+```
+Evidence 1: Did backend log show /api/xxx request?
+  ├─ NO  → problem in L1-L3 (frontend DOM/event/JS)
+  │        → enter "Console check" branch
+  └─ YES → Evidence 2: response status code?
+       ├─ 4xx/5xx → problem in L5-L6 (backend / external API)
+       │           → enter "backend log + curl replay" branch
+       └─ 2xx    → problem in L4/L7 (frontend render / network)
+                  → enter "Network tab + image load" branch
+```
+
+### Forbidden Tools (in bug diagnosis phase)
+
+| ❌ Forbidden | ✅ Replacement |
+|--------------|----------------|
+| Chrome headless debug (macOS errors garbled) | ask user to F12 Console |
+| Read whole file >3 times | grep key function + 10-line context |
+| Repeat grep same string >2 times | grep once, note result, only re-grep on change |
+| "Defensive fix just in case" without code evidence | fix MUST be based on step-4 grep location |
+
+### Stall Circuit Breaker
+
+**Any bug diagnosis exceeding 5 rounds without identifying a binary split point** → Agent MUST pause, reflect on methodology, return to step 0 and re-collect evidence.
+
+Do NOT keep grinding on the wrong branch — cut back to the upper layer and start over.
+
+Source: 2026-07-25 bug-diagnosis-three-evidence candidate (56 → 7 round speedup observed in baidu-qrcode bug case).
+
+<!-- ENFORCE: id=R-D-79, hook=agent_end, action=check_diagnosis_rounds, message=bug 排查超过 5 轮无二分点 — 暂停, 回到 step 0 重新收集证据 -->
+
+
 
 
 

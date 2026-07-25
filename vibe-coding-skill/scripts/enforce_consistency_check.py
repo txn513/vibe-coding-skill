@@ -84,6 +84,7 @@ _PURE_EXTENSION_RULES = {
     "R-D-76", # review must be verifiably independent (script-path gate)
     "R-D-76-fallback", # grep-based fallback justification
     "R-D-77", # medium/high-risk cannot use grep fallback
+    "R-D-79", # bug diagnosis three-layer evidence method
 }
 
 # Known CLI gate functions / markers mapped by ENFORCE id.
