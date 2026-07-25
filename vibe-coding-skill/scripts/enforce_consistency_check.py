@@ -83,6 +83,7 @@ _PURE_EXTENSION_RULES = {
     "R-D-75", # follow-up tag must include spec-id
     "R-D-76", # review must be verifiably independent (script-path gate)
     "R-D-76-fallback", # grep-based fallback justification
+    "R-D-77", # medium/high-risk cannot use grep fallback
 }
 
 # Known CLI gate functions / markers mapped by ENFORCE id.

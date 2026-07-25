@@ -1260,6 +1260,27 @@ Whichever fallback is used, the spec's `## fallback 原因` section MUST explain
 
 <!-- ENFORCE: id=R-D-76-fallback, hook=tool_call, tool=bash, match=record_review.*--reviewer.*grep-independent-review-fallback, action=check_fallback_justification, message=grep-independent-review-fallback fallback 必须含"fallback 原因"段 + retro 必答"为什么用 fallback" -->
 
+### R-D-77: Risk-Gated Fallback Prohibition
+
+The `grep-independent-review-fallback` path from R-D-76 may NOT be used for medium-risk or high-risk specs. The grep fallback cannot observe runtime semantics (data integrity, transaction ordering, exception swallowing, race conditions), so it misses the failure modes that medium/high-risk work is most likely to introduce.
+
+| Spec risk level | Fallback allowed | Required |
+|---|---|---|
+| low | yes (any fallback path) | real session or grep with justification |
+| **medium** | **NO grep fallback** | **must run `pi --print --no-session` or `codex exec`**, output captured to `.agents/reviews/review-<spec>-pi-<date>.md` |
+| high | NO fallback | must run >=2 independent sessions, second session must use a different review angle (e.g. first reviews code, second reviews evidence) |
+
+If the medium/high-risk spec cannot run an independent session due to environment failure (pi-agent broken, no network), the spec must be **downgraded to low-risk** with explicit user confirmation, NOT silently downgraded via fallback.
+
+`vibe advance review` gate MUST verify spec risk level vs reviewer identifier:
+- medium/high spec + `grep-independent-review-fallback` reviewer → reject
+- medium/high spec + `pi-agent-...` reviewer but no `.agents/reviews/review-<spec>-pi-<date>.md` → reject
+- medium/high spec + ≥2 `pi-agent-...` review files → accept
+
+Source: 2026-07-25 medium-risk-must-use-pi-agent candidate (feat-dev-seed-and-cleanup lost 3 user bookmarks + 94 cost_log rows due to grep fallback missing runtime issues).
+
+<!-- ENFORCE: id=R-D-77, hook=tool_call, tool=bash, match=record_review.*--reviewer.*grep-independent-review-fallback.*--risk.*(medium|high), action=block_grep_fallback_for_medium_high, message=medium/high-risk spec 禁止 grep fallback, 必须真独立 session. 拒绝 advance. -->
+
 
 
 

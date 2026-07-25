@@ -98,6 +98,10 @@ def record_review(
     if reviewer and "independent" in reviewer.lower():
         _enforce_independent_session(project_root, reviewer)
 
+    # R-D-77: medium/high-risk spec cannot use grep fallback
+    if "grep-independent-review-fallback" in reviewer.lower():
+        _enforce_no_grep_fallback_for_medium_high(project_root, spec_name)
+
     review_file = _latest_pending_review(project_root, spec_name)
     if not review_file:
         generated = generate_review(project_root, spec_name, reviewer)
@@ -302,6 +306,39 @@ def _enforce_independent_session(project_root: str, reviewer: str) -> None:
             f"enforcer-log has no independent session record. "
             f"Run `pi --print --no-session -ne '<prompt>'` or "
             f"`codex exec --allowedTools Read,Bash,Grep` to start one."
+        )
+
+
+def _enforce_no_grep_fallback_for_medium_high(project_root: str, spec_name: str) -> None:
+    """R-D-77: grep-based fallback cannot be used for medium/high-risk specs.
+
+    The grep fallback cannot observe runtime semantics (data integrity,
+    transaction ordering, exception swallowing, race conditions) and is
+    therefore unsuitable for work that modifies data or system state.
+    """
+    spec_file = os.path.join(project_root, ".agents", "specs", f"{spec_name}.md")
+    if not os.path.exists(spec_file):
+        return
+    try:
+        with open(spec_file, encoding="utf-8") as f:
+            spec_content = f.read()
+    except OSError:
+        return
+
+    risk_match = re.search(r">\s*风险:\s*(\S+)", spec_content)
+    if not risk_match:
+        return
+    risk_level = risk_match.group(1).strip().lower()
+    if risk_level in {"medium", "high"}:
+        raise ValueError(
+            f"R-D-77: spec `{spec_name}` is risk={risk_level}, but reviewer is "
+            f"'grep-independent-review-fallback'. Grep fallback cannot observe "
+            f"runtime semantics (data integrity, transaction ordering, exception "
+            f"swallowing). Risk: medium/high spec must run a real independent "
+            f"session (pi --print --no-session or codex exec) and capture "
+            f"output to .agents/reviews/review-<spec>-pi-<date>.md. "
+            f"If session cannot run, downgrade spec to low-risk with explicit "
+            f"user confirmation (NOT silent fallback)."
         )
 
 
