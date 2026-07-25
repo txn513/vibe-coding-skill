@@ -1176,7 +1176,14 @@ def commit(
                     for nl in numstat_out.splitlines():
                         cols = nl.split("\t")
                         if len(cols) >= 3 and cols[2].strip():
-                            changed_files.append(cols[2].strip())
+                            path = cols[2].strip()
+                            # Edge case (2026-07-25f): git rename uses
+                            # "{old => new}" form in numstat output. Extract
+                            # the new path so review-summary can match it.
+                            if "=>" in path:
+                                new_part = path.split("=>")[-1].strip().rstrip("}")
+                                path = new_part
+                            changed_files.append(path)
             missing_files = []
             for filepath in changed_files:
                 basename = os.path.basename(filepath)
@@ -1241,11 +1248,13 @@ def commit(
         # The whitelist is conservative: only matches explicit title/meta
         # patterns. Real file-entry lines (which start with "<path>:" or
         # "- <path>:") are unaffected.
+        # Add CJK range (\u4e00-\u9fff) so titles like "变更文件审查结论:"
+        # (CJK char directly after "变更文件") are still recognized.
         _NON_FILE_TITLE_PATTERNS = re.compile(
             r"^(?:"
             r"业务结论|审查要点|变更文件|结论依据|已核对的验证证据|"
             r"Verify|Review|Bypass|Hotfix"
-            r")(?:\s|\(|[:(：])",
+            r")(?:[\s\u4e00-\u9fff(：])",
             re.UNICODE | re.IGNORECASE,
         )
         _SPEC_TITLE_PATTERN = re.compile(r"^spec[:\s]", re.UNICODE | re.IGNORECASE)
@@ -1305,8 +1314,10 @@ def commit(
             if ":" not in part:
                 continue
             # 提取 filepath 和 ":" 后面的结论文字
+            # Edge case (2026-07-25f): strip leading "- " (markdown list bullet)
+            # so filepath ".agents/...md" starts cleanly for auto-generated check.
             filepath, _, conclusion = part.partition(":")
-            filepath = filepath.strip()
+            filepath = re.sub(r"^[-\s]+", "", filepath).strip()
             # Rule 55 exclusion (2026-07-10): vibe 自动生成文件
             # (evidence/plans/reviews/changelogs/activity.md) 没有"行号"
             # 概念, 跳过 line-ref 检查。这些文件由 vibe scripts 写入,
