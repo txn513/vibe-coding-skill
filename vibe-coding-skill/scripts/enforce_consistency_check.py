@@ -82,6 +82,7 @@ _PURE_EXTENSION_RULES = {
     "R-D-74", # snapshot recency tolerance
     "R-D-75", # follow-up tag must include spec-id
     "R-D-76", # review must be verifiably independent (script-path gate)
+    "R-D-76-fallback", # grep-based fallback justification
 }
 
 # Known CLI gate functions / markers mapped by ENFORCE id.

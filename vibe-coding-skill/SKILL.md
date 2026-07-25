@@ -1248,6 +1248,18 @@ This prevents the failure mode where an agent fabricates a reviewer name to clai
 
 <!-- ENFORCE: id=R-D-76, hook=tool_call, tool=bash, match=scripts/record_review\.py, action=verify_independent_session, message=record_review 调用前必须先实际跑独立 session (pi --print --no-session / pi agent --print --no-session / codex exec / spawn_reviewer) 并把输出落盘到 .agents/reviews/ -->
 
+### R-D-76 Timeout Fallback
+
+`pi --print --no-session` may timeout (>=30s) on long Chinese prompts (>200 chars). The Skill does not control pi-agent performance; projects must choose a documented fallback:
+
+1. **Retry with shorter prompt**: condense the review scope to <=100 chars, retry once
+2. **Grep-based independent review**: use `git ls-files` + `grep` + `codex exec --allowedTools Read,Bash,Grep` instead; review file MUST contain `grep-independent-review-fallback` reviewer identifier (NOT `--reviewer independent` placeholder)
+3. **Override-approver**: only with explicit user confirmation; 3-condition override path
+
+Whichever fallback is used, the spec's `## fallback 原因` section MUST explain why pi-agent timed out, and the retro MUST answer "为什么用 fallback" to prevent fallback abuse.
+
+<!-- ENFORCE: id=R-D-76-fallback, hook=tool_call, tool=bash, match=record_review.*--reviewer.*grep-independent-review-fallback, action=check_fallback_justification, message=grep-independent-review-fallback fallback 必须含"fallback 原因"段 + retro 必答"为什么用 fallback" -->
+
 
 
 
