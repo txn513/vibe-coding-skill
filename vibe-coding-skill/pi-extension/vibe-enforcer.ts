@@ -514,6 +514,25 @@ function registerHandlers(pi: ExtensionAPI, rules: EnforceRule[], projectRoot: s
 
 // ── Main ─────────────────────────────────────────────────
 
+// R-D-79: stall breaker — track bash tool_calls, warn when no evidence collected
+pi.on("tool_call", async (event, ctx) => {
+  if (event.toolName !== "bash") return;
+  const cmd = event.input?.command ?? "";
+  if (isEvidenceCollection(cmd)) {
+    r_d_79_stall_counter = 0;
+    return;
+  }
+  r_d_79_stall_counter++;
+  if (r_d_79_stall_counter >= R_D_79_STALL_THRESHOLD) {
+    ctx.ui.notify(
+      `⚠️ R-D-79 卡顿熔断: 已 ${r_d_79_stall_counter} 轮无证据收集命令 (tail/curl/grep/pytest). ` +
+      `Bug 排查三层证据法要求按 Step 0-5 收集证据, 暂停一下回到 Step 0 重新开始.`,
+      "warning"
+    );
+    r_d_79_stall_counter = 0; // reset after warning to avoid spam
+  }
+});
+
 export default function vibeEnforcerExtension(pi: ExtensionAPI) {
   let rules: EnforceRule[] = [];
   let projectRoot = "";
@@ -745,6 +764,28 @@ pi.on("tool_call", async (event, ctx) => {
     }
   }
 });
+
+// R-D-79: bug-diagnosis stall breaker. Tracks bash tool_calls per session;
+// when N consecutive calls have NOT been evidence-collection (tail/curl/grep),
+// emits a soft warning. Resets to 0 on evidence command.
+// Per-session state — resets on session_start.
+let r_d_79_stall_counter = 0;
+const R_D_79_STALL_THRESHOLD = 5;
+const R_D_79_EVIDENCE_PATTERNS = [
+  /\btail\s+[^|]*\.log/,           // tail log files
+  /\bcurl\s+(-s|-i|--include)/,     // curl API calls
+  /\bgrep\s+(-n|-rn|--line)/,       // grep with line numbers
+  /\brg\s+(-n|--line)/,             // ripgrep
+  /\bpytest\b/,                     // pytest
+  /\bnode\s+--check\b/,            // node syntax check
+  /\bpython3?\s+-c\b/,             // python one-liner
+  /\bjournalctl\s+(-u|--since)/,    // journalctl
+  /\b\.\/[a-z_-]+debug\.sh\b/i, // debug scripts
+];
+
+function isEvidenceCollection(cmd: string): boolean {
+  return R_D_79_EVIDENCE_PATTERNS.some((p) => p.test(cmd));
+}
 
 // R66: session recovery — enforce vibe status within first 3 bash tool calls.
 // Per-session counter — resets on extension reload (session start / compact recovery).
