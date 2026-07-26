@@ -547,6 +547,46 @@ def _audit_rule_bloat(project_root: str, warnings: list[str]) -> None:
                 "Consider archiving stale rules to .agents/rules/archive/ "
                 "or marking with > 状态: stale."
             )
+def _audit_docs(project_root: str, warnings: list[str]) -> None:
+    """R-D-87 advisory: check docs/ completeness and staleness."""
+    import re as _re
+    import datetime as _dt
+    docs_dir = os.path.join(project_root, "docs")
+    if not os.path.isdir(docs_dir):
+        warnings.append(
+            "R-D-87: docs/ directory missing - run "
+        )
+        return
+    readme = os.path.join(docs_dir, "README.md")
+    if not os.path.exists(readme):
+        warnings.append("R-D-87: docs/README.md missing - run ")
+    stale_count = 0
+    now_date = _dt.datetime.now()
+    for root, _dirs, files in os.walk(docs_dir):
+        for fname in files:
+            if not fname.endswith(".md"):
+                continue
+            fpath = os.path.join(root, fname)
+            try:
+                with open(fpath, encoding="utf-8") as fp:
+                    head = fp.read(2000)
+            except OSError:
+                continue
+            lu = _re.search(r"^last_updated:\s*(\d{4}-\d{2}-\d{2})", head, _re.MULTILINE)
+            if not lu:
+                continue
+            try:
+                lu_date = _dt.datetime.strptime(lu.group(1), "%Y-%m-%d")
+            except ValueError:
+                continue
+            if (now_date - lu_date).days > 30:
+                stale_count += 1
+    if stale_count > 0:
+        warnings.append(
+            f"R-D-87: {stale_count} docs/ files stale (last_updated > 30 days)"
+        )
+
+
 def doctor(project_root: str) -> dict:
     workflow, migrated = ensure_workflow(project_root)
     issues = []
@@ -597,6 +637,7 @@ def doctor(project_root: str) -> dict:
     _audit_reproduction_runtime_present(project_root, warnings)
     _audit_inbox_drift(project_root, warnings)
     _audit_directory_structure(project_root, warnings)
+    _audit_docs(project_root, warnings)
     _audit_unbound_rules(project_root, warnings)
     _audit_spec_status_drift(project_root, warnings)
     _audit_test_setdefault(project_root, warnings)
