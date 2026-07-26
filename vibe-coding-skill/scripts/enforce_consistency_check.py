@@ -87,6 +87,9 @@ _PURE_EXTENSION_RULES = {
     "R-D-79", # bug diagnosis three-layer evidence method
     "R-D-80", # operator precedence trap
     "R-D-81", # spec scope locked before plan
+    "R-D-82", # verify command exit code policy
+    "R-D-83", # medium-risk spec >=3 review rounds (R-D-77 v2)
+    "R-D-84", # pi-agent short prompt fallback template
 }
 
 # Known CLI gate functions / markers mapped by ENFORCE id.

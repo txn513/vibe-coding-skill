@@ -1374,6 +1374,49 @@ This rule eliminates the "Plan realized new file needed → spec amend + re-veri
 
 Source: 2026-07-26 spec-scope-before-plan candidate.
 
+## Rule R-D-82: Verify Command Exit Code Policy
+
+commands.verify MUST specify an explicit pytest exit policy (-x or --maxfail=N). Without it, pytest exit code varies across versions - 92 failed may report exit=0 locally but exit=1 in pi-agent session.
+
+Evidence files MUST record actual exit code AND cite the exit policy used (local vs CI vs pi-agent session).
+
+Source: 2026-07-27 pytest-exit-code-env-difference candidate.
+
+## Rule R-D-83: Medium-Risk Spec Requires >=3 Independent Review Rounds
+
+R-D-77 v2: medium-risk spec review MUST complete at least 3 independent pi-agent rounds before advance to released. Each round must:
+
+1. Re-read spec + diff + evidence fresh (no inheritance from previous round)
+2. Cite file:line for any CHANGES_REQUESTED issue
+3. Verify previous-round fixes actually landed (not just claimed)
+
+| Round | Purpose |
+|-------|---------|
+| 1 | first independent pass: initial findings |
+| 2 | post-fix-1 pass: verify round-1 fixes, surface new issues |
+| 3 | post-fix-2 pass: final verdict |
+
+vibe advance review gate MUST verify >=3 pi-agent-...round-N review files exist before allowing released.
+
+Source: 2026-07-27 r-d-77-min-3-rounds candidate.
+
+## Rule R-D-84: Pi-Agent Short Prompt Fallback Template
+
+When R-D-76 v2 short-prompt fallback is used, prompt MUST be standardized to enforce 3 required response elements:
+
+1. VERDICT - APPROVED or CHANGES_REQUESTED
+2. Blocking issues - file:line references with business conclusion
+3. Round N carry-over - explicit YES/NO on previous-round fixes
+
+record_review.py MUST validate that:
+- short-prompt includes VERDICT template marker
+- pi-agent output contains verdict + (if CHANGES_REQUESTED) >=1 file:line reference
+
+Template at templates/pi-agent-review-short-prompt.md (canonical form).
+
+Source: 2026-07-27 pi-agent-short-prompt-template candidate.
+
+
 
 
 
