@@ -76,6 +76,20 @@
   > Rule 44: 如果本 spec 引入写操作 / 状态变更 / 新存储位置，必须列出可能被影响的读路径，或显式标注「无读路径影响」并给出一行原因。留空或跳过均视为不通过 spec-ready 门禁。
 
 {{FIX_SCOPE_SECTION}}{{CALL_SITES_SECTION}}
+## 文档更新 (R-D-87)
+
+完成后必填 (与 R-D-72 evidence 并列):
+- [ ] 更新 docs/modules/<本 spec 涉及的主要模块>.md (职责 / API / 关键文件 / 坑点)
+- [ ] 如改了技术栈 / 新增依赖, 更新 docs/tech-stack.md
+- [ ] 如引入新决策, 写 adr/000N-<slug>.md
+- [ ] 如改了架构边界 / 引入新服务, 更新 docs/architecture.md
+- [ ] 如发现新业务术语, 更新 docs/glossary.md
+- [ ] 如完成 spec 影响 docs/README.md 索引, 同步更新
+
+> Rule R-D-87: 项目文档纪律. docs/ 是跨 session 的项目知识,
+> 让下一个 agent (或 compact 后恢复) 能快速进入状态.
+> v0.1 软门禁 — doctor 报 stale 但不阻塞 advance.
+
 ## 验证方式
 
 ### 正常路径 (Happy Path)

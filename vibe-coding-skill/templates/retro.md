@@ -180,6 +180,23 @@
 - [ ] 更新 review checklist: {{ACTION_REVIEW_CL}}
 - [ ] 其他: {{ACTION_OTHER}}
 
+## 文档准确性 (R-D-87)
+
+本次 spec 涉及的 docs/ 文档:
+
+- [ ] 内容仍然准确 (无需更新)
+- [ ] 已更新 (commit: <hash>)
+- [ ] 重大变更需要专项 (next spec 处理: <spec-id>)
+
+列出本次涉及的文档 (可写 N/A):
+- docs/modules/<module>.md: {{DOCS_MODULE_STATUS}}
+- docs/tech-stack.md: {{DOCS_TECH_STATUS}}
+- docs/architecture.md: {{DOCS_ARCH_STATUS}}
+- docs/adr/NNNN-<slug>.md: {{DOCS_ADR_STATUS}}
+- docs/glossary.md: {{DOCS_GLOSSARY_STATUS}}
+
+> Rule R-D-87: retro 时同步 docs 准确性, 让下一次项目接管不需要读 spec 历史.
+
 ## 开放 gap（可选）
 
 > 提示：如果你想 Skill 在新 verify evidence 写入时提示"此 gap 可能已闭合"，
