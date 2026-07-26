@@ -159,6 +159,38 @@ def init_project(path: str, project_type: str = "generic", force: bool = False) 
         else:
             print(f"   ⚠️  bugs.inbox=true 但 templates/bug-inbox.md 不存在")
 
+    # R-D-87: docs/ scaffold creation. Use docs_init.py to leverage
+    # auto-detection of modules from .agents/specs/. Idempotent — only
+    # creates missing files.
+    try:
+        import docs_init as _docs_init
+        _docs_init.docs_init(path, dry_run=False)
+    except Exception as _e:
+        # Fallback: create minimal docs/ skeleton directly
+        docs_dir = os.path.join(path, "docs")
+        os.makedirs(docs_dir, exist_ok=True)
+        for sub in ("modules", "adr"):
+            os.makedirs(os.path.join(docs_dir, sub), exist_ok=True)
+        readme_path = os.path.join(docs_dir, "README.md")
+        if not os.path.exists(readme_path):
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            readme_content = (
+                "---\n"
+                f"last_updated: {today}\n"
+                "status: NEEDS_UPDATE\n"
+                "---\n\n"
+                "# Project Docs Index\n\n"
+                "<!-- Created by vibe init. Run `vibe docs-init --apply` to auto-fill. -->\n\n"
+                "## Project Overview\n\n"
+                "- [overview.md](overview.md)\n"
+                "- [tech-stack.md](tech-stack.md)\n"
+                "- [architecture.md](architecture.md)\n"
+                "- [glossary.md](glossary.md)\n\n"
+                "## Module Docs\n\n"
+                "<!-- module docs auto-generated on next `vibe docs-init` -->\n"
+            )
+            atomic_write(readme_path, readme_content)
+
     # Auto git init if not a repo (2026-07-12: many agents forget this step)
     git_dir = os.path.join(path, ".git")
     if not os.path.isdir(git_dir):
@@ -204,6 +236,7 @@ def init_project(path: str, project_type: str = "generic", force: bool = False) 
     print(f"   .agents/policy-differences.md — 待确认规范差异摘要 ({len(policy_manifest.get('review_items', []))} 项)")
     print(f"   .git/hooks/commit-msg — 阻止 raw git commit（Rule 53）")
     print(f"   .gitignore — 忽略 vibe 生成文件")
+    print(f"   docs/ — 项目文档骨架 (R-D-87, 跑  自动填充)")
 
 
 def _read(name: str) -> str:
