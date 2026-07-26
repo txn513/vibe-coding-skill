@@ -90,6 +90,7 @@ _PURE_EXTENSION_RULES = {
     "R-D-82", # verify command exit code policy
     "R-D-83", # medium-risk spec >=3 review rounds (R-D-77 v2)
     "R-D-84", # pi-agent short prompt fallback template
+    "R-D-87", # project documentation discipline (docs/ maintenance)
 }
 
 # Known CLI gate functions / markers mapped by ENFORCE id.

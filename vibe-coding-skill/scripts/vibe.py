@@ -459,6 +459,12 @@ def main() -> None:
     tidy_cmd.add_argument("--apply", action="store_true",
                           help="执行清理操作")
 
+    docs_init_cmd = sub.add_parser("docs-init", help="初始化 docs/ 目录骨架 (R-D-87)")
+    docs_init_cmd.add_argument("project_root")
+    docs_init_cmd.add_argument("--dry-run", action="store_true", default=True,
+                               help="预览，不实际创建 (默认)")
+    docs_init_cmd.add_argument("--apply", action="store_true", help="实际创建文件")
+
     # propose-skill-upgrade — create a skill upgrade candidate proposal
     propose_skill = sub.add_parser(
         "propose-skill-upgrade",

@@ -1416,6 +1416,48 @@ Template at templates/pi-agent-review-short-prompt.md (canonical form).
 
 Source: 2026-07-27 pi-agent-short-prompt-template candidate.
 
+## Rule R-D-87: Project Documentation Discipline (docs/ maintenance)
+
+Every vibe-coding project MUST maintain a `docs/` directory as cross-cutting project documentation. Per-feature specs/plans/retros cover individual changes, but docs/ holds the *cumulative project knowledge* that helps a fresh agent (or session-resume) become productive quickly.
+
+### docs/ structure (recommended)
+
+| File | Purpose | Trigger to update |
+|------|---------|-------------------|
+| `README.md` | index (TOC + last_updated) | new/deleted doc |
+| `overview.md` | 1-page project summary | project positioning change |
+| `tech-stack.md` | frameworks / services / deps + selection rationale | new dep added |
+| `architecture.md` | system boundary + main components (C4 Level 1-2) | architecture change |
+| `modules/<m>.md` | module responsibility / API / gotchas | module touched by spec done |
+| `adr/N-<slug>.md` | key decisions | any tech selection |
+| `glossary.md` | domain terms | new business term |
+
+### Workflow integration
+
+1. `vibe docs-init <root>` — idempotent skeleton creator (scans .agents/specs/, AGENTS.md, pyproject.toml to seed drafts)
+2. `vibe tidy <root>` — relocates/archives stale docs (orphan, root-md-loose, agent-md-overlap, stale-doc)
+3. `vibe doctor <root>` — advisory check: docs/ completeness + stale + orphan
+4. Spec template `## 文档更新` section — required checkbox at spec done
+5. Retro template `## 文档准确性` section — audit docs after spec
+
+### Lifecycle states (frontmatter status)
+
+- `CURRENT` — verified within 30 days
+- `NEEDS_UPDATE` — content may be stale, manual review needed
+- `NEEDS_AUTHOR` — placeholder, author must fill
+
+### Old project migration
+
+- < 7 days: `vibe init` already creates docs/ — no action
+- 7-30 days: next `vibe upgrade` advises `vibe docs-init`
+- 30-90 days: recommended `vibe docs-init`, then spec workflow auto-fills rest
+- > 90 days: `vibe doctor` advisory recommends `vibe docs-init`
+
+`vibe docs-init` is idempotent — re-running only fills missing files, never overwrites. Use `vibe tidy --apply` for cleanup.
+
+Source: 2026-07-27 提案 (项目文档定期维护 + 联动 tidy/init/upgrade/doctor).
+
+
 
 
 
