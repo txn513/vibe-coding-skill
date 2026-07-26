@@ -40,6 +40,8 @@ def record_evidence(
     configured: bool = False,
     purpose: str = "standard",
     execute: bool | None = None,
+    append_mode: bool = False,
+    force_overwrite: bool = False,
 ) -> str | None:
     spec_name = validate_artifact_name(spec_name, "规格名称")
     if phase not in PHASES:
@@ -275,6 +277,23 @@ def record_evidence(
 {command_output}
 ```
 """
+    # 2026-07-27b: protect manually-written content from --configured overwrite
+    if configured and os.path.exists(evidence_file) and not force_overwrite:
+        existing_size = os.path.getsize(evidence_file)
+        if existing_size > 500:  # heuristic: substantial manual content
+            print(f"⚠️  evidence 文件已存在 ({existing_size} bytes), --configured 默认会重写内容.")
+            print(f"   如需保留手动内容, 加 --append (追加) 或 --force-overwrite (强制重写)")
+            print(f"   文件路径: {evidence_file}")
+
+    if os.path.exists(evidence_file) and append_mode and not force_overwrite:
+        # Append mode: keep existing body, prepend new frontmatter + digest
+        try:
+            with open(evidence_file, encoding="utf-8") as ef:
+                existing_body = ef.read()
+        except OSError:
+            existing_body = ""
+        content = content + "\n\n---\n\n## Previous Content (preserved by --append)\n\n" + existing_body
+
     atomic_write(evidence_file, content)
     # C2 advisory (2026-07-11): bug spec fix-regression gate requires
     # Command-Digests line to include ALL configured verify digests

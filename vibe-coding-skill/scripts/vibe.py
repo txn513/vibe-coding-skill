@@ -491,6 +491,10 @@ def main() -> None:
     evidence.add_argument("--configured", action="store_true",
                           help="Auto-capture digests from workflow.json [commands.<phase>]")
     evidence.add_argument("--purpose", choices=sorted(record_evidence.PURPOSES), default="standard")
+    evidence.add_argument("--append", dest="append_mode", action="store_true",
+                          help="Append new evidence to existing file")
+    evidence.add_argument("--force-overwrite", dest="force_overwrite", action="store_true",
+                          help="Force overwrite existing evidence file")
     evidence.epilog = EVIDENCE_EPILOG
     evidence.formatter_class = argparse.RawDescriptionHelpFormatter
 
@@ -861,6 +865,8 @@ def main() -> None:
             root, args.spec_name, args.phase, args.result, description_text,
             args.actor, args.role, exec_command,
             args.configured, args.purpose,
+            append_mode=args.append_mode,
+            force_overwrite=args.force_overwrite,
         )
         if result is None:
             raise SystemExit(1)
