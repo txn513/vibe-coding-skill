@@ -465,6 +465,13 @@ def main() -> None:
                                help="预览，不实际创建 (默认)")
     docs_init_cmd.add_argument("--apply", action="store_true", help="实际创建文件")
 
+    cheatsheet_cmd = sub.add_parser(
+        "cheatsheet",
+        help="打印命令速查表 (按工作流阶段分组)",
+    )
+    cheatsheet_cmd.add_argument("project_root", nargs="?", default=".", help="项目路径 (默认: 当前目录, 但 cheatsheet 不需要)")
+    cheatsheet_cmd.add_argument("--filter", help="只显示包含关键字的命令, 例 'docs' 或 'commit'")
+
     # propose-skill-upgrade — create a skill upgrade candidate proposal
     propose_skill = sub.add_parser(
         "propose-skill-upgrade",
@@ -819,6 +826,11 @@ def main() -> None:
             raise SystemExit(1)
     elif args.operation == "tidy":
         tidy.tidy(root, dry_run=not getattr(args, 'apply', False))
+    elif args.operation == "docs-init":
+        import docs_init as _docs_init_mod
+        _docs_init_mod.docs_init(root, dry_run=not getattr(args, 'apply', True))
+    elif args.operation == "cheatsheet":
+        _print_cheatsheet(filter_kw=getattr(args, "filter", ""))
     elif args.operation == "archive-stale":
         import json as _json
         findings = archive_status.find_stale(args.project_root)
@@ -982,6 +994,79 @@ def main() -> None:
             Path(root), args.source_id, args.reason, actor,
         )
         print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+def _print_cheatsheet(filter_kw: str = "") -> None:
+    """Print a quick reference of all vibe commands, grouped by workflow phase.
+
+    Filter by keyword: `vibe cheatsheet --filter docs` shows only docs-related.
+    """
+    groups = [
+        ("1. Bootstrap (one-time)", [
+            ("vibe init <path>", "Initialize project: AGENTS.md + .agents/ + docs/ (R-D-87)"),
+            ("vibe install-auxiliary", "Install skill + pi extension into codex/claude/etc."),
+            ("vibe install-precommit-hook", "Install pre-commit hook (blocks raw git commit)"),
+        ]),
+        ("2. Project health", [
+            ("vibe status <path>", "Show spec status, evidence, drift, next-step hints"),
+            ("vibe next <path>", "Recommend next action based on current project state"),
+            ("vibe doctor <path>", "Audit project (advisories, not blocking)"),
+            ("vibe upgrade <path>", "Sync Skill version into project's .skill-version"),
+        ]),
+        ("3. Spec workflow", [
+            ("vibe intent <path> <name>", "Start Discovery (intent doc)"),
+            ("vibe spec <path> <name>", "Generate spec skeleton"),
+            ("vibe design <path> <name>", "Generate design doc (optional)"),
+            ("vibe plan <path> <name>", "Generate plan from spec"),
+            ("vibe prompt <path> <name>", "Generate implementation prompt"),
+        ]),
+        ("4. Execute", [
+            ("vibe evidence <path> <spec> <phase> <result>", "Record evidence (verify / release / observe)"),
+            ("vibe review-decision <path> <spec> <conclusion>", "Record reviewer decision (R-D-59/77/83)"),
+            ("vibe commit", "Use instead of `git commit` (Rule 53 review + verify gate)"),
+            ("vibe changelog <path> <spec>", "Generate changelog for released spec"),
+            ("vibe retro <path> <spec>", "Create retro doc"),
+        ]),
+        ("5. Spec lifecycle", [
+            ("vibe advance <path> <spec> <to>", "Move spec between states (Rule 22)"),
+            ("vibe amend <path> <spec> <desc>", "Amend spec + recompute digest (Rule 47)"),
+            ("vibe risk <path> <spec> <level>", "Confirm risk level (required for in-progress)"),
+        ]),
+        ("6. Housekeeping (R-D-87 docs maintenance)", [
+            ("vibe docs-init <path>", "Create/update docs/ skeleton (idempotent)"),
+            ("vibe tidy <path>", "Tidy .agents/ and docs/ (--apply to execute)"),
+            ("vibe archive-stale <path>", "Archive old evidence / plans"),
+            ("vibe propose-skill-upgrade <path> <title>", "Create Skill upgrade candidate"),
+        ]),
+        ("7. Skill admin (admin only)", [
+            ("vibe migrate <path>", "Migrate .agents/ between Skill versions"),
+            ("vibe self-analyze <path>", "Aggregate retro findings for skill-upgrade candidates"),
+            ("vibe self-upgrade", "Apply pending skill upgrades from approved proposals"),
+            ("vibe install-auxiliary --list", "List available auxiliary skills"),
+        ]),
+    ]
+
+    if filter_kw:
+        groups = [
+            (title, [(cmd, desc) for cmd, desc in cmds if filter_kw.lower() in cmd.lower() or filter_kw.lower() in desc.lower()])
+            for title, cmds in groups
+        ]
+        groups = [(t, c) for t, c in groups if c]
+
+    print("=" * 60)
+    print("VIBE CHEATSHEET")
+    if filter_kw:
+        print(f"filter: {filter_kw}")
+    print("=" * 60)
+    for title, cmds in groups:
+        print()
+        print(title)
+        for cmd, desc in cmds:
+            print(f"  {cmd:<48} {desc}")
+    print()
+    print("Tip: `vibe <command> --help` for command-specific options")
+    print("     `vibe cheatsheet --filter <keyword>` to filter")
+
 
 
 if __name__ == "__main__":
