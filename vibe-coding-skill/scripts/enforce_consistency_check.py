@@ -85,6 +85,8 @@ _PURE_EXTENSION_RULES = {
     "R-D-76-fallback", # grep-based fallback justification
     "R-D-77", # medium/high-risk cannot use grep fallback
     "R-D-79", # bug diagnosis three-layer evidence method
+    "R-D-80", # operator precedence trap
+    "R-D-81", # spec scope locked before plan
 }
 
 # Known CLI gate functions / markers mapped by ENFORCE id.

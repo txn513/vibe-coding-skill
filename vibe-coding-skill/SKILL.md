@@ -1341,6 +1341,40 @@ Source: 2026-07-25 bug-diagnosis-three-evidence candidate (56 → 7 round speedu
 
 <!-- ENFORCE: id=R-D-79, hook=agent_end, action=check_diagnosis_rounds, message=bug 排查超过 5 轮无二分点 — 暂停, 回到 step 0 重新收集证据 -->
 
+## Rule R-D-80: Operator Precedence Trap (Mixed Short-Circuit + Assignment + Ternary)
+
+JS / Python / Rust expressions MUST NOT mix `&&` / `||` + `=` (assignment) + `===` / `==` + `?:` (ternary) in the same statement. The precedence confusion silently produces wrong results — most commonly the ternary result is discarded because `===` binds tighter than `?:`, but the assignment runs first.
+
+Example anti-pattern:
+```javascript
+document.getElementById('themeIcon') && (document.getElementById('themeIcon').textContent = getTheme()) === 'dark' ? '🌙' : '☀️';
+//                       ↑ assignment                                          ↑ compare  ↑ ternary
+// textContent always becomes 'dark' string literal; emoji never reaches DOM
+```
+
+The lint-level enforcement belongs to the project's ESLint / flake8 config (Skill does not ship a JS linter). The Skill enforces this rule via:
+
+1. `spec` template gets a "代码风格防御" subsection warning against this pattern
+2. `review-summary` content gate warns when summary mentions mixed operators in changed lines
+
+Source: 2026-07-26 operator-precedence-lint candidate (theme icon bug in `frontend/app.js:2568`).
+
+## Rule R-D-81: Spec Scope Locked Before Plan
+
+The spec's "涉及范围" section is **locked** once the spec reaches `in-progress`. Any new file required during `execute` is an amend trigger — agent MUST amend the spec first, re-record evidence, then proceed. The Plan template must include a "Plan 完整前自检" step that cross-checks every Plan task against the spec scope; if any Plan task touches a file not in spec scope, the Plan is incomplete and must trigger spec amend.
+
+| Phase | Check |
+|-------|-------|
+| spec-ready → in-progress | "涉及范围" section must list ALL files that will be touched, with `新增文件 / 修改文件 / 不动文件 / 受影响的读路径` populated. |
+| plan generation | Plan must cite spec scope section. Tasks touching out-of-scope files = spec amend trigger. |
+| commit step 1 | Advisory: spec scope vs `git diff --cached` files. Mismatch = soft warning. |
+| advance to done | retro must mention any spec amend that occurred during execute. |
+
+This rule eliminates the "Plan realized new file needed → spec amend + re-verify + re-review" wasted cycle (observed: 5+ minutes per occurrence).
+
+Source: 2026-07-26 spec-scope-before-plan candidate.
+
+
 
 
 
