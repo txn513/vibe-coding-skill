@@ -7,6 +7,7 @@ Usage:
 """
 
 import argparse
+import glob
 import os
 import re
 from datetime import datetime, timezone
@@ -535,7 +536,6 @@ def _print_untagged_precipitation_hint(project_root: str) -> None:
     Scans the most recent retro for untagged precipitation entries
     (those lacking [active:]/[deferred:]/[superseded:]/[永不:] tags).
     """
-    import glob
 
     retros_dir = os.path.join(project_root, ".agents", "retros")
     if not os.path.isdir(retros_dir):
@@ -1727,6 +1727,38 @@ def recommend_next(project_root: str, specs: list[dict] | None = None) -> dict:
             print("   如果这是新 session，请先运行 `vibe status` 恢复状态 (Rule 66)。")
             print("<!-- vibe:session_state: stale_activity -->")
             print()
+
+    # R-D-87: docs/ missing -> recommend docs-init (highest priority after drift).
+    # Without docs/, the next agent / session-resume loses project context.
+    # Check only for projects that have been around >7 days (have at least
+    # one spec or some changelog) — new projects are handled by init.
+    docs_dir = os.path.join(project_root, "docs")
+    if not os.path.isdir(docs_dir):
+        has_history = (
+            os.path.isdir(os.path.join(project_root, ".agents", "specs"))
+            and glob.glob(os.path.join(project_root, ".agents", "specs", "*.md"))
+        ) or glob.glob(os.path.join(project_root, ".agents", "changelogs", "*.md"))
+        if has_history:
+            return _recommendation(
+                "初始化 docs/ 目录 (R-D-87)",
+                "项目已有 specs/changelogs 历史但缺 docs/ — 下个 agent 或 session-resume 将丢失项目全景.",
+                checks=[
+                    ".agents/specs/ 有 spec 文件 (项目运行中)",
+                    "docs/ 不存在 (跨 session 知识不可恢复)",
+                ],
+                why_not="现在不能直接进新 spec 工作, 因为下一个 agent 接手时 0 上下文, "
+                       "会重复踩已知的坑 (这是 100 项目最常见的浪费).",
+                action_command=f"vibe docs-init {project_root} --apply",
+                alternative={
+                    "action": "先跑 dry-run 看会创建什么",
+                    "command": f"vibe docs-init {project_root}",
+                    "reason": "dry-run 后再决定",
+                },
+                model={
+                    "tier": "standard",
+                    "reasoning": "docs-init 是生成脚本, 不需 LLM 决策, 跑完标准命令即可.",
+                },
+                )
 
     # 2026-07-12: missing retro for done specs is the highest-priority
     # next action. A retro is required for every done spec (Rule 54),
