@@ -62,6 +62,29 @@ def record_evidence(
     if not evidence and not command and not configured:
         raise ValueError("证据说明不能为空")
 
+    # R-D-87 evidence discipline: advisory checks
+    if evidence:
+        # Check 1: does evidence reference an AC?
+        has_ac_ref = bool(re.search(
+            r"AC\d+|验收标准|成功标准|acceptance|criterion|behavio(u)?r",
+            evidence, re.IGNORECASE
+        ))
+        # Check 2: does evidence contain execution output markers?
+        has_execution_output = bool(re.search(
+            r"exit code|stdout|stderr|passed|failed|PASS|FAIL|"
+            r"pytest|curl|测试通过|测试结果|assert"
+            r"|exit:\s*[0-9]|returncode|Exit:\s*[0-9]",
+            evidence, re.IGNORECASE
+        ))
+        if not has_ac_ref:
+            print("⚠️  evidence 描述未引用 AC 编号 (AC1/AC2/验收标准)。")
+            print("   建议: 在描述中注明该证据证明了哪个验收标准。")
+            print()
+        if not has_execution_output and not command and not configured:
+            print("⚠️  evidence 描述缺少执行输出标记 (exit code/测试结果)。")
+            print("   建议: 包含实际执行输出而非仅代码逻辑推断。")
+            print()
+
     spec_file = os.path.join(project_root, ".agents", "specs", f"{spec_name}.md")
     if not os.path.exists(spec_file):
         print(f"❌ 规格不存在: {spec_name}")
