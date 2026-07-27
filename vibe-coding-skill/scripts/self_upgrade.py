@@ -31,6 +31,15 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 def upgrade(project_root: str, dry_run: bool = True, auto: bool = False) -> list[dict]:
     """Run self-analysis and apply improvements to the PROJECT."""
+    # R-D-87: check if docs/ missing (independent of retro analysis)
+    docs_dir = os.path.join(project_root, "docs")
+    docs_missing = not os.path.isdir(docs_dir)
+    if docs_missing:
+        print("📚 项目缺少 docs/ 目录 (R-D-87)")
+        print(f"   建议: vibe docs-init {project_root} --apply")
+        print(f"   或先预览: vibe docs-init {project_root} --dry-run")
+        print()
+
     sys.path.insert(0, SCRIPT_DIR)
     import self_analyze
 
@@ -38,15 +47,24 @@ def upgrade(project_root: str, dry_run: bool = True, auto: bool = False) -> list
 
     if "error" in findings:
         print(f"📭 {findings['error']}")
+        if docs_missing:
+            print()
+            print("ℹ️  docs/ 缺失不影响其他升级操作。")
+            print("    用 vibe docs-init 初始化后, 再跑 vibe upgrade 继续。")
         return []
 
     suggestions = findings.get("suggestions", [])
-    if not suggestions:
-        print("✅ 无改进建议。")
-        return []
 
     # Ensure project directories exist
     _ensure_dirs(project_root)
+
+    if not suggestions:
+        print("✅ 无改进建议。")
+        if docs_missing:
+            print()
+            print("ℹ️  docs/ 缺失不影响其他升级操作。")
+            print("    用 vibe docs-init 初始化后, 再跑 vibe upgrade 继续。")
+        return []
 
     applied = []
 
