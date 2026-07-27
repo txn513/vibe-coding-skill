@@ -137,6 +137,20 @@ class TidyTests(unittest.TestCase):
         self.assertEqual(post_missing, [],
                          f"docs/ missing advise should be gone, got: {post_missing}")
 
+    def test_freshly_initialized_docs_not_flagged_as_orphan(self) -> None:
+        # Regression test: docs-init creates docs/README.md with [text](file.md)
+        # style links. tidy's orphan regex must capture the URL side, not the
+        # link text side, otherwise every freshly-created file gets flagged.
+        docs_init.docs_init(str(self.project), dry_run=False)
+        actions = tidy_mod.tidy(str(self.project), dry_run=True)
+        orphans = [a for a in actions
+                   if a.get("src", "").startswith("docs/")
+                   and "orphan" in a.get("reason", "")]
+        # adr/README.md is intentionally not linked from index (directory marker)
+        linked_orphans = [o for o in orphans if o["src"] != "docs/adr/README.md"]
+        self.assertEqual(linked_orphans, [],
+                         f"linked docs wrongly flagged as orphan: {linked_orphans}")
+
     def test_missing_docs_emits_advise(self) -> None:
         buf = io.StringIO()
         with redirect_stdout(buf):

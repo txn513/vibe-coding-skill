@@ -154,7 +154,12 @@ def _find_tidy_actions(project_root: str) -> list[dict]:
             try:
                 with open(readme_path, encoding="utf-8") as fp:
                     readme_content = fp.read()
-                linked = set(re.findall(r"\[([^\]]+\.md)\]", readme_content))
+                # Match markdown links `[text](file.md)` -> capture URL side
+                linked_urls = set(re.findall(r"\]\(([^)]+\.md)\)", readme_content))
+                # Accept either the full URL path (e.g. "adr/README.md") or its basename
+                linked = set(linked_urls)
+                for u in linked_urls:
+                    linked.add(os.path.basename(u))
                 for root, _dirs, files in os.walk(docs_dir):
                     for fname in files:
                         if not fname.endswith(".md"):
