@@ -260,6 +260,9 @@ def main() -> None:
                    help="preview only (default)")
     p.add_argument("--apply", action="store_true", help="execute")
     args = p.parse_args()
+    if not os.path.isdir(args.project_root):
+        print(f"Error: project_root does not exist or is not a directory: {args.project_root}", file=sys.stderr)
+        sys.exit(2)
     tidy(args.project_root, dry_run=not args.apply)
 
 
