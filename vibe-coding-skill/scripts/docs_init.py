@@ -225,6 +225,21 @@ def _doc_glossary(terms: list[tuple[str, int]]) -> str:
     return _frontmatter("NEEDS_AUTHOR") + body
 
 
+def _check_root_file_count(project_root: str) -> None:
+    """Advisory: warn when docs/ root has >15 .md files (suggest subdirs)."""
+    docs_dir = os.path.join(project_root, "docs")
+    try:
+        root_md = [f for f in os.listdir(docs_dir)
+                   if f.endswith(".md") and os.path.isfile(os.path.join(docs_dir, f))]
+        if len(root_md) > 15:
+            print(f"\u26a0\ufe0f  docs/ 根目录有 {len(root_md)} 个 .md 文件，考虑创建子目录")
+            print("   建议: references/ (外部API), operations/ (运维/监控),")
+            print("          checklists/ (发布清单), project/ (业务/定价/研究)")
+            print()
+    except OSError:
+        pass
+
+
 def _find_docs_actions(project_root: str) -> list[dict]:
     actions = []
     modules = _detect_modules(project_root)
@@ -296,6 +311,7 @@ def docs_init(project_root: str, dry_run: bool = True) -> list[dict]:
 
     if not todo:
         print(f"✅ docs/ already initialized ({len(actions)} files exist). Re-run skips all.")
+        _check_root_file_count(project_root)
         return []
 
     print(f"📚 计划创建 {len(todo)} 个 docs/ 文件 (跳过 {len(actions) - len(todo)} 个已存在):\n")
@@ -317,6 +333,9 @@ def docs_init(project_root: str, dry_run: bool = True) -> list[dict]:
         created += 1
     print(f"✅ created {created} docs/ files.")
     print()
+    # R-D-87: warn when docs/ root has >15 files
+    _check_root_file_count(project_root)
+
     print("Next:")
     print("  1. Edit overview.md / architecture.md (NEEDS_AUTHOR sections)")
     print("  2. Run `vibe tidy --apply` to verify docs structure")

@@ -176,6 +176,19 @@ def _find_tidy_actions(project_root: str) -> list[dict]:
             except OSError:
                 pass
 
+        # R-D-87: advise when docs/ root has >15 files (suggest subdirs)
+        try:
+            root_md_files = [f for f in os.listdir(docs_dir)
+                             if f.endswith(".md") and os.path.isfile(os.path.join(docs_dir, f))]
+            if len(root_md_files) > 15:
+                actions.append({
+                    "action": "advise",
+                    "src": "docs/",
+                    "reason": f"docs/ root has {len(root_md_files)} .md files - consider subdirs (references/operations/checklists/project)",
+                })
+        except OSError:
+            pass
+
     reserved_root_md = {"README.md", "LICENSE.md", "LICENSE", "AGENTS.md", "CHANGELOG.md"}
     for entry in sorted(os.listdir(project_root)):
         if not entry.endswith(".md"):
