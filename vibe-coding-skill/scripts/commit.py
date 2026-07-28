@@ -222,7 +222,7 @@ def _append_enforcer_log_step1(project_root: str) -> None:
         pass  # Non-critical; marker file is the primary record
 
 
-def _write_review_marker(project_root: str) -> None:
+def _write_review_marker(project_root: str, commit_message: str = "") -> None:
     """Write the marker after step 1 (vibe commit shows diff).
 
     Also ensures `.gitignore` (at the project root) ignores the marker,
@@ -242,6 +242,7 @@ def _write_review_marker(project_root: str) -> None:
         "step1": "diff shown, ready for step2 (vibe commit --reviewed)",
         "created_at": _time.time(),
         "project_root": os.path.realpath(project_root),
+        "commit_message": commit_message,
     }
     with open(path, "w", encoding="utf-8") as handle:
         handle.write(_json.dumps(payload, ensure_ascii=False))
@@ -1127,6 +1128,14 @@ def commit(
     # (vibe commit without --reviewed) that wrote the marker.
     if reviewed and not quick and not no_verify:
         marker_content = _read_and_clear_review_marker(project_root)
+        _marker_commit_message = ""
+        if marker_content is not None:
+            try:
+                import json as _json2
+                _payload = _json2.loads(marker_content)
+                _marker_commit_message = _payload.get("commit_message", "")
+            except (ValueError, TypeError):
+                pass
         if marker_content is None:
             print("🔒 Review 门禁升级 — 检测到跳过第 1 步 (Rule 53):")
             print("   `--reviewed` 需要在一次 `vibe commit`（不传 --reviewed）之后执行。")
@@ -1186,6 +1195,11 @@ def commit(
                             changed_files.append(path)
             missing_files = []
             for filepath in changed_files:
+                # 2026-07-29: skip governance files (.agents/ specs/plans/
+                # evidence/retros/rules + docs/) - they have no code to
+                # review, requiring a review-summary entry just adds noise.
+                if _is_governance_file(filepath):
+                    continue
                 basename = os.path.basename(filepath)
                 if filepath not in summary and basename not in summary:
                     missing_files.append(filepath)
@@ -1325,6 +1339,11 @@ def commit(
             # digest 已更新")。missing_file gate 仍然要求每个文件被提到。
             if _is_auto_generated_path(filepath):
                 continue
+            # 2026-07-29: also skip governance files in mixed commits
+            # (spec/plan/evidence/retro/rules + docs/) - no code logic
+            # to cite line numbers for.
+            if _is_governance_file(filepath):
+                continue
             if not line_ref_pattern.search(conclusion):
                 no_line_ref_parts.append(part)
         # Governance-only commit: skip per-file line-ref requirement
@@ -1383,7 +1402,8 @@ def commit(
         print("   审查要点: 意外修改 / 范围蔓延 / 回归 / 空文件 / 配置泄露")
         print("   如果发现问题: 先修复，再从第 1 步重新开始。")
         # Write the step-1 marker so a subsequent --reviewed can verify step 1 happened.
-        _write_review_marker(project_root)
+        _step1_msg = _extract_commit_message(commit_argv)
+        _write_review_marker(project_root, commit_message=_step1_msg)
         # 2026-07-22: also write enforcer-log so R53b can verify step 1 happened
         # (previously only marker file was written, enforcer checked enforcer-log
         # and found nothing → false block → agent injected fake records)
@@ -1678,6 +1698,9 @@ def commit(
     # so project-level pre-commit hooks (R8.43, R-D-63) can read it.
     # Previously used git commit -m which doesn't populate COMMIT_EDITMSG.
     commit_message = _extract_commit_message(commit_argv)
+    # 2026-07-29: fallback to marker message if step 2 didn't repeat -m
+    if not commit_message and _marker_commit_message:
+        commit_message = _marker_commit_message
 
     # 2026-07-22 (Improvement B): auto-add spec: <name> trailer
     if not re.search(r"spec[:\s]+[a-z0-9-]+", commit_message, re.IGNORECASE):
