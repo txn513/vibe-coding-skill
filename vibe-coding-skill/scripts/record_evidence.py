@@ -28,6 +28,34 @@ PURPOSES = {"standard", "reproduction", "fix-regression"}
 VIBE_OPTIONS_AFTER_COMMAND = {"--configured", "--purpose"}
 
 
+def _check_trigger_path_coverage(spec_content: str, evidence: str) -> None:
+    """S2: If spec ACs contain trigger verbs but evidence only shows pytest
+    pass, warn that the real trigger path may not be tested."""
+    # Detect trigger verbs in AC section
+    trigger_verbs = re.search(
+        r"(?:触发|调用|事件|trigger|invoke|回调|入口|hook|"
+        r"when.*then|on.*event|after.*call)",
+        spec_content, re.IGNORECASE
+    )
+    if not trigger_verbs:
+        return
+
+    # Check if evidence is pytest-only with pass/exit=0
+    has_pytest = bool(re.search(r"pytest", evidence, re.IGNORECASE))
+    has_pass = bool(re.search(r"passed|exit\s*=?\s*0|PASS|全过|通过", evidence, re.IGNORECASE))
+    has_real_path = bool(re.search(
+        r"curl|http|request|client|integration|集成|e2e|"
+        r"process_|handle_|on_|dispatch|endpoint",
+        evidence, re.IGNORECASE
+    ))
+
+    if has_pytest and has_pass and not has_real_path:
+        print("⚠️  AC 含触发类动词，但 evidence 仅跑 pytest 全过。")
+        print("   建议: 确认测试覆盖了真实触发入口（如 process_* / handle_* / endpoint），")
+        print("          而非仅测被触发函数本身。pytest 全过 ≠ 触发链路通。")
+        print()
+
+
 def record_evidence(
     project_root: str,
     spec_name: str,
@@ -92,6 +120,11 @@ def record_evidence(
     with open(spec_file, encoding="utf-8") as handle:
         spec_content = handle.read()
     spec_fields = spec_metadata(spec_content)
+
+    # S2: trigger-verb AC check - if AC contains trigger verbs but evidence
+    # only shows pytest pass, remind agent to test the real trigger path
+    if evidence and phase == "verify":
+        _check_trigger_path_coverage(spec_content, evidence)
 
     status_match = re.search(r">\s*状态:\s*(\S+)", spec_content)
     status = status_match.group(1) if status_match else "draft"
