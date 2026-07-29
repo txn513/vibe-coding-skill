@@ -358,7 +358,34 @@ def _check_retro_upgrade_candidates(project_root: str) -> list[dict]:
 
         # Check if a candidate file already exists for this retro
         retro_base = fname.replace(".md", "").lower()
+        # 1. Filename match (fallback)
         has_file = any(retro_base in ec for ec in existing_candidates)
+        # 2. Content match - candidate files typically reference the source
+        # retro in their header (e.g. "> 来源: <retro-name>"). Filename
+        # matching alone fails because candidates use their own naming
+        # convention (skill-candidate-<topic>.md, not <retro-name>.md).
+        if not has_file:
+            for subdir in [".agents/skill-upgrade-candidates",
+                           ".agents/archive/skill-upgrade-candidates"]:
+                cdir = os.path.join(project_root, subdir)
+                if not os.path.isdir(cdir):
+                    continue
+                try:
+                    for cf in os.listdir(cdir):
+                        if not cf.endswith(".md"):
+                            continue
+                        try:
+                            with open(os.path.join(cdir, cf), encoding="utf-8") as ch:
+                                ctext = ch.read()
+                        except OSError:
+                            continue
+                        if retro_base in ctext or fname in ctext:
+                            has_file = True
+                            break
+                except OSError:
+                    pass
+                if has_file:
+                    break
 
         if not has_file:
             candidates.append({
