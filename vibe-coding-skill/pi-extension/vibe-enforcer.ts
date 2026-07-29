@@ -12,6 +12,16 @@ interface EnforceRule {
   _compiledRegex?: RegExp;
 }
 
+// Serious consequence warning - appended to every block reason.
+// Design intent: make the agent understand that bypassing rules = wasted work.
+const BLOCK_CONSEQUENCE =
+  "\n\n⚠️ 铁律: 不按规范走 = 用户打回重写。绕过门禁写出来的代码白写，" +
+  "因为用户验收时会拒绝。不要试图绕过，按规范来才是最短路径。";
+
+function blockWithWarning(reason: string): { block: true; reason: string } {
+  return { block: true, reason: reason + BLOCK_CONSEQUENCE };
+}
+
 function findSkillPath(cwd: string): string | null {
   const candidates: string[] = [];
   candidates.push(path.join(process.env.HOME || "", ".pi", "agent", "skills", "vibe-coding", "SKILL.md"));
@@ -297,7 +307,7 @@ function registerHandlers(pi: ExtensionAPI, rules: EnforceRule[], projectRoot: s
           // R53: block raw git commit
           if (id === "R53" && rule.action === "block") {
             ctx.ui.notify(`⚠️ ${id}: ${message}`, "warning");
-            return { block: true, reason: `${id}: ${message}` };
+            return blockWithWarning(`${id}: ${message}`);
           }
 
           // R53b: block --quick / --no-verify on runtime code
@@ -322,7 +332,7 @@ function registerHandlers(pi: ExtensionAPI, rules: EnforceRule[], projectRoot: s
                   const msg = `Rule 53b: --quick/--no-verify on runtime code forbidden (${runtimeFiles.length} runtime files). Use full vibe commit two-step flow.`;
                   ctx.ui.notify(`🚫 ${id}: ${msg}`, "warning");
                   appendEnforcerLog(projectRoot, id, "block", cmd, msg);
-                  return { block: true, reason: msg };
+                  return blockWithWarning(msg);
                 }
                 appendEnforcerLog(projectRoot, id, "pass", cmd, "Docs-only bypass");
               } catch (e) {
@@ -353,7 +363,7 @@ function registerHandlers(pi: ExtensionAPI, rules: EnforceRule[], projectRoot: s
               const msg = "必须先跑 vibe commit (step 1) 看 diff 并审查，才能加 --reviewed。不能跳过 step 1 直接 step 2。";
               ctx.ui.notify(`🚫 R53b: ${msg}`, "warning");
               appendEnforcerLog(projectRoot, "R53b", "block", cmd, msg);
-              return { block: true, reason: msg };
+              return blockWithWarning(msg);
             }
             appendEnforcerLog(projectRoot, "R53b", "pass", cmd, "Step 1 review found in log");
           }
@@ -372,7 +382,7 @@ function registerHandlers(pi: ExtensionAPI, rules: EnforceRule[], projectRoot: s
                 const msg = `Governance batch: ${govFiles.length} gov files + ${bizFiles.length} biz files. Use --quick or split commits.`;
                 ctx.ui.notify(`🚫 R53c: ${msg}`, "warning");
                 appendEnforcerLog(projectRoot, "R53c", "block", cmd, msg);
-                return { block: true, reason: msg };
+                return blockWithWarning(msg);
               }
               appendEnforcerLog(projectRoot, "R53c", "pass", cmd, "OK");
             } catch (e) {
@@ -385,7 +395,7 @@ function registerHandlers(pi: ExtensionAPI, rules: EnforceRule[], projectRoot: s
             const msg = "禁止用 /tmp 脚本绕过 vibe commit。必须用 vibe commit 两步流程 (step 1: 看 diff → step 2: --reviewed)。";
             ctx.ui.notify(`🚫 R53d: ${msg}`, "warning");
             appendEnforcerLog(projectRoot, "R53d", "block", cmd, msg);
-            return { block: true, reason: msg };
+            return blockWithWarning(msg);
           }
 
           // R8.43: block VIBE_SKIP_COMMIT_MSG_HOOK
@@ -393,7 +403,7 @@ function registerHandlers(pi: ExtensionAPI, rules: EnforceRule[], projectRoot: s
             const msg = "禁止跳过 commit-msg hook (VIBE_SKIP_COMMIT_MSG_HOOK=1)。Hook 是门禁不是可选步骤。";
             ctx.ui.notify(`🚫 R8.43: ${msg}`, "warning");
             appendEnforcerLog(projectRoot, "R8.43", "block", cmd, msg);
-            return { block: true, reason: msg };
+            return blockWithWarning(msg);
           }
 
           // R59: block --force non-emergency
@@ -404,7 +414,7 @@ function registerHandlers(pi: ExtensionAPI, rules: EnforceRule[], projectRoot: s
               const msg = "--force 仅限 emergency。如需跳过门禁，请：(1) 声明 emergency reason，或 (2) 用 override_approver (R67)。";
               ctx.ui.notify(`🚫 R59: ${msg}`, "warning");
               appendEnforcerLog(projectRoot, "R59", "block", cmd, msg);
-              return { block: true, reason: msg };
+              return blockWithWarning(msg);
             }
             appendEnforcerLog(projectRoot, "R59", "pass", cmd, "Emergency reason declared");
           }
@@ -414,7 +424,7 @@ function registerHandlers(pi: ExtensionAPI, rules: EnforceRule[], projectRoot: s
             const msg = "observe evidence 必须带 --configured，否则 Command-Digests 为 N/A，advance gate 会拒绝。";
             ctx.ui.notify(`🚫 R30c: ${msg}`, "warning");
             appendEnforcerLog(projectRoot, "R30c", "block", cmd, msg);
-            return { block: true, reason: msg };
+            return blockWithWarning(msg);
           }
 
           // R4: verify commands check
@@ -564,7 +574,7 @@ export default function vibeEnforcerExtension(pi: ExtensionAPI) {
                 const msg = `Governance batch: ${govFiles.length} gov files + ${bizFiles.length} biz files. Use --quick or split commits.`;
                 ctx.ui.notify(`🚫 ${id}: ${msg}`, "warning");
                 appendEnforcerLog(projectRoot, id, "block", cmd, msg);
-                return { block: true, reason: msg };
+                return blockWithWarning(msg);
               }
               appendEnforcerLog(projectRoot, id, "pass", cmd, "OK");
             } catch (e) {
@@ -580,7 +590,7 @@ export default function vibeEnforcerExtension(pi: ExtensionAPI) {
               const msg = "Sandbox async DB detected. Downgrade: grep static → MagicMock → temp fixture. Never real async DB writes.";
               ctx.ui.notify(`🚫 ${id}: ${msg}`, "warning");
               appendEnforcerLog(projectRoot, id, "block", cmd, msg);
-              return { block: true, reason: msg };
+              return blockWithWarning(msg);
             }
             appendEnforcerLog(projectRoot, id, "pass", cmd, "OK");
           }
@@ -608,7 +618,7 @@ export default function vibeEnforcerExtension(pi: ExtensionAPI) {
                     const msg = `Review ${rf} lacks Solo Session Limitation Disclosure. Add: (1) reviewer session ID placeholder, (2) independent review pending note, (3) follow-up action.`;
                     ctx.ui.notify(`🚫 ${id}: ${msg}`, "warning");
                     appendEnforcerLog(projectRoot, id, "block", cmd, msg);
-                    return { block: true, reason: msg };
+                    return blockWithWarning(msg);
                   }
                 }
               }
@@ -660,7 +670,7 @@ export default function vibeEnforcerExtension(pi: ExtensionAPI) {
                   const msg = `🚫 R5d: ${result.detail}. ${reviewTip}`;
                   ctx.ui.notify(msg, "warning");
                   appendEnforcerLog(projectRoot, id, "block", cmd, msg);
-                  return { block: true, reason: msg };
+                  return blockWithWarning(msg);
                 }
               } else {
                 appendEnforcerLog(projectRoot, id, "pass", cmd, "OK");
@@ -685,7 +695,7 @@ export default function vibeEnforcerExtension(pi: ExtensionAPI) {
                       const msg = `Follow-up spec ${specId} not found. Create: vibe intent . ${specId}`;
                       ctx.ui.notify(`🚫 ${id}: ${msg}`, "warning");
                       appendEnforcerLog(projectRoot, id, "block", cmd, msg);
-                      return { block: true, reason: msg };
+                      return blockWithWarning(msg);
                     }
                   }
                 }
@@ -714,7 +724,7 @@ export default function vibeEnforcerExtension(pi: ExtensionAPI) {
               const msg = "禁止直接改 spec 状态行。必须用 `vibe advance <project> <spec> <new_status>`，让门禁检查 evidence/review。";
               ctx.ui.notify(`🚫 R-D-68: ${msg}`, "warning");
               appendEnforcerLog(projectRoot, id, "block", cmd || filePath, msg);
-              return { block: true, reason: msg };
+              return blockWithWarning(msg);
             }
           }
 
@@ -762,7 +772,7 @@ export default function vibeEnforcerExtension(pi: ExtensionAPI) {
                     "请先用 `pi agent --print --no-session` 或 `codex exec` 启动独立 review session。";
         ctx.ui.notify(`🚫 ${msg}`, "warning");
         appendEnforcerLog(projectRoot, "R-D-59", "block", cmd, msg);
-        return { block: true, reason: msg };
+        return blockWithWarning(msg);
       }
     }
   });
@@ -784,7 +794,7 @@ export default function vibeEnforcerExtension(pi: ExtensionAPI) {
       const msg = `R66: 前 3 次 bash 调用内必须先跑 \`vibe status .\` + \`vibe next .\`。当前是第 ${r66ToolCallCount} 次 bash 调用。`;
       ctx.ui.notify(`🚫 ${msg}`, "warning");
       appendEnforcerLog(projectRoot, "R66", "block", cmd, msg);
-      return { block: true, reason: msg };
+      return blockWithWarning(msg);
     } else if (!r66StatusSeen && r66ToolCallCount < 3) {
       ctx.ui.notify(`⚠️ R66: 还没跑 vibe status，当前第 ${r66ToolCallCount} 次 bash 调用`, "warning");
       appendEnforcerLog(projectRoot, "R66", "warning", cmd, "vibe status not yet called");
