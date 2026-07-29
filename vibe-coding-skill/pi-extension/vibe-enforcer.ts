@@ -514,24 +514,6 @@ function registerHandlers(pi: ExtensionAPI, rules: EnforceRule[], projectRoot: s
 
 // ── Main ─────────────────────────────────────────────────
 
-// R-D-79: stall breaker — track bash tool_calls, warn when no evidence collected
-pi.on("tool_call", async (event, ctx) => {
-  if (event.toolName !== "bash") return;
-  const cmd = event.input?.command ?? "";
-  if (isEvidenceCollection(cmd)) {
-    r_d_79_stall_counter = 0;
-    return;
-  }
-  r_d_79_stall_counter++;
-  if (r_d_79_stall_counter >= R_D_79_STALL_THRESHOLD) {
-    ctx.ui.notify(
-      `⚠️ R-D-79 卡顿熔断: 已 ${r_d_79_stall_counter} 轮无证据收集命令 (tail/curl/grep/pytest). ` +
-      `Bug 排查三层证据法要求按 Step 0-5 收集证据, 暂停一下回到 Step 0 重新开始.`,
-      "warning"
-    );
-    r_d_79_stall_counter = 0; // reset after warning to avoid spam
-  }
-});
 
 export default function vibeEnforcerExtension(pi: ExtensionAPI) {
   let rules: EnforceRule[] = [];
@@ -735,35 +717,80 @@ export default function vibeEnforcerExtension(pi: ExtensionAPI) {
               return { block: true, reason: msg };
             }
           }
+
+  // R-D-79: stall breaker — track bash tool_calls, warn when no evidence collected
+  pi.on("tool_call", async (event, ctx) => {
+    if (event.toolName !== "bash") return;
+    const cmd = event.input?.command ?? "";
+    if (isEvidenceCollection(cmd)) {
+      r_d_79_stall_counter = 0;
+      return;
+    }
+    r_d_79_stall_counter++;
+    if (r_d_79_stall_counter >= R_D_79_STALL_THRESHOLD) {
+      ctx.ui.notify(
+        `⚠️ R-D-79 卡顿熔断: 已 ${r_d_79_stall_counter} 轮无证据收集命令 (tail/curl/grep/pytest). ` +
+        `Bug 排查三层证据法要求按 Step 0-5 收集证据, 暂停一下回到 Step 0 重新开始.`,
+        "warning"
+      );
+      r_d_79_stall_counter = 0; // reset after warning to avoid spam
+    }
+  });
+
+  // R-D-59: block fake independent review — claims independent but no pi session record
+  pi.on("tool_call", async (event, ctx) => {
+    if (event.toolName !== "bash") return;
+    const cmd = event.input?.command ?? "";
+
+    // Detect record_review.py claiming independent reviewer
+    if (cmd.includes("record_review") && /--reviewer\s+\S*independent/.test(cmd)) {
+      const logPath = path.join(projectRoot, ".agents", "enforcer-log.md");
+      let hasIndependentSession = false;
+      try {
+        if (fs.existsSync(logPath)) {
+          const log = fs.readFileSync(logPath, "utf-8");
+          hasIndependentSession = /pi\s+(agent|run)\s+--(print|no-session)/.test(log) ||
+                                  /codex\s+exec/.test(log) ||
+                                  /spawn_reviewer/.test(log);
+        }
+      } catch {}
+
+      if (!hasIndependentSession) {
+        const msg = "R-D-59: 声称独立 review (--reviewer independent) 但 enforcer-log 无独立 session 调用记录。" +
+                    "请先用 `pi agent --print --no-session` 或 `codex exec` 启动独立 review session。";
+        ctx.ui.notify(`🚫 ${msg}`, "warning");
+        appendEnforcerLog(projectRoot, "R-D-59", "block", cmd, msg);
+        return { block: true, reason: msg };
+      }
+    }
+  });
+
+  let r66ToolCallCount = 0;
+  let r66StatusSeen = false;
+  pi.on("tool_call", async (event, ctx) => {
+    // Only count bash tool calls — vibe status can only run via bash
+    if (event.toolName !== "bash") return;
+    const cmd = event.input?.command ?? "";
+    // Check if this is a vibe status/next command — counts as compliance, not business operation
+    if (/vibe(?:\.py)?\s+(status|next)/.test(cmd)) {
+      r66StatusSeen = true;
+      return; // vibe status itself doesn't count as a "business" bash call
+    }
+    r66ToolCallCount++;
+    // Warn on first 2 bash calls, block on 3rd if no vibe status
+    if (!r66StatusSeen && r66ToolCallCount >= 3) {
+      const msg = `R66: 前 3 次 bash 调用内必须先跑 \`vibe status .\` + \`vibe next .\`。当前是第 ${r66ToolCallCount} 次 bash 调用。`;
+      ctx.ui.notify(`🚫 ${msg}`, "warning");
+      appendEnforcerLog(projectRoot, "R66", "block", cmd, msg);
+      return { block: true, reason: msg };
+    } else if (!r66StatusSeen && r66ToolCallCount < 3) {
+      ctx.ui.notify(`⚠️ R66: 还没跑 vibe status，当前第 ${r66ToolCallCount} 次 bash 调用`, "warning");
+      appendEnforcerLog(projectRoot, "R66", "warning", cmd, "vibe status not yet called");
+    }
+  });
+
 }
 
-// R-D-59: block fake independent review — claims independent but no pi session record
-pi.on("tool_call", async (event, ctx) => {
-  if (event.toolName !== "bash") return;
-  const cmd = event.input?.command ?? "";
-  
-  // Detect record_review.py claiming independent reviewer
-  if (cmd.includes("record_review") && /--reviewer\s+\S*independent/.test(cmd)) {
-    const logPath = path.join(projectRoot, ".agents", "enforcer-log.md");
-    let hasIndependentSession = false;
-    try {
-      if (fs.existsSync(logPath)) {
-        const log = fs.readFileSync(logPath, "utf-8");
-        hasIndependentSession = /pi\s+(agent|run)\s+--(print|no-session)/.test(log) ||
-                                /codex\s+exec/.test(log) ||
-                                /spawn_reviewer/.test(log);
-      }
-    } catch {}
-    
-    if (!hasIndependentSession) {
-      const msg = "R-D-59: 声称独立 review (--reviewer independent) 但 enforcer-log 无独立 session 调用记录。" +
-                  "请先用 `pi agent --print --no-session` 或 `codex exec` 启动独立 review session。";
-      ctx.ui.notify(`🚫 ${msg}`, "warning");
-      appendEnforcerLog(projectRoot, "R-D-59", "block", cmd, msg);
-      return { block: true, reason: msg };
-    }
-  }
-});
 
 // R-D-79: bug-diagnosis stall breaker. Tracks bash tool_calls per session;
 // when N consecutive calls have NOT been evidence-collection (tail/curl/grep),
@@ -793,29 +820,6 @@ function isEvidenceCollection(cmd: string): boolean {
 // Only bash tool calls are counted (read/edit/write don't count — Agent needs
 // to read files before it can decide to run vibe status, and vibe status
 // itself is only executable via bash).
-let r66ToolCallCount = 0;
-let r66StatusSeen = false;
-pi.on("tool_call", async (event, ctx) => {
-  // Only count bash tool calls — vibe status can only run via bash
-  if (event.toolName !== "bash") return;
-  const cmd = event.input?.command ?? "";
-  // Check if this is a vibe status/next command — counts as compliance, not business operation
-  if (/vibe(?:\.py)?\s+(status|next)/.test(cmd)) {
-    r66StatusSeen = true;
-    return; // vibe status itself doesn't count as a "business" bash call
-  }
-  r66ToolCallCount++;
-  // Warn on first 2 bash calls, block on 3rd if no vibe status
-  if (!r66StatusSeen && r66ToolCallCount >= 3) {
-    const msg = `R66: 前 3 次 bash 调用内必须先跑 \`vibe status .\` + \`vibe next .\`。当前是第 ${r66ToolCallCount} 次 bash 调用。`;
-    ctx.ui.notify(`🚫 ${msg}`, "warning");
-    appendEnforcerLog(projectRoot, "R66", "block", cmd, msg);
-    return { block: true, reason: msg };
-  } else if (!r66StatusSeen && r66ToolCallCount < 3) {
-    ctx.ui.notify(`⚠️ R66: 还没跑 vibe status，当前第 ${r66ToolCallCount} 次 bash 调用`, "warning");
-    appendEnforcerLog(projectRoot, "R66", "warning", cmd, "vibe status not yet called");
-  }
-});
 
 // Pi Extension loader requires id export
 export const id = "vibe-enforcer";
