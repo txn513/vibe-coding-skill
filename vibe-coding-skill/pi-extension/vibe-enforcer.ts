@@ -718,9 +718,11 @@ export default function vibeEnforcerExtension(pi: ExtensionAPI) {
             }
           }
 
-  // R-D-79: stall breaker — track bash tool_calls, warn when no evidence collected
+  // R-D-79: stall breaker — only active during bug/fix diagnosis
   pi.on("tool_call", async (event, ctx) => {
     if (event.toolName !== "bash") return;
+    // Only activate when there's an active fix-/bug spec in-progress
+    if (!hasActiveBugSpec(projectRoot)) return;
     const cmd = event.input?.command ?? "";
     if (isEvidenceCollection(cmd)) {
       r_d_79_stall_counter = 0;
@@ -809,6 +811,21 @@ const R_D_79_EVIDENCE_PATTERNS = [
   /\bjournalctl\s+(-u|--since)/,    // journalctl
   /\b\.\/[a-z_-]+debug\.sh\b/i, // debug scripts
 ];
+
+// R-D-79: check if project has an active bug/fix spec (in-progress or review)
+function hasActiveBugSpec(projectRoot: string): boolean {
+  try {
+    const specsDir = path.join(projectRoot, ".agents", "specs");
+    if (!fs.existsSync(specsDir)) return false;
+    const files = fs.readdirSync(specsDir).filter(f => f.endsWith(".md"));
+    for (const f of files) {
+      if (!f.startsWith("fix-") && !f.startsWith("bug-")) continue;
+      const content = fs.readFileSync(path.join(specsDir, f), "utf-8");
+      if (/\u72b6\u6001:\s*(in-progress|review)\b/.test(content)) return true;
+    }
+  } catch {}
+  return false;
+}
 
 function isEvidenceCollection(cmd: string): boolean {
   return R_D_79_EVIDENCE_PATTERNS.some((p) => p.test(cmd));
