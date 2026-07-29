@@ -1216,6 +1216,15 @@ def commit(
                 print("   \u683c\u5f0f: <\u6587\u4ef6\u540d>: <\u5ba1\u67e5\u7ed3\u8bba>; <\u6587\u4ef6\u540d>: <\u5ba1\u67e5\u7ed3\u8bba>")
                 # Example with backtick for readability
                 print("   \u4f8b: app.py: \u52203\u884c+\u52a02\u884c, \u8bed\u4e49\u7b49\u4ef7; utils.py: \u65b0\u589ehelper, \u65e0\u526f\u4f5c\u7528")
+                # 2026-07-29: generate copy-paste template from actual missing files
+                _template_parts = []
+                for mf in missing_files[:10]:
+                    _bn = os.path.basename(mf)
+                    _template_parts.append(f"{_bn}: L<n> <conclusion>")
+                if _template_parts:
+                    print()
+                    print("\U0001f4cb Template (copy & edit):")
+                    print(f"   --review-summary '{'; '.join(_template_parts)}'")
                 print("<!-- vibe:commit_review_gate: missing_file_review -->")
                 # R53 active inspection reminder (2026-07-13)
                 print()
