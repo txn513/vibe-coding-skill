@@ -29,30 +29,58 @@ VIBE_OPTIONS_AFTER_COMMAND = {"--configured", "--purpose"}
 
 
 def _check_trigger_path_coverage(spec_content: str, evidence: str) -> None:
-    """S2: If spec ACs contain trigger verbs but evidence only shows pytest
-    pass, warn that the real trigger path may not be tested."""
-    # Detect trigger verbs in AC section
-    trigger_verbs = re.search(
+    """S2: If spec ACs contain trigger/degradation verbs but evidence only
+    shows pytest pass, warn that the real path may not be tested."""
+    # Detect trigger verbs OR degradation-path keywords in AC section
+    trigger_match = re.search(
         r"(?:触发|调用|事件|trigger|invoke|回调|入口|hook|"
         r"when.*then|on.*event|after.*call)",
         spec_content, re.IGNORECASE
     )
-    if not trigger_verbs:
-        return
+    degradation_match = re.search(
+        r"(?:降级|fallback|超时|timeout|缓存失效|过期|失效|"
+        r"retry|重试|限流|rate.?limit|错误处理|error.?handler|"
+        r"degrad|fail.?over|circuit.?break)",
+        spec_content, re.IGNORECASE
+    )
 
-    # Check if evidence is pytest-only with pass/exit=0
-    has_pytest = bool(re.search(r"pytest", evidence, re.IGNORECASE))
-    has_pass = bool(re.search(r"passed|exit\s*=?\s*0|PASS|全过|通过", evidence, re.IGNORECASE))
-    has_real_path = bool(re.search(
-        r"curl|http|request|client|integration|集成|e2e|"
-        r"process_|handle_|on_|dispatch|endpoint",
+    if trigger_match:
+        # Check if evidence is pytest-only with pass/exit=0
+        has_pytest = bool(re.search(r"pytest", evidence, re.IGNORECASE))
+        has_pass = bool(re.search(r"passed|exit\s*=?\s*0|PASS|全过|通过", evidence, re.IGNORECASE))
+        has_real_path = bool(re.search(
+            r"curl|http|request|client|integration|集成|e2e|"
+            r"process_|handle_|on_|dispatch|endpoint",
+            evidence, re.IGNORECASE
+        ))
+        if has_pytest and has_pass and not has_real_path:
+            print("⚠️  AC 含触发类动词，但 evidence 仅跑 pytest 全过。")
+            print("   建议: 确认测试覆盖了真实触发入口（如 process_* / handle_* / endpoint），")
+            print("          而非仅测被触发函数本身。pytest 全过 ≠ 触发链路通。")
+            print()
+
+    if degradation_match:
+        # Check if evidence mentions degradation/failure testing
+        has_degradation_test = bool(re.search(
+            r"timeout|超时|fallback|降级|fail|error|500|429|"
+            r"retry|重试|mock.*error|patch.*fail|expired|过期",
+            evidence, re.IGNORECASE
+        ))
+        if not has_degradation_test:
+            print("⚠️  AC 含降级/fallback/超时类关键词，但 evidence 未提及降级路径测试。")
+            print("   建议: 补充 degradation-path 测试（模拟超时/错误/限流场景），")
+            print("          happy-path 全过 ≠ 降级路径正确。")
+            print()
+
+    # S3: detect "code existence" language in evidence (not behavior verification)
+    existence_words = re.search(
+        r"(?:代码存在|函数已加|文件已创建|已实现|grep.*found|"
+        r"function.*exists|file.*exists|已添加|已定义|defined)",
         evidence, re.IGNORECASE
-    ))
-
-    if has_pytest and has_pass and not has_real_path:
-        print("⚠️  AC 含触发类动词，但 evidence 仅跑 pytest 全过。")
-        print("   建议: 确认测试覆盖了真实触发入口（如 process_* / handle_* / endpoint），")
-        print("          而非仅测被触发函数本身。pytest 全过 ≠ 触发链路通。")
+    )
+    if existence_words:
+        print("⚠️  evidence 使用了'代码存在'类结论，不等于行为验证。")
+        print("   建议: 补充用户可感知的行为证据（curl 输出 / UI 截图 / 真实请求结果）。")
         print()
 
 
